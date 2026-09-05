@@ -53,5 +53,6 @@ __pycache__/
 # run rows are machine-local measurements, not source.
 .claude/productizer/ab-out/
 .claude/productizer/ab-runs.tsv
-.claude/productizer/ab-task.tsv
+# ab-task.tsv is deliberately NOT ignored: it defines the two arms, so a clone
+# that cannot read it cannot reproduce or even see what was compared.
 .claude/productizer/pipeline.html

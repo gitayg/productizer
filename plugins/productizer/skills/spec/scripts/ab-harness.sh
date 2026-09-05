@@ -149,13 +149,16 @@ if [ "$MODE" = "run" ]; then
     if [ -n "$start" ] && [ -n "$stop" ]; then dur=$(( stop - start )); else dur="unavailable"; fi
     if [ "$rc" -eq 0 ]; then status="complete"; else status="incomplete"; FAILED=$((FAILED + 1)); fi
 
+    # A cost is one decimal number. The character-class test this replaced
+    # accepted `1.2.3`, `...` and `.` as costs, wrote them into the runs file,
+    # and left `report` to drop them again - so a row could carry a cost that
+    # every reader had to re-validate, and the two validators disagreed about
+    # what a cost was. This pattern is the one `median` already applies, so a
+    # value that survives `run` is a value `report` can use.
     cost="unavailable"
     if [ -f "$out/cost.usd" ]; then
       raw="$(tr -d ' \n' < "$out/cost.usd")"
-      case "$raw" in
-        ''|*[!0-9.]*) ;;
-        *) cost="$raw" ;;
-      esac
+      if printf '%s\n' "$raw" | grep -Eq '^[0-9]+(\.[0-9]+)?$'; then cost="$raw"; fi
     fi
     bytes="$(wc -c < "$out/stdout" | tr -d ' ')"
 
@@ -218,7 +221,7 @@ echo "A/B - task $TASK"
 echo "  variable  the harness. Same model, same task, both arms."
 echo "  runs      $RUNS"
 echo
-printf '%-10s %-9s %-11s %-9s %-22s %s\n' "arm" "runs" "complete" "incomplete" "median duration_ms" "median cost_usd"
+printf '%-10s %-9s %-11s %-10s %-22s %s\n' "arm" "runs" "complete" "incomplete" "median duration_ms" "median cost_usd"
 for arm in $ARMS; do
   eval "n_all=\$N_ALL_$arm; n_ok=\$N_OK_$arm; n_bad=\$N_BAD_$arm"
   eval "d_med=\$D_MED_$arm; d_n=\$D_N_$arm; c_med=\$C_MED_$arm; c_n=\$C_N_$arm"
@@ -228,7 +231,7 @@ for arm in $ARMS; do
     if [ "$d_med" = "unmeasured" ]; then d_cell="unmeasured"; else d_cell="$d_med (n=$d_n)"; fi
     if [ "$c_med" = "unmeasured" ]; then c_cell="unavailable"; else c_cell="$c_med (n=$c_n)"; fi
   fi
-  printf '%-10s %-9s %-11s %-9s %-22s %s\n' "$arm" "$n_all" "$n_ok" "$n_bad" "$d_cell" "$c_cell"
+  printf '%-10s %-9s %-11s %-10s %-22s %s\n' "$arm" "$n_all" "$n_ok" "$n_bad" "$d_cell" "$c_cell"
 done
 echo
 

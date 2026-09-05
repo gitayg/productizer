@@ -2341,6 +2341,508 @@ def vz_norm(t):
     return re.sub(r'[^a-z0-9]+', ' ', (t or '').lower()).strip()
 
 
+# --- section 5, drawn first: the system as a system -----------------------
+# The other four sections each draw one file. This one draws the shape those
+# four are details of - the stages in the order the skill writes them, what
+# decides each one's state, what can stop the work, and the principles that
+# sit above every requirement.
+#
+# NOT ONE OF THOSE LISTS IS KEPT HERE. The stages are the skill's own
+# `### N - Name` headings; the artifacts are its own Stage/Templates table;
+# the reads are derived by parsing stage-status.sh for the files it consults
+# before it emits each row; the live states are that script's own answers,
+# already parsed at the top of this file; the gates are read off checks.yaml,
+# run-checks.sh's exit contract and the gate files on disk; the principles are
+# the constitution's own `### Pn` blocks. A stage hard-coded here would be a
+# stage nobody could remove by editing the skill, and a drawing that disagreed
+# with the lifecycle would look exactly like one that agreed with it.
+#
+# DIRECTION IS CLAIMED IN ONE COLUMN AND REFUSED IN THE OTHER, for the reason
+# section 3 gives at length: a filename inside a file establishes that the file
+# names it, never which way data moves. `reads` is the exception and earns it -
+# stage-status.sh is a reporter whose own header says it reports and does not
+# gate, this script runs it as a subprocess and parses its output, and the
+# files below are the ones it opens to decide a row. A template named in a
+# table is drawn as NAMED. It is never drawn as written.
+SKILL_DIR = os.path.dirname(SCRIPTS)
+# Shown, never derived from a path on this machine: these strings are printed
+# into a page that gets published, and an absolute path there is somebody's
+# home directory. The leak that shipped in v4.2.0 came in through exactly this
+# kind of line.
+ARCH_SKILL_SHOW = 'skills/spec/SKILL.md'
+ARCH_SS_SHOW = 'scripts/stage-status.sh'
+ARCH_RC_SHOW = 'scripts/run-checks.sh'
+ARCH_TD_SHOW = 'skills/spec/templates/'
+ARCH_HK_SHOW = '.claude/hooks/'
+
+arch_skill = slurp(os.path.join(SKILL_DIR, 'SKILL.md'))
+arch_ss = slurp(os.path.join(SCRIPTS, 'stage-status.sh'))
+arch_rc = slurp(os.path.join(SCRIPTS, 'run-checks.sh'))
+
+try:
+    arch_tpls = sorted(os.listdir(os.path.join(SKILL_DIR, 'templates')))
+    ARCH_TD_STATE = 'read'
+except OSError:
+    arch_tpls, ARCH_TD_STATE = [], 'unreadable'
+
+# The examined repository's installed hooks. Listed and stat'ed; never opened
+# for anything it might say and never run. P4 - a repository under examination
+# does not choose what happens on the machine reading it.
+arch_hooks, ARCH_HK_STATE = [], 'absent'
+if os.path.isdir(rel('.claude/hooks')):
+    try:
+        arch_hooks = sorted(os.listdir(rel('.claude/hooks')))
+        ARCH_HK_STATE = 'read'
+    except OSError:
+        ARCH_HK_STATE = 'unreadable'
+
+# One class per state stage-status.sh can return. The five are never collapsed:
+# `not run`, `unknown` and `n/a` lead to three different next actions.
+ARCH_SCLS = {'ok': 's-ok', 'blocked': 's-blk', 'waiting': 's-wait',
+             'unknown': 's-unk', 'not run': 's-nr', 'n/a': 's-na'}
+
+
+def arch_tick(t):
+    """Escape first, then re-mark the backticks the source file wrote."""
+    return re.sub(r'`([^`]+)`', r'<span class="mono">\1</span>', esc(t))
+
+
+# --- the nine stages, from the skill's own headings -----------------------
+ARCH_STAGES = []
+if arch_skill is not None:
+    for _m in re.finditer(r'(?m)^###[ \t]+([0-9]+)[ \t]*·[ \t]*(.+?)[ \t]*$', arch_skill):
+        _head = _m.group(2)
+        _nm, _tag = (_head.split('—', 1) + [''])[:2]
+        ARCH_STAGES.append({'n': _m.group(1), 'name': _nm.strip(), 'tag': _tag.strip()})
+
+# --- the skill's own Stage / Templates table ------------------------------
+ARCH_TPLROW, ARCH_TPLKEYS = {}, []
+if arch_skill is not None:
+    _sp = arch_skill.split('| Stage | Templates |', 1)
+    if len(_sp) > 1:
+        _seen = False
+        for _line in _sp[1].split('\n'):
+            if not _line.startswith('|'):
+                if _seen:
+                    break
+                continue
+            _seen = True
+            _cells = [c.strip() for c in _line.strip().strip('|').split('|')]
+            if len(_cells) != 2 or not _cells[0].strip('- '):
+                continue
+            _key = _cells[0].split('·')[0].strip()
+            if _key not in ARCH_TPLROW:
+                ARCH_TPLROW[_key] = []
+                ARCH_TPLKEYS.append(_key)
+            for _f in re.findall(r'`([^`]+)`', _cells[1]):
+                if _f not in ARCH_TPLROW[_key]:
+                    ARCH_TPLROW[_key].append(_f)
+
+# --- what stage-status.sh opens before it answers for a stage -------------
+# Read forward through the script, collecting every path literal and every
+# expansion of a path variable, and attribute what has accumulated to the
+# `row` call that consumes it. A `# --- Stage n ---` banner clears the buffer,
+# so the variable block at the top of the file is not attributed to stage 0.
+# A bare basename is dropped where a longer path already collected ends with
+# it: `checks-result.json` inside a message is the same file as
+# `.claude/productizer/checks-result.json`, and drawing both would say a stage
+# reads two.
+ARCH_READS, ARCH_READ_ORDER = {}, []
+if arch_ss is not None:
+    _av = dict((mm.group(1), mm.group(2)) for mm in
+               re.finditer(r'(?m)^([A-Z][A-Z0-9_]*)="([^"$]+)"[ \t]*$', arch_ss))
+    _RE_AROW = re.compile(r'\brow[ \t]+([0-9a-z]+)[ \t]')
+    _RE_AMARK = re.compile(r'^#[ \t]*-{2,}[ \t]*Stage\b')
+    _RE_APATH = re.compile(r'(?<![\w/.-])((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.[a-z]{2,5}'
+                           r'|[A-Za-z0-9_-]+\.(?:md|json|yaml|yml))(?![\w-])')
+    _apend = []
+    for _line in arch_ss.split('\n'):
+        if _RE_AMARK.match(_line):
+            _apend = []
+            continue
+        if _line.lstrip().startswith('#'):
+            continue
+        for _mm in re.finditer(r'\$\{?([A-Z][A-Z0-9_]*)\}?', _line):
+            if _mm.group(1) in _av:
+                _apend.append(_av[_mm.group(1)])
+        for _mm in _RE_APATH.finditer(_line):
+            _apend.append(_mm.group(1))
+        _ids = _RE_AROW.findall(_line)
+        if _ids:
+            for _i in _ids:
+                if _i not in ARCH_READS:
+                    ARCH_READS[_i] = []
+                    ARCH_READ_ORDER.append(_i)
+                for _f in _apend:
+                    if _f not in ARCH_READS[_i]:
+                        ARCH_READS[_i].append(_f)
+            _apend = []
+    for _i in ARCH_READS:
+        ARCH_READS[_i] = [p for p in ARCH_READS[_i]
+                          if not any(q != p and q.endswith('/' + p)
+                                     for q in ARCH_READS[_i])]
+
+# --- board 1: the stages, and what each one names -------------------------
+ARCH_ACT_N, ARCH_MISS_N = 0, 0
+if arch_skill is None:
+    p_arch_flow = vz_empty(
+        'NOT RUN — there is no %s to read.' % ARCH_SKILL_SHOW,
+        'The stages of this drawing are the skill’s own headings and the artifacts are its '
+        'own Stage/Templates table. With no file there is neither, and a lifecycle drawn from a '
+        'list kept in this script would be one nobody could correct by editing the skill. An '
+        'empty board here would read as a product with no stages, which is a claim about the '
+        'lifecycle; this is the absence of the file that describes it.')
+elif not ARCH_STAGES:
+    p_arch_flow = vz_empty(
+        '%s was read and declares no stage heading.' % ARCH_SKILL_SHOW,
+        'A measured zero for the drawing. The file opened and no line in it matches the '
+        '<span class="mono">### n · Name</span> shape every stage in this skill is written '
+        'as. Nothing is inferred about what else is in the file.')
+else:
+    _aparts = []
+    for _s in ARCH_STAGES:
+        _r = stage(_s['n'])
+        _acts = []
+        for _p in ARCH_READS.get(_s['n'], []):
+            _here = os.path.exists(rel(_p))
+            _acts.append(('reads', _p,
+                          'in the tree' if _here else 'not in the tree',
+                          '' if _here else ' a-gone'))
+        for _t in ARCH_TPLROW.get(_s['n'], []):
+            if ARCH_TD_STATE != 'read':
+                _acts.append(('names', _t,
+                              'unknown — the templates directory could not be listed',
+                              ' a-gone'))
+            elif _t in arch_tpls:
+                _acts.append(('names', _t, 'shipped with the skill', ''))
+            else:
+                _acts.append(('names', _t, 'named in the table, not in %s' % ARCH_TD_SHOW,
+                              ' a-gone'))
+                ARCH_MISS_N += 1
+        ARCH_ACT_N += len(_acts)
+        _cls = ARCH_SCLS.get(_r['state'], 's-unk')
+        _abody, _apaths, _ay = [], [], 6
+        for _kind, _what, _note, _k in _acts:
+            _plain = len(_kind) + len(_what) + len(_note) + 6
+            _lines = max(1, min(3, (_plain + 77) // 78))
+            _hh = 22 + 16 * _lines
+            _abody.append(
+                '<div class="vz-act%s" style="left:52px;top:%dpx;width:calc(100%% - 52px);'
+                'height:%dpx"><span class="vz-chip">%s</span> '
+                '<span class="mono">%s</span> <span class="a-what">— %s</span></div>'
+                % (_k, _ay, _hh, esc(_kind), esc(_what), esc(_note)))
+            _cy = _ay + _hh // 2
+            _apaths.append(vz_path('M 6 8 C 6 %d, 24 %d, 52 %d' % (_cy, _cy, _cy)))
+            _ay += _hh + 8
+        _ah = _ay - 8 + 6
+        _inner = ('<div class="vz-acts" style="height:%dpx">%s%s</div>'
+                  % (_ah, vz_wires(52, _ah, _apaths), ''.join(_abody)))
+        if not _acts:
+            _inner = ('<p class="vz-det">Neither source names a file for this stage. '
+                      '%s consults nothing on disk before answering for it, and the '
+                      'Stage/Templates table has no row keyed <span class="mono">%s</span>. '
+                      'That is a measured zero for both readings, not a stage with no '
+                      'artifacts.</p>' % (esc(ARCH_SS_SHOW), esc(_s['n'])))
+        _aparts.append(
+            '<div class="vz-cluster"><div class="vz-trig">'
+            '<span class="vz-tk">stage %s</span>'
+            '<span class="vz-ttxt"><b>%s</b>%s</span>'
+            '<span class="vz-badge %s">%s</span></div>'
+            '<p class="vz-det">%s</p>%s</div>'
+            % (esc(_s['n']), esc(_s['name']),
+               (' — ' + esc(_s['tag'])) if _s['tag'] else '',
+               _cls, esc(_r['state']), arch_tick(_r['detail']), _inner))
+    _aoff = [k for k in ARCH_TPLKEYS if k not in [s['n'] for s in ARCH_STAGES]]
+    _aoffn = sum(len(ARCH_TPLROW[k]) for k in _aoff)
+    p_arch_flow = (
+        '<div class="vz-board">%s</div>'
+        '<p class="provenance">Stages, their order, their names and their taglines are the '
+        '<span class="mono">### n · Name</span> headings of <span class="mono">%s</span>, '
+        'in the order that file writes them. The state on each badge is '
+        '<span class="mono">%s</span>’s own answer for that stage, run as a subprocess by '
+        'this script and parsed — never re-derived here, because two copies of that '
+        'reasoning disagree the first time one is edited. <b>reads</b> is that script’s own '
+        'file list, taken by reading it for the paths it opens before each row it emits; it is '
+        'the one column on this page that claims a direction, and it claims it because that '
+        'script has no write path at all. <b>names</b> is the skill’s Stage/Templates table, '
+        'and it is deliberately not a write arrow — a table naming a template establishes '
+        'that the stage names it, not that the stage writes it. %d stage(s), %d artifact '
+        'row(s); %d template(s) named in the table are not in <span class="mono">%s</span>; %d '
+        'further template(s) belong to %d table row(s) that are not one of the numbered stages '
+        'and are not drawn.</p>'
+        % (''.join(_aparts), esc(ARCH_SKILL_SHOW), esc(ARCH_SS_SHOW), len(ARCH_STAGES),
+           ARCH_ACT_N, ARCH_MISS_N, esc(ARCH_TD_SHOW), _aoffn, len(_aoff)))
+
+# --- board 2: what can refuse ---------------------------------------------
+# Three layers, and they stop three different things. A hook stops a tool call
+# before it happens; a declared check stops the stage after it ran; the
+# runner's own contract stops the run when the runner cannot tell whether
+# anything was checked. A lane with nothing derivable behind it draws one node
+# saying which of unknown / absent it is, and never nothing.
+arch_sev, arch_sev_order, arch_pol, arch_pol_order = {}, [], {}, []
+if checks_raw is not None:
+    _acur = None
+    for _raw in checks_raw.split('\n'):
+        _m = re.match(r'^  - id:\s*(\S+)\s*$', _raw)
+        if _m:
+            _acur = _m.group(1)
+            continue
+        _m = re.match(r'^    severity:\s*(\S+)\s*$', _raw)
+        if _m and _acur:
+            if _m.group(1) not in arch_sev:
+                arch_sev[_m.group(1)] = []
+                arch_sev_order.append(_m.group(1))
+            arch_sev[_m.group(1)].append(_acur)
+            continue
+        _m = re.match(r'^  (empty_run|spec_coverage|allow_repo_local_tools):\s*(\S+)\s*$', _raw)
+        if _m and _m.group(1) not in arch_pol:
+            arch_pol[_m.group(1)] = _m.group(2)
+            arch_pol_order.append(_m.group(1))
+_asevall = [c for v in arch_sev.values() for c in v]
+arch_nosev = [c for c in lim_order if c not in _asevall]
+
+# run-checks.sh states its own exit contract in its header, under a banner it
+# writes in capitals. Parsed from there rather than restated here: a second
+# copy of a contract is a copy that goes stale silently.
+ARCH_RC_CODES = []
+if arch_rc is not None:
+    _ain = False
+    for _line in arch_rc.split('\n'):
+        if not _line.startswith('#'):
+            if _ain:
+                break
+            continue
+        if re.match(r'^#\s*EXIT CODES ARE THE CONTRACT', _line):
+            _ain = True
+            continue
+        if not _ain:
+            continue
+        _m = re.match(r'^#\s{2,}(\d)\s\s+(\S.*?)\s*$', _line)
+        if _m:
+            ARCH_RC_CODES.append({'code': _m.group(1), 'text': _m.group(2)})
+            continue
+        _m = re.match(r'^#\s{5,}(\S.*?)\s*$', _line)
+        if _m and ARCH_RC_CODES:
+            ARCH_RC_CODES[-1]['text'] += ' ' + _m.group(1)
+            continue
+        if _line.rstrip() == '#' and ARCH_RC_CODES:
+            break
+
+_agates = []
+for _f in arch_tpls:
+    if _f.endswith('-gate.sh') and _f not in _agates:
+        _agates.append(_f)
+for _f in arch_hooks:
+    if _f.endswith('-gate.sh') and _f not in _agates:
+        _agates.append(_f)
+_agates.sort()
+
+ARCH_GATE_ROWS = []
+for _f in _agates:
+    _int = ARCH_TD_STATE == 'read' and _f in arch_tpls
+    _inh = ARCH_HK_STATE == 'read' and _f in arch_hooks
+    if _inh and os.access(rel('.claude/hooks/' + _f), os.X_OK):
+        _sub, _k = 'installed here, executable', 's-ok'
+    elif _inh:
+        _sub, _k = 'installed here, NOT executable', 's-blk'
+    elif ARCH_HK_STATE == 'unreadable':
+        _sub, _k = 'unknown — %s could not be listed' % ARCH_HK_SHOW, 's-unk'
+    elif _int:
+        _sub, _k = 'shipped as a template, not installed here', 's-nr'
+    else:
+        _sub, _k = 'installed here, not shipped as a template', 's-wait'
+    ARCH_GATE_ROWS.append((_f, _sub, _k,
+                           'template: %s  ·  installed: %s'
+                           % ('yes' if _int else 'no', 'yes' if _inh else 'no')))
+
+ARCH_G_BUILT = bool(ARCH_GATE_ROWS) or bool(arch_sev_order) or bool(ARCH_RC_CODES)
+if not ARCH_G_BUILT:
+    p_arch_gate = vz_empty(
+        'NOT RUN — none of the three sources behind this board could be read.',
+        'The gate files, <span class="mono">%s</span> and <span class="mono">%s</span> were all '
+        'looked for and none of them answered. A board drawn from that would say this lifecycle '
+        'has nothing that can refuse, which is the most dangerous sentence this page could '
+        'print, so it prints this instead.' % (esc(CHECKS_PATH), esc(ARCH_RC_SHOW)))
+else:
+    GA, GB, GC = 0, 282, 564
+    GWA, GWB, GWC = 268, 268, 292
+    GNH, GNS, GHDR = 46, 54, 68
+    _g1, _g2, _g3 = [], [], []
+    for _f, _sub, _k, _ti in ARCH_GATE_ROWS:
+        _g1.append((_f, _sub, _k, _ti))
+    if not _g1:
+        _g1.append(('no gate file found', 'a measured zero in both places'
+                    if ARCH_TD_STATE == 'read' and ARCH_HK_STATE != 'unreadable'
+                    else 'unknown — a directory could not be listed',
+                    's-nr' if ARCH_TD_STATE == 'read' else 's-unk',
+                    'nothing named *-gate.sh in either place'))
+    if checks_raw is None:
+        _g2.append(('%s could not be read' % CHECKS_PATH, 'unknown, not none declared', 's-unk',
+                    'the file was looked for and did not open'))
+    elif not lim_order:
+        _g2.append(('no check is declared', 'a measured zero', 's-nr',
+                    '%s was read and declares no check' % CHECKS_PATH))
+    else:
+        for _sv in arch_sev_order:
+            _g2.append(('severity: %s' % _sv,
+                        '%d of %d declared check(s)' % (len(arch_sev[_sv]), len(lim_order)),
+                        's-blk' if _sv == 'block' else 's-wait',
+                        ', '.join(arch_sev[_sv])))
+        if arch_nosev:
+            _g2.append(('no severity line', '%d check(s) — inherits the file’s defaults'
+                        % len(arch_nosev), 's-unk', ', '.join(arch_nosev)))
+        for _pk in arch_pol_order:
+            _g2.append(('policy.%s' % _pk, arch_pol[_pk], 's-ok',
+                        'declared in %s' % CHECKS_PATH))
+    if not ARCH_RC_CODES:
+        _g3.append(('%s states no exit contract here' % ARCH_RC_SHOW,
+                    'unknown' if arch_rc is None else 'a measured zero',
+                    's-unk' if arch_rc is None else 's-nr',
+                    'the banner this parser reads was not found in the file'))
+    else:
+        for _c in ARCH_RC_CODES:
+            _g3.append(('exit %s' % _c['code'], _c['text'][:44], 's-blk' if _c['code'] != '0'
+                        else 's-ok', _c['text']))
+    _gn = max(len(_g1), len(_g2), len(_g3))
+    _gh = GHDR + _gn * GNS + 8
+    _glanes = [
+        vz_lane(GA, 0, GWA, _gh, 'stops a tool call',
+                'gate hooks, %s and %s' % (ARCH_TD_SHOW, ARCH_HK_SHOW)),
+        vz_lane(GB, 0, GWB, _gh, 'stops the stage', 'declared in %s' % CHECKS_PATH),
+        vz_lane(GC, 0, GWC, _gh, 'stops the run', '%s’s own exit contract' % ARCH_RC_SHOW)]
+    _gnodes = []
+    for _col, _x, _w in ((_g1, GA, GWA), (_g2, GB, GWB), (_g3, GC, GWC)):
+        for _i, (_lab, _sub, _k, _ti) in enumerate(_col):
+            _gnodes.append(vz_node(_x + 11, GHDR + _i * GNS, _w - 22, GNH,
+                                   esc(_lab), _sub, _k, _ti))
+    _gcw = GC + GWC
+    p_arch_gate = (
+        '<div class="vz-board"><div class="vz-canvas" style="width:%dpx;height:%dpx">'
+        '%s%s</div></div>'
+        '<p class="provenance">Three layers, refusing three different things, and no arrow '
+        'between them because there is none: a hook refuses a tool call before it happens, a '
+        'declared check refuses the stage after it ran, and the runner refuses the whole run '
+        'when it cannot tell whether anything was checked. The left lane is a listing of '
+        '<span class="mono">%s</span> and <span class="mono">%s</span> plus the executable bit '
+        '— the files are listed and stat’ed, never opened for what they might say and '
+        'never run, because a repository being examined does not choose what happens on the '
+        'machine reading it. The middle lane is the <span class="mono">severity</span> and '
+        '<span class="mono">policy</span> lines of <span class="mono">%s</span>, counted, not '
+        'evaluated. The right lane is parsed out of <span class="mono">%s</span>’s own '
+        'header rather than restated here, because a second copy of a contract is the copy that '
+        'goes stale. What this board cannot tell you is whether any of them has ever fired.</p>'
+        % (_gcw, _gh + 6, ''.join(_glanes), ''.join(_gnodes),
+           esc(ARCH_TD_SHOW), esc(ARCH_HK_SHOW), esc(CHECKS_PATH), esc(ARCH_RC_SHOW)))
+
+# --- board 3: the principles above every requirement ----------------------
+# The constitution's own blocks. Each lane is one principle and the nodes in it
+# are the requirement ids it names under `Enforced by`, checked against the
+# spec this page already parsed - so a principle naming an id the spec does not
+# hold active is visible here rather than only in a diff nobody ran.
+ARCH_PRIN = []
+if constit is not None:
+    for _b in re.split(r'(?m)^###[ \t]+', constit)[1:]:
+        _head = _b.split('\n', 1)[0]
+        _m = re.match(r'^(P[0-9]+)[ \t]*[—-]+[ \t]*(.+?)[ \t]*$', _head)
+        if not _m:
+            continue
+        _body = _b.split('\n', 1)[1] if '\n' in _b else ''
+
+        def _afield(name, body=_body):
+            mm = re.search(r'(?m)^%s\n:[ \t]*(.+?)(?=\n\n|\n[A-Z][a-z]+\n:|\Z)'
+                           % re.escape(name), body, re.S)
+            return ' '.join(mm.group(1).split()) if mm else None
+        _st = re.match(r'^\s*(\w+)\.', _body.lstrip('\n'))
+        ARCH_PRIN.append({
+            'id': _m.group(1), 'title': _m.group(2),
+            'status': _st.group(1) if _st else 'not stated',
+            'prevents': _afield('Prevents'), 'checked': _afield('Checked by'),
+            'reqs': re.findall(r'R[0-9]+', _afield('Enforced by') or '')})
+
+_astat = dict((r['id'], r) for r in VZ_REQS)
+if constit is None:
+    p_arch_prin = vz_empty(
+        'NOT RUN — there is no %s to read.' % CONST_PATH,
+        'These lanes are the constitution’s own principles and the nodes in them are the '
+        'requirement ids each principle names. With no file there is neither. Drawing an empty '
+        'board would say this product has no principles above its requirements, and a product '
+        'that has never written any and one whose file is missing are not the same answer.')
+elif not ARCH_PRIN:
+    p_arch_prin = vz_empty(
+        '%s was read and ratifies no principle.' % CONST_PATH,
+        'A measured zero. The file is there, it parsed, and no line in it matches the '
+        '<span class="mono">### Pn — title</span> shape every principle in this '
+        'constitution is written as.')
+else:
+    PW, PG, PNH, PNS = 205, 12, 46, 54
+    _pmaxt = max(len(p['title']) for p in ARCH_PRIN)
+    _phdr = 30 + 16 * max(2, min(5, (_pmaxt + 27) // 28))
+    _pmaxn = max(1, max(len(p['reqs']) for p in ARCH_PRIN))
+    _ph = _phdr + _pmaxn * PNS + 8
+    _plane, _pnode = [], []
+    _pdang = 0
+    for _pi, _p in enumerate(ARCH_PRIN):
+        _px = _pi * (PW + PG)
+        _plane.append(vz_lane(_px, 0, PW, _ph,
+                              '%s · %s' % (_p['id'], _p['status']), _p['title']))
+        if not _p['reqs']:
+            _pnode.append(vz_node(_px + 11, _phdr, PW - 22, PNH,
+                                  'names no requirement', 'a measured zero', 's-nr',
+                                  'this principle’s Enforced by line names no R id'))
+            continue
+        for _ri, _rid in enumerate(_p['reqs']):
+            _rq = _astat.get(_rid)
+            if spec is None:
+                _sub, _k, _ti = 'unknown — no spec to check', 's-unk', ''
+            elif _rq is None:
+                _sub, _k = 'not an id this spec holds', 's-blk'
+                _ti = 'named under Enforced by; no such requirement line in %s' % SPEC_PATH
+                _pdang += 1
+            elif _rq['status'] == 'superseded':
+                _sub, _k, _ti = ('superseded by %s' % _rq['sup'], 's-wait', _rq['text'])
+            elif _rq['status'] == 'withdrawn':
+                _sub, _k, _ti = ('withdrawn', 's-na', _rq['text'])
+            else:
+                _sub, _k, _ti = ('active', 's-ok', _rq['text'])
+            _pnode.append(vz_node(_px + 11, _phdr + _ri * PNS, PW - 22, PNH,
+                                  esc(_rid), _sub, _k, _ti))
+    _pcw = len(ARCH_PRIN) * PW + (len(ARCH_PRIN) - 1) * PG
+    _prows = []
+    for _p in ARCH_PRIN:
+        _prows.append(
+            '<div class="vz-row"><span class="vz-rid">%s</span><span class="vz-txt">'
+            '<b>Prevents</b> %s <b>Checked by</b> %s</span></div>'
+            % (esc(_p['id']),
+               arch_tick(_p['prevents']) if _p['prevents'] else
+               '<span class="a-what">not stated under this principle.</span>',
+               arch_tick(_p['checked']) if _p['checked'] else
+               '<span class="a-what">not stated under this principle.</span>'))
+    p_arch_prin = (
+        '<div class="vz-board"><div class="vz-canvas" style="width:%dpx;height:%dpx">'
+        '%s%s</div></div>%s'
+        '<p class="provenance">Read from <span class="mono">%s</span>: one lane per '
+        '<span class="mono">### Pn</span> block, one node per requirement id that block names '
+        'under <span class="mono">Enforced by</span>, and the status of each of those ids taken '
+        'from <span class="mono">%s</span> — the same parse the two sections below this one '
+        'use, not a second reading. %d principle(s), %d requirement id(s) named, %d of them '
+        'naming no active or superseded line in the spec. What this board asserts is that the '
+        'principle points somewhere; it does not assert that the requirement it points at is '
+        'enough to hold it.</p>'
+        % (_pcw, _ph + 6, ''.join(_plane), ''.join(_pnode), ''.join(_prows),
+           esc(CONST_PATH), esc(SPEC_PATH), len(ARCH_PRIN),
+           sum(len(p['reqs']) for p in ARCH_PRIN), _pdang))
+
+p_vz_arch = ('<p class="vz-cap">The lifecycle, stage by stage <span>— the order the skill '
+             'writes them in, what each stage’s state is read from, and the artifacts its '
+             'own table names for it.</span></p>%s'
+             '<p class="vz-cap">Where the work can be refused <span>— three layers, '
+             'stopping three different things.</span></p>%s'
+             '<p class="vz-cap">What sits above every requirement <span>— the ratified '
+             'principles, and the requirement ids each one leans on.</span></p>%s'
+             % (p_arch_flow, p_arch_gate, p_arch_prin))
+if ARCH_STAGES or ARCH_G_BUILT or ARCH_PRIN:
+    _vz_built += 1
+
 # --- section 1: what the product must do ----------------------------------
 # Grouped by NORMALISED TRIGGER, over active requirements only. A superseded
 # requirement is not an obligation - it is the record of one that stopped being
@@ -2762,14 +3264,22 @@ else:
     _vz_built += 1
 
 p_vz = ('<div class="h">Visualizer — the lifecycle as a drawing</div>'
-        '<p class="lede">Four pictures of things the rest of this page reports as numbers, '
-        'drawn because in each case the shape is the fact and a count loses it. Everything '
+        '<p class="lede">Five pictures of things the rest of this page reports as numbers, '
+        'drawn because in each case the shape is the fact and a count loses it. The first is '
+        'the system itself and the other four are details of it, which is the order they are '
+        'in: a reader wants the shape of the thing before its parts. Everything '
         'here is read from the repository at generation time, and a section that could not be '
         'built says which of <b>not run</b>, <b>unknown</b> and <b>a measured zero</b> it '
         'is — an empty drawing and a drawing of nothing look identical, which is why no '
         'section is ever left blank.</p>'
-        '<div class="vz" id="panel-visualizer">%s%s%s%s</div>'
-        % (vz_sec('vz-actions', 'What the product must do',
+        '<div class="vz" id="panel-visualizer">%s%s%s%s%s</div>'
+        % (vz_sec('vz-architecture', 'The system, and what it is allowed to do',
+                  'The nine stages in the order the skill writes them, the artifacts each one '
+                  'names, the three layers that can refuse work, and the principles every '
+                  'requirement sits under. Nothing on this drawing is a list kept in the '
+                  'generator — each part is parsed out of the file that owns it, so editing '
+                  'the lifecycle moves the picture.', p_vz_arch),
+           vz_sec('vz-actions', 'What the product must do',
                   'Every active requirement, grouped by the trigger that fires it. A trigger '
                   'owing more than one obligation fans out; a trigger owing exactly one is a '
                   'row. Parsed with the repository’s own EARS grammar.', p_vz_act),

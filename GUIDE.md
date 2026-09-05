@@ -353,6 +353,27 @@ concern is open with no ruling behind it, when a pending ruling is cited by
 nothing, and when a pending ruling is still wearing the template. A ruling that
 still reads like the template is a file, not an ask.
 
+## The system, drawn from the files that define it
+
+The Visualizer's first board is the architecture: the nine lifecycle stages with what each one
+reads and names, the three places work can be refused, and the principles that sit above every
+requirement.
+
+Nothing in it is a list kept in the generator. The stages and their order come from `SKILL.md`'s
+own `### n - Name` headings, the artifacts from its own Stage/Templates table, the gates from what
+is actually installed and executable, the refusal contract from `run-checks.sh`'s own exit-code
+header, and the principles from `constitution.md`'s own `### Pn` blocks. Rename a stage in
+`SKILL.md` and the board renames with it - which is the point, because a lifecycle drawn from a
+list inside the builder is one nobody can correct by editing the skill.
+
+Remove any of those files and the board says NOT RUN and which file is missing. It never draws an
+empty diagram: a product with no stages and a product whose description is missing are different
+answers, and only one of them is about the product.
+
+Two things it reports that nothing else had noticed: `SKILL.md` declares nine stages while
+`stage-status.sh` emits thirteen rows, and `artifact-gate.sh` ships in `templates/` while
+appearing in no row of the Stage/Templates table.
+
 ## One page you read before you touch the spec
 
 The checks above are all here and they are all separate, and nobody runs five

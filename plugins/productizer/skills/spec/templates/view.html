@@ -664,6 +664,46 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
   background-size:3px 9px;background-repeat:repeat-y;opacity:.85}
 .vz-row.c-sup .vz-txt{color:var(--muted)}
 
+/* Lifecycle STATE, on its own axis, for the architecture section. The six
+   values stage-status.sh can return are drawn with the same hue tokens the
+   delta axis uses above, and the reuse is deliberate rather than careless:
+   the two never appear in one section, and every element wearing one of these
+   also carries the state as TEXT in its own subtitle or badge, so hue
+   reinforces a word rather than being the only place the answer is written.
+   The three kinds of absence are separated by LINE STYLE, not by hue, because
+   they are all grey and they lead to three different next actions: `unknown`
+   is dotted, `not run` is dashed, `n/a` is dashed and dimmed. A reader who
+   cannot separate the greys can still separate the strokes. */
+.vz-node.s-ok{border-color:var(--ok);background-color:color-mix(in srgb,var(--ok) 8%,var(--raised))}
+.vz-node.s-blk{border-color:var(--crit);background-color:color-mix(in srgb,var(--crit) 10%,var(--raised))}
+.vz-node.s-wait{border-color:var(--warn);background-color:color-mix(in srgb,var(--warn) 8%,var(--raised))}
+.vz-node.s-unk{border-color:var(--muted);border-style:dotted}
+.vz-node.s-nr{border-color:var(--line);border-style:dashed}
+.vz-node.s-nr .vz-nlab,.vz-node.s-na .vz-nlab{color:var(--muted)}
+.vz-node.s-na{border-color:var(--line);border-style:dashed;opacity:.82}
+.vz-badge.s-ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.vz-badge.s-blk{color:var(--crit);border-color:color-mix(in srgb,var(--crit) 50%,transparent)}
+.vz-badge.s-wait{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.vz-badge.s-unk{border-style:dotted}
+.vz-badge.s-nr,.vz-badge.s-na{border-style:dashed}
+
+/* One section draws three boards, so each board gets a caption. The caption is
+   a heading in weight only - the section's own h2 stays the one heading, and a
+   second real one would put three entries in a reader's outline for one
+   drawing. */
+.vz-cap{margin:6px 0 0;font-size:12.5px;font-weight:600;color:var(--text);line-height:1.55}
+.vz-cap span{font-weight:400;color:var(--muted)}
+.vz-cap:first-child{margin-top:0}
+/* The one line under a stage's header: that stage's state in the reporter's
+   own words, which is longer than a badge and shorter than a paragraph. */
+.vz-det{margin:0;font-size:11.5px;color:var(--muted);line-height:1.55}
+.vz-det .mono{color:var(--text)}
+/* An artifact row the tree does not hold. Dashed, not red: it is an absence,
+   and this page does not draw an absence as a failure. */
+.vz-act .vz-chip{margin-right:6px}
+.vz-act.a-gone{border-style:dashed;border-color:color-mix(in srgb,var(--muted) 50%,transparent)}
+.a-what{color:var(--muted)}
+
 /* The sheet-wide reduce rule above already kills these; repeating it costs two
    lines and survives that rule being edited. */
 @media (prefers-reduced-motion:reduce){
