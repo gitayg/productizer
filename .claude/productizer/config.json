@@ -108,7 +108,7 @@
     "gh_account": "gitayg",
     "pr_draft_first": true,
     "issues": {
-      "label": "sdlc",
+      "label": "sdlc:intent",
       "branch_pattern": "feature/<issue>-<slug>",
       "pr_title_pattern": "#<issue>: <summary>",
       "stage_labels": {
