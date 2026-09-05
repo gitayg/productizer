@@ -17,7 +17,7 @@ thing it does not measure.
 
 | Instrument | Script | Answers | Unit |
 |---|---|---|---|
-| Retrieval budget | `scripts/retrieval-budget.sh` | is the spec still cheap to retrieve from? | characters (a proxy) |
+| Retrieval budget | `scripts/retrieval-budget.sh` | is the spec still cheap to retrieve from? | characters (a proxy, calibrated 2026-09-05) |
 | A/B harness | `scripts/ab-harness.sh` | does the process cost more, and how much more? | ms, USD |
 | Stage snapshot | `scripts/stage-snapshot.sh` | how much did a human have to rewrite? | lines (a proxy) |
 
@@ -81,8 +81,27 @@ count`.
 the failure the norm.
 
 **Files.** `.claude/productizer/retrieval-prompts.tsv` (`id`, target `R`-id,
-terms) and `.claude/productizer/retrieval-baseline.tsv` (`id`, chars). Both are
-committed; the baseline moves in a reviewed commit, like any other threshold.
+terms) and `.claude/productizer/retrieval-baseline.tsv` (`id`, chars, mix). Both
+are committed; the baseline moves in a reviewed commit, like any other threshold.
+The third field is optional and a two-field baseline still reads correctly.
+
+**Neither file exists in this repository yet**, so `retrieval-budget.sh .` exits 6
+and this instrument has never produced a figure about this product. The unit was
+calibrated on 2026-09-05; the check itself is still unrun here.
+
+**The calibration, and why there is still no printed token count.** Measured
+2026-09-05 against the model's own tokeniser via `/v1/messages/count_tokens`, with
+a 7-token per-request overhead subtracted: EARS requirement lines 4.21 bytes per
+token, the whole living spec 3.89, YAML 3.84, markdown table rows 3.74, shell with
+comments 3.35, Python 3.12, comment-stripped shell 2.33. That is an 85% spread, so
+no single factor exists and none is printed. What IS narrow is the band the check
+actually reports over: 3.79 to 4.31 across its own candidate slices, a 14% spread,
+so N characters is about N/4 tokens on today's spec and nothing wider is claimed.
+The exchange rate is a property of the CONTENT, not of the file: 2000 bytes of
+prose is 471 tokens and 2000 bytes of comment-stripped shell is 859 - the same
+character count for 82% more tokens - which is why a `mix` figure is recorded
+beside the character budget and why it is never banded. Nothing has measured what
+a healthy mix is, so a band would be a threshold nobody derived.
 
 **What it does not measure.** Whether the requirement it found was the right
 one, whether the model would have understood it, or whether the spec is any
