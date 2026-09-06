@@ -581,6 +581,57 @@ GUARD_EQUAL, GUARD_OVERLAP, GUARD_DISJOINT = "EQUAL", "OVERLAP", "DISJOINT"
 GUARD_UNRELATED, GUARD_UNKNOWN = "UNRELATED", "UNKNOWN"
 
 
+NEGATORS = {"not", "no", "never"}
+
+
+def guard_entailment(ga: str, gb: str) -> str | None:
+    """Reason, when one guard cannot hold without the other holding too.
+
+    The token-subset test below catches a narrowing written as ADDED WORDS -
+    `while a session is idle` against `while a session is idle for 30 minutes`,
+    which is selftest case C1 and has convicted since this file shipped. It
+    cannot catch the same narrowing written as a TIGHTER NUMBER, because the two
+    literals leave each token set carrying a word the other lacks: *an account
+    in arrears for more than 14 days* against *an enterprise account in arrears
+    for more than 30 days* share 57% of their terms and land in UNKNOWN, which
+    escalates instead of ruling. Nothing semantic is missing there. An
+    enterprise account in arrears for more than 30 days IS an account in arrears
+    for more than 14 days, and this file already carries the interval arithmetic
+    that says so.
+
+    ENTAILMENT, NOT RESEMBLANCE. Three conditions, all required, and all
+    checkable here: the narrower guard says everything the broader one says
+    (content tokens, which drop the numbers and the units), it bounds every
+    dimension the broader one bounds, and its range on each of those sits inside
+    the broader range. Then every state satisfying the narrower guard satisfies
+    the broader one, so the two can hold together and the response test is
+    allowed to run - which is what GUARD_OVERLAP means.
+
+    NEGATION IS REFUSED RATHER THAN REASONED ABOUT. `bounds` reads *not in
+    arrears for more than 30 days* as (30, inf), which is the complement of what
+    the sentence says, so an entailment computed over it would point the wrong
+    way. A pair whose guards do not carry the same negators is left alone.
+    """
+    ta, tb = tokens(ga), tokens(gb)
+    if (ta & NEGATORS) != (tb & NEGATORS):
+        return None
+    ca, cb = content_tokens(ga), content_tokens(gb)
+    ba, bb = bounds(ga), bounds(gb)
+    for wide_c, wide_b, narrow_c, narrow_b in ((ca, ba, cb, bb), (cb, bb, ca, ba)):
+        if not wide_b or not narrow_b or not wide_c:
+            continue
+        if not wide_c <= narrow_c or not set(wide_b) <= set(narrow_b):
+            continue
+        if not all(narrow_b[dim].subset_of(wide_b[dim]) for dim in wide_b):
+            continue
+        if wide_c == narrow_c and all(wide_b[dim].subset_of(narrow_b[dim]) for dim in wide_b):
+            continue  # the same guard written twice, not a narrowing of one
+        dim = sorted(wide_b)[0]
+        return (f"one guard is a strictly narrower case of the other: it says "
+                f"everything the other says and its range on {dim} is inside it")
+    return None
+
+
 def guard_relation(a: Requirement, b: Requirement) -> tuple:
     """Decide whether the two guards can hold at the same time."""
     ga, gb = a.guard.strip().lower(), b.guard.strip().lower()
@@ -604,6 +655,10 @@ def guard_relation(a: Requirement, b: Requirement) -> tuple:
 
     if ta <= tb or tb <= ta:
         return GUARD_OVERLAP, "one guard is a strictly narrower case of the other"
+
+    entailed = guard_entailment(ga, gb)
+    if entailed:
+        return GUARD_OVERLAP, entailed
 
     j = jaccard(ta, tb)
     if j >= 0.6:
@@ -863,6 +918,15 @@ CASES = [
      "R55: When a batch completes, the widget shall stop polling the queue.",
      "R56: When a batch completes, the widget shall cease polling the queue.",
      "BOTH responses stop the same activity — agreement, not conflict"),
+
+    ("G1", CONTRADICTION,
+     "R57: While an account is in arrears for more than 14 days, the ledger shall suspend the account.",
+     "R58: While an enterprise account is in arrears for more than 30 days, the ledger shall keep the account fully active.",
+     "a narrowing written as a tighter number rather than as added words"),
+    ("G2", UNDECIDED,
+     "R59: While an enterprise account is in arrears for more than 7 days, the ledger shall suspend the account.",
+     "R60: While an account is in arrears for more than 14 days, the ledger shall keep the account fully active.",
+     "the words narrow and the number widens — neither guard entails the other"),
 ]
 
 

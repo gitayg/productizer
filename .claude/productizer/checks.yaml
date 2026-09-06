@@ -1840,11 +1840,19 @@ checks:
         - id: R39
           verdict: Partial
           reason: >-
-            THE SECOND CLAUSE IS NOT MEASURED. R39 says "a self-test that REACHES EACH EXIT CODE
-            it can return"; this asserts only that a self-test exists and answers. No self-test
-            in this repository reports which exit codes it drove, so there is nothing to read,
-            and inventing a reporting protocol here would be a claim with no assertion under it.
-            Second gap: the structural NEGATIVES are never executed, so a tool dispatching a
+            THE SECOND CLAUSE IS NOW COUNTED, NOT ASSERTED. Superseded 2026-09-06; the text
+            here until then said the clause was NOT MEASURED and that inventing a reporting
+            protocol would be a claim with no assertion under it. What changed is that the
+            codes a self-test drove are knowable only to the self-test, so the protocol is a
+            DECLARATION it makes and this check reads: one line, `exit codes reached: <codes>
+            documented: <codes>`, both halves bare integer lists, the reached half computed
+            from the cases as they ran. Three figures are kept apart and never added: how many
+            DECLARE, how many of those drove every code they document, and how many were NOT
+            ASKED. Measured 2026-09-06: 3 of 34 declare, 3 of 3 complete, 31 unmeasured - 11
+            emit nothing, 20 emit a prose codes line with no `documented:` half. No exit code
+            rests on any of them: a self-test never asked which codes it drove has not been
+            shown incomplete, and this reader cannot tell a computed reached-list from a
+            hardcoded one. Second gap: the structural NEGATIVES are never executed, so a tool dispatching a
             self-test in a shape the scanner does not recognise reads as carrying none - it
             over-reports the shortfall, which is the safe direction and still a wrong line.
             Third: third-party tools the suite invokes, `shellcheck` today, are rendered n/a and
@@ -1860,7 +1868,10 @@ checks:
             falsified: dropping the dispatch-shape rule makes `evals/solver-probe.py` read as
             carrying a self-test on the strength of a line that invokes somebody else's, and
             dropping the rejection override makes a tool that refuses the flag count as covered.
-            Measured on this repo 2026-09-06: 3 of 31 carry one that answers.
+            Measured on this repo 2026-09-06: 34 of 34 repository check tools carry one that
+            answers. The R39.b reader was falsified twice - ignoring a documented code that
+            was never driven, and accepting a prose codes line as a declaration - and each
+            break turns a green corpus red.
         - id: R40
           verdict: Partial
           reason: >-
@@ -1870,8 +1881,11 @@ checks:
             is missing at run time reads as reached here while running nothing, and a self-test
             invoked from anywhere else - a Makefile, a hook, a person - is invisible. It reads
             ONE checks.yaml and ONE workflow. And the obligation is vacuous for a tool with no
-            self-test to run: that shortfall is R39's, counted there and not here, so this
-            verdict says nothing about the 28 tools R39 reports.
+            self-test to run: that shortfall is R39's, counted there and not here. Measured
+            2026-09-06 that set is EMPTY - R39 reads 34 of 34 - so there is nothing this
+            verdict is currently silent about. It stays silent about it by construction, not
+            because the number happens to be zero today. (Superseded 2026-09-06: this sentence
+            named 28 tools, a figure that was hardcoded and went stale.)
           evidence: >-
             For every self-test found, asserts something invokes it AND that its failure can
             still set the run's exit code - for a declared check, that no non-zero code sits in
@@ -1885,11 +1899,11 @@ checks:
       pattern: '^(\S+)$'
       min_covered: 20
     limitations:
-      - R39's "reaches each exit code it can return" is not measured at all, and the claim is Partial for it. The only self-test here that demonstrates the clause is this check's own, which drives 10 cases across exit 0, 1 and 2.
+      - R39's "reaches each exit code it can return" is COUNTED, NOT ENFORCED, and the claim stays Partial for it. 31 of 34 self-tests do not declare which codes they drove; that is unmeasured, not a shortfall of zero. Writing the emitters is follow-up work. A declaration is also self-reported: this check compares a self-test's two halves against each other and cannot tell a computed reached-list from a hardcoded one, nor whether the `documented:` half is the tool's true contract - a tool that under-documents its codes reads as complete over an incomplete contract.
       - Reachability is static. It reads checks.yaml and one workflow file; an invocation from a Makefile, a git hook or a person is invisible, and a declared check whose tool is absent at run time still reads as reaching the self-test it names.
       - Structural negatives are never executed. A tool dispatching a self-test in an unrecognised shape reads as carrying none, which over-reports the shortfall rather than hiding it.
       - Third-party tools are n/a, not findings. `shellcheck` is a check tool the suite invokes and nobody here can give it a self-test; it is named and counted separately so neither number contaminates the other.
-      - It reports ITSELF as a self-test nothing reaches, because the declared command runs the measurement and not the self-test. That finding is real and is left standing rather than exempted.
+      - Superseded 2026-09-06: it used to report ITSELF as a self-test nothing reaches, because the declared command runs the measurement and not the self-test. The workflow now names `check-selftest-coverage.sh --selftest` on its own line, so the finding is resolved rather than exempted - it was never waived, and the fix was to reach it.
 
   # --- the retrieval budget, which nothing ran until now -------------------
   #

@@ -151,6 +151,18 @@ jobs:
         # No line is guarded with `||` and this step sets no continue-on-error.
         # The scanner detects both as SWALLOWED - a self-test whose failure cannot
         # set the run's exit code has not been run in any sense that matters.
+        #
+        # `spec-doctor.sh` is on this list and is DELIBERATELY NOT a declared
+        # check in checks.yaml. It exits 1 on findings and it counts a WARN as
+        # one, so a `block` check over it would turn every pre-existing warning
+        # into a red suite - which is the condition the "Spec" step above already
+        # refuses to gate on, for the stated reason that the first thing anyone
+        # does with such a gate is delete it. It also computes nothing of its
+        # own that a declared check does not already run, and it emits no path
+        # for `coverage.from: stdout_paths` to read, so a check declared over it
+        # would claim coverage it never had. Naming it here is what puts it
+        # inside the set check-selftest-coverage.sh measures R39 and R40 over,
+        # which is the obligation that was actually missing.
         run: |
           set -euo pipefail
           python3 evals/solver-probe.py --selftest
@@ -182,6 +194,7 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/check-waiver-rendering.sh --selftest
           bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
           bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/spec-doctor.sh --selftest
           bash scripts/check-hygiene.sh --selftest
 
       - name: Acceptance rows — check-acceptance-rows self-test
@@ -251,6 +264,28 @@ jobs:
       #     undecided       (escalated)       : 7
       #     precision : 1.00   recall : 0.89   (n=9 must-halt cases)
       #
+      # RE-MEASURED 2026-09-06, same command, after `guard_entailment`
+      # landed in contradiction-check.py. P14 is now convicted by proof:
+      # of its two guards - `in arrears for more than 14 days` against
+      # `an enterprise account in arrears for more than 30 days` - the
+      # second ENTAILS the first, so every state satisfying it satisfies
+      # the other. No lexicon entry was added.
+      #
+      #     true positives  (caught)          : 9
+      #     false negatives (missed silently) : 1    <- P03 still, and
+      #     false positives (halted wrongly)  : 0       still deliberate
+      #     true negatives  (stayed quiet)    : 10
+      #     undecided       (escalated)       : 6
+      #     precision : 1.00   recall : 0.90   (n=10 must-halt cases)
+      #
+      # What this corpus CANNOT referee, measured while convicting P14:
+      # of the ten must-not-halt cases, ZERO have an exclusive-response
+      # pair. So no negative here can punish a rule that only loosens the
+      # guard relation - which is why `--break guards` reports precision
+      # 1.00 while being plainly unsound. Corpus precision is not evidence
+      # for such a rule; only a proof is. Four further cases (P04, P05,
+      # P07, P15) were left undecided on that ground rather than convicted.
+      #
       # The bounds below ARE those five numbers, not round ones chosen near
       # them. Moving a bound is a diff, and a diff that moves one must carry a
       # fresh measurement and a fresh date, or the comment above stops being
@@ -260,7 +295,7 @@ jobs:
       # so bounding those bounds it; and a case moving from undecided to caught
       # is the improvement this corpus was built to provoke. Bounding it would
       # block the improvement.
-      - name: Solver — 26-case probe, against the 2026-09-05 baseline
+      - name: Solver — 26-case probe, against the 2026-09-06 baseline
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
@@ -270,10 +305,14 @@ jobs:
           import re
           import sys
 
-          # Measured 2026-09-05 at 4b4eb51. FLOOR = at least this many.
-          # CEIL = at most this many. Both halves are needed: a floor alone
-          # cannot see a solver that starts halting on non-conflicts.
-          FLOOR = {"true positives": 8, "true negatives": 10}
+          # Measured 2026-09-06 at 8216ab6 + guard_entailment. FLOOR = at
+          # least this many. CEIL = at most this many. Both halves are
+          # needed: a floor alone cannot see a solver that starts halting on
+          # non-conflicts. TP 8 -> 9: `guard_entailment` convicts P14, whose
+          # guards one ENTAILS the other. A floor of 8 already admitted 9, so
+          # nothing was failing; raising it is what stops the gain regressing
+          # silently. The other three are unmoved and deliberately so.
+          FLOOR = {"true positives": 9, "true negatives": 10}
           CEIL = {"false negatives": 1, "false positives": 0}
           PAT = {
               "true positives": r"true positives\s*\(caught\)\s*:\s*(\d+)",
@@ -319,14 +358,16 @@ jobs:
           if failures:
               for line in failures:
                   print("::error::solver probe regressed - %s" % line)
-              print("::error::baseline measured 2026-09-05 at 4b4eb51: true "
-                    "positives 8, false negatives 1, false positives 0, true "
-                    "negatives 10. This run: %s. Either the solver lost ground, "
+              print("::error::baseline measured 2026-09-06 at 8216ab6 + "
+                    "guard_entailment: true positives 9, false negatives 1, "
+                    "false positives 0, true negatives 10. The prior baseline, "
+                    "2026-09-05 at 4b4eb51, read true positives 8; only that "
+                    "number moved. This run: %s. Either the solver lost ground, "
                     "or the corpus moved and the bounds in this workflow need "
                     "re-measuring and re-dating in a diff." % this_run)
               raise SystemExit(1)
 
-          print("solver probe at or above the 2026-09-05 baseline: %s" % this_run)
+          print("solver probe at or above the 2026-09-06 baseline: %s" % this_run)
           PY
 
       # Stage 5, last because it is the slowest: shellcheck runs per changed

@@ -54,13 +54,49 @@
 # consequence is written down under KNOWN LIMITATIONS rather than left to be
 # discovered.
 #
-# WHAT IS NOT ASSERTED, STATED HERE AND CLAIMED AS `Partial` IN checks.yaml.
-# R39's second clause - "that reaches each exit code it can return" - is NOT
-# measured. Nothing in a self-test's output says which exit codes it drove, so
-# the only honest measurement available is that the self-test exists and
-# answers. Asserting the clause needs a reporting protocol no self-test in this
-# repository implements, and inventing one silently here would produce a claim
-# with no assertion behind it.
+# R39's SECOND CLAUSE - "that reaches each exit code it can return" - IS NOW
+# COUNTED, AND STILL NOT ENFORCED. It cannot be measured from the outside: what
+# codes a self-test drove is known only to the self-test. So the tool half of
+# the clause is a REPORTING PROTOCOL the self-test emits and this reader parses.
+#
+#   THE R39.b DECLARATION PROTOCOL. One line, any indentation, anywhere in the
+#   self-test's output:
+#
+#       exit codes reached: 0 2 3 4 5 6   documented: 0 2 3 4 5 6
+#
+#   - the literal `exit codes reached:`, then the codes the cases actually
+#     drove, then the literal `documented:`, then the codes the tool's own
+#     contract says it can return;
+#   - both halves are NON-EMPTY lists of non-negative integers separated by
+#     spaces or commas, and nothing else may share the line - no prose, no
+#     trailing sentence, no `and`;
+#   - the reached half must be COMPUTED from the cases as they ran, not written
+#     out as a literal. This reader cannot tell the difference and does not
+#     pretend to; see NOT ASSERTED in the output.
+#   - stdout is the stream to use. stderr is read too, because the probe
+#     captures both.
+#   - at most one such line per run. Two are ambiguous and read as unparsed.
+#
+#   THE SHAPE IS NOT INVENTED HERE. `retrieval-budget.sh --selftest` already
+#   prints exactly this line, and printed it before anything read it, because a
+#   tool documenting six exit codes had to prove its cases drove all six. The
+#   only change is that the separator between the halves is now defined, and
+#   that an empty or prose half is defined to be unreadable rather than zero.
+#
+#   THE `documented:` HALF IS WHAT MAKES THE LINE A MEASUREMENT. Twenty
+#   self-tests in this repository already print `exit codes reached: 0, 1 and
+#   2 - the whole contract.` - a hardcoded literal with nothing to check it
+#   against, which is a claim wearing a measurement's clothes. Those lines do
+#   not parse, deliberately, and are reported `unparsed`.
+#
+# WHAT THIS READER DOES WITH IT, AND WHAT IT REFUSES TO DO. It counts three
+# things separately and never adds them up: how many self-tests DECLARE, how
+# many of those declarations are COMPLETE - every documented code reached - and
+# how many were NOT ASKED, because they emit no declaration. A tool that does
+# not declare has NOT been shown incomplete. It reads `not asked`, never 0, and
+# no exit code of this check rests on any of those figures. Making the gap
+# visible and counted is the product; enforcing it would turn 32 unasked
+# questions into 32 false findings on the day the reader shipped.
 #
 # HOW "IS RUN" IS MEASURED. A self-test is REACHED when the tool path and the
 # flag both appear in one declared check's `command` argv, or on one line of a
@@ -102,8 +138,15 @@
 # The measurement is done in python3, which the runner already requires.
 #
 # KNOWN LIMITATIONS, written down rather than discovered later:
-#   - R39's "reaches each exit code it can return" is not measured at all. See
-#     above. The claim in checks.yaml is `Partial` and says so.
+#   - R39's "reaches each exit code it can return" is COUNTED, not asserted.
+#     A declaration is the self-test's own account of its run: this reader
+#     checks the two halves against each other, and cannot tell a computed
+#     reached-list from a literal one. A tool that documents fewer codes than
+#     it can return declares a complete run over an incomplete contract, and
+#     that reads `complete` here.
+#   - The count is over the tools that answer a self-test flag. A tool with no
+#     self-test contributes to the R39 shortfall and is `n/a` for R39.b - one
+#     shortfall, counted once.
 #   - The structural negatives are never executed, so a tool that dispatches a
 #     self-test in a shape this scanner does not recognise reads as carrying
 #     none. That direction is the safe one - it over-reports the shortfall -
@@ -128,9 +171,14 @@
 #      workflow that could not be read or parsed, or a checks.yaml that
 #      declares no checks. Never confused with 0.
 #
+# NO R39.b FIGURE SETS ANY OF THEM. A tool that declares an incomplete run, one
+# that declares nothing and one whose declaration will not parse all leave the
+# exit code where it was. The figure is reported; the clause is not enforced.
+#
 # Under --selftest the same three mean: every case produced the exit code it
-# declares (0), at least one did not (1), and the corpus could not be driven at
-# all (2).
+# declares AND this self-test drove every code the contract above documents
+# (0), a case did not or a documented code was never driven (1), and the corpus
+# could not be driven at all (2).
 set -euo pipefail
 
 VERSION="check-selftest-coverage 1.0"
@@ -297,8 +345,41 @@ esac
 exit 0
 TOOL
 
+  # --- the three R39.b fixtures ---------------------------------------------
+  # declares, and drove every code it documents.
+  cat > "$d/tools/codes-complete.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest) printf '    exit codes reached: 0 1 2   documented: 0 1 2\n'; exit 0 ;;
+esac
+exit 0
+TOOL
+
+  # declares, and one documented code was never driven. THE FALSIFICATION: a
+  # reader that only checks the line is PRESENT reports this one as covered.
+  cat > "$d/tools/codes-missing.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest) printf '    exit codes reached: 0 1   documented: 0 1 2\n'; exit 0 ;;
+esac
+exit 0
+TOOL
+
+  # says something about exit codes in the prose shape twenty self-tests here
+  # already use: a hardcoded list with nothing to check it against. Unparsed,
+  # which is unmeasured - never compliant, and never a zero.
+  cat > "$d/tools/codes-malformed.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest) printf '    exit codes reached: 0, 1 and 2 - the whole contract.\n'; exit 0 ;;
+esac
+exit 0
+TOOL
+
   chmod +x "$d/tools/with-selftest.sh" "$d/tools/mention-only.sh" \
-           "$d/tools/rejects-flag.sh" "$d/tools/slow-selftest.sh"
+           "$d/tools/rejects-flag.sh" "$d/tools/slow-selftest.sh" \
+           "$d/tools/codes-complete.sh" "$d/tools/codes-missing.sh" \
+           "$d/tools/codes-malformed.sh"
   printf 'name: fixture\njobs:\n  checks:\n    steps:\n      - run: |\n          echo nothing\n' \
     > "$d/.github/workflows/checks.yml"
 }
@@ -389,7 +470,31 @@ rm -f "$SB/absent/checks.yaml"
 mk_case noprobe
 cp "$SB/clean/checks.yaml" "$SB/noprobe/checks.yaml"
 
+# codes: the R39.b protocol, all four states in one tree - one self-test that
+# declares and is complete, one that declares and is INCOMPLETE, one whose line
+# does not parse, and one that says nothing at all. The whole case must exit 0:
+# R39.b is counted, and a tool that never declared has not been shown
+# incomplete, so none of this may turn into a finding.
+mk_case codes
+cat > "$SB/codes/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-selftest
+    command: [./tools/with-selftest.sh, --selftest]
+  - id: fixture-codes-complete
+    command: [./tools/codes-complete.sh, --selftest]
+  - id: fixture-codes-missing
+    command: [./tools/codes-missing.sh, --selftest]
+  - id: fixture-codes-malformed
+    command: [./tools/codes-malformed.sh, --selftest]
+CFG
+
 FAILED=0
+CASES=0
+# Every exit code a case actually produced, one per line. The R39.b line this
+# self-test prints is COMPUTED from this, never written out as a literal - a
+# hardcoded list is the claim the protocol exists to replace.
+CODES_SEEN=""
 drive() {
   # $1 case, $2 expected exit code, $3 expected sentence, $4.. extra argv
   local case_name="$1" want="$2" marker="$3"
@@ -398,6 +503,9 @@ drive() {
   python3 "$MEASURE" --root "$SB/$case_name" --checks checks.yaml \
     --workflow .github/workflows/checks.yml --probe-timeout "$PROBE_TIMEOUT" \
     "$@" > "$SB/$case_name.out" 2> "$SB/$case_name.err" || rc=$?
+  CASES=$((CASES + 1))
+  CODES_SEEN="${CODES_SEEN}${rc}
+"
   local why=""
   [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
   # stdout AND stderr: a could-not-measure sentence is written to stderr, and a
@@ -439,6 +547,9 @@ if [ "$CLEAN_RC" -ne 0 ] || ! grep -q 'R39 and R40 hold' "$SB/clean.out"; then
   die_unmeasured "the corpus premise did not hold; unmeasured, not a pass"
 fi
 printf '  held: case %-12s exit 0, and said so - R39 and R40 hold\n' "clean"
+CASES=$((CASES + 1))
+CODES_SEEN="${CODES_SEEN}0
+"
 
 drive mention     1 "mention-only.sh carries no self-test"
 drive rejected    1 "its parser rejected the flag"
@@ -450,10 +561,32 @@ drive unparseable 2 "not parseable YAML"
 drive absent      2 "could not be read"
 drive noprobe     0 "probe: not run"                                     --no-probe
 
-printf '  cases driven: 10, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' "$FAILED"
+# The R39.b protocol, driven over the four states a declaration can be in. All
+# three cases are exit 0: non-compliance is a figure this check reports, never
+# a finding it fails on.
+drive codes       0 "R39.b: 2 of 4 check tools carrying a self-test declare"
+drive codes       0 "codes-missing.sh documents 0 1 2 and never reached 2"
+drive codes       0 "1 emit a line this protocol could not parse"
+
+printf '  cases driven: %d. Cases that did not hold: %d\n' "$CASES" "$FAILED"
+
+# This tool's own R39.b declaration, in the protocol it defines. The reached
+# half is computed from the cases above; the documented half is the contract in
+# this file's header.
+REACHED="$(printf '%s' "$CODES_SEEN" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+MISSING=""
+for want in 0 1 2; do
+  printf '%s' "$CODES_SEEN" | grep -qx "$want" || MISSING="$MISSING $want"
+done
+printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
+
 if [ "$FAILED" -ne 0 ]; then
   printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
   exit 1
 fi
-printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2, and each case asserts which finding it produced.\n'
+if [ -n "$MISSING" ]; then
+  printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+  exit 1
+fi
+printf '  R39 for this tool: the self-test exists, drove every exit code its contract documents, and each case asserts which finding it produced.\n'
 exit 0

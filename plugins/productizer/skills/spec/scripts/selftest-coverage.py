@@ -5,9 +5,14 @@ for what is asserted, what is not, and why.
 Reads two files that decide what the check suite executes - the declared checks
 and the CI workflow - and answers two questions over the tools they name:
 
-    R39  does the tool carry a self-test?
-    R40  does anything actually run it, with its failure still able to set the
-         run's exit code?
+    R39   does the tool carry a self-test?
+    R39.b does that self-test DECLARE which exit codes it drove and which its
+          contract documents - and if it declares, did it drive them all?
+    R40   does anything actually run it, with its failure still able to set the
+          run's exit code?
+
+R39.b is COUNTED, never enforced. A self-test that emits no declaration has not
+been shown incomplete; it has not been asked. That reads `not asked`, never 0.
 
 Renders four states apart and never collapses them into a zero: a count is a
 count, `n/a` is a guard that does not apply, `-` is never run, `?` is
@@ -42,6 +47,32 @@ DISPATCH = (
 FLAG_RE = re.compile(r"--self[-_]?test\b")
 REJECTED_RE = re.compile(r"unknown (option|argument|flag)", re.I)
 PLACEHOLDER_RE = re.compile(r"[{}]")
+
+# --- the R39.b declaration protocol ----------------------------------------
+# One line, any indent, on stdout or stderr:
+#
+#     exit codes reached: <codes>   documented: <codes>
+#
+# Both halves are non-empty lists of non-negative integers separated by spaces
+# or commas, and nothing else may share the line. The shape is lifted from
+# retrieval-budget.sh, which invented it for itself because it had to.
+#
+# The `documented:` half is what makes the line a measurement rather than a
+# claim. Twenty self-tests here already print a hardcoded `exit codes reached:
+# 0, 1 and 2 - the whole contract.`, which asserts nothing: the list is a
+# literal in the source, not a record of what the cases drove, and there is no
+# second list to check it against. Those lines do NOT parse, on purpose, and
+# are reported `unparsed` - unmeasured, never compliant and never zero.
+CODES_LINE_HINT = "exit codes reached"
+CODES_LINE = re.compile(
+    r"^\s*exit codes reached:(?P<reached>.*?)\bdocumented:(?P<documented>.*)$")
+CODE_LIST = re.compile(r"^[0-9]+(?:[,\s]+[0-9]+)*$")
+SPLIT_CODES = re.compile(r"[,\s]+")
+
+CODES_COMPLETE = "complete"
+CODES_INCOMPLETE = "INCOMPLETE"
+CODES_SILENT = "not asked"
+CODES_UNPARSED = "unparsed"
 
 
 def out(line=""):
@@ -102,10 +133,73 @@ def scan_dispatch(path):
     return flags, False
 
 
+def parse_code_list(text):
+    """A half of the declaration line, as a sorted set of ints. None if it is
+    not a bare list of non-negative integers - prose is not a declaration."""
+    text = text.strip()
+    if not text or not CODE_LIST.match(text):
+        return None
+    return sorted({int(tok) for tok in SPLIT_CODES.split(text) if tok})
+
+
+def declared_codes(text):
+    """Read the R39.b declaration out of a self-test's own output.
+
+    Returns (state, reached, documented, detail). Nothing here can produce a
+    finding: an absent or unreadable declaration is unmeasured, and the count
+    of unmeasured tools is the point of the exercise.
+    """
+    parsed = []
+    unparsed = 0
+    for line in text.split("\n"):
+        if CODES_LINE_HINT not in line:
+            continue
+        m = CODES_LINE.match(line)
+        pair = None
+        if m:
+            reached = parse_code_list(m.group("reached"))
+            documented = parse_code_list(m.group("documented"))
+            if reached and documented:
+                pair = (reached, documented)
+        if pair is None:
+            unparsed += 1
+        else:
+            parsed.append(pair)
+    if len(parsed) > 1:
+        return (CODES_UNPARSED, None, None,
+                "declares its exit-code coverage on more than one line, and "
+                "which of them governs is undefined")
+    if not parsed:
+        if unparsed:
+            return (CODES_UNPARSED, None, None,
+                    "names exit codes reached in a shape this protocol does "
+                    "not define - no `documented:` half to check them against")
+        return (CODES_SILENT, None, None,
+                "emits no exit-code declaration, so what it drove is unknown")
+    reached, documented = parsed[0]
+    missing = [c for c in documented if c not in reached]
+    extra = [c for c in reached if c not in documented]
+    detail = "drove %s of the %s it documents" % (
+        " ".join(str(c) for c in sorted(set(documented)) if c in reached) or "none",
+        " ".join(str(c) for c in documented))
+    if missing:
+        detail = "documents %s and never reached %s" % (
+            " ".join(str(c) for c in documented),
+            " ".join(str(c) for c in missing))
+    if extra:
+        detail += ("; it also drove %s, which its contract does not document"
+                   % " ".join(str(c) for c in extra))
+    state = CODES_INCOMPLETE if missing else CODES_COMPLETE
+    return state, reached, documented, detail
+
+
 def probe(root, relpath, flag, timeout):
-    """Run the self-test. (state, detail).
+    """Run the self-test. (state, detail, output).
 
     state: "answered" | "rejected" | UNREADABLE
+    output: stdout and stderr together, and empty for anything but "answered".
+    Both streams are read because the probe captures both, so a declaration is
+    a declaration wherever the self-test writes it.
     """
     full = os.path.join(root, relpath)
     if relpath.endswith(".py"):
@@ -115,13 +209,14 @@ def probe(root, relpath, flag, timeout):
     try:
         proc = subprocess.run(argv, cwd=root, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return UNREADABLE, "timed out after %ds" % timeout
+        return UNREADABLE, "timed out after %ds" % timeout, ""
     except OSError as exc:
-        return UNREADABLE, "could not be executed (%s)" % exc.__class__.__name__
+        return UNREADABLE, "could not be executed (%s)" % exc.__class__.__name__, ""
     err = proc.stderr.decode("utf-8", "replace")
     if proc.returncode == 2 and REJECTED_RE.search(err):
-        return "rejected", "exit 2, argument rejected"
-    return "answered", "exit %d" % proc.returncode
+        return "rejected", "exit 2, argument rejected", ""
+    out_text = proc.stdout.decode("utf-8", "replace")
+    return "answered", "exit %d" % proc.returncode, out_text + "\n" + err
 
 
 def load_yaml(path, what):
@@ -270,16 +365,23 @@ def main():
         if not rec["local"]:
             rec["flags"] = None                     # external: n/a, not zero
             rec["answered"] = NA
+            rec["codes"] = {"state": NA, "detail": "third-party"}
             continue
         flags, bad = scan_dispatch(os.path.join(root, name))
         if bad:
             rec["flags"] = None
             rec["answered"] = UNREADABLE
+            rec["codes"] = {"state": UNREADABLE, "detail": "could not be read"}
             rec["unreadable"] = True
             unreadable.append(name)
             continue
         rec["flags"] = sorted(flags)
         rec["answered"] = NA if not flags else NEVER_RUN
+        # No self-test is no declaration to look for - a guard, not a shortfall.
+        rec["codes"] = (
+            {"state": NA, "detail": "no self-test to declare anything"}
+            if not flags else
+            {"state": NEVER_RUN, "detail": "the self-test was never run"})
 
     probed = 0
     if args.probe:
@@ -288,19 +390,25 @@ def main():
                 continue
             probed += 1
             flag = rec["flags"][0]
-            state, detail = probe(root, name, flag, args.probe_timeout)
+            state, detail, output = probe(root, name, flag, args.probe_timeout)
             if state == "rejected":
                 # The source reads as if it dispatches and the parser says
                 # otherwise. The parser is what runs, so it wins.
                 rec["disagreed"] = detail
                 rec["flags"] = []
                 rec["answered"] = NA
+                rec["codes"] = {"state": NA,
+                                "detail": "no self-test to declare anything"}
             elif state == UNREADABLE:
                 rec["answered"] = UNREADABLE
                 rec["probe_note"] = detail
+                rec["codes"] = {"state": UNREADABLE, "detail": detail}
                 unreadable.append(name)
             else:
                 rec["answered"] = detail
+                cstate, creached, cdocumented, cdetail = declared_codes(output)
+                rec["codes"] = {"state": cstate, "reached": creached,
+                                "documented": cdocumented, "detail": cdetail}
 
     # --- reachability -----------------------------------------------------
     for name, rec in tools.items():
@@ -343,7 +451,8 @@ def main():
     out("  tool set: %d invoked by %s or %s - %d in this repository, %d "
         "third-party" % (len(tools), checks_rel, workflow_rel,
                          len(local_names), len(external)))
-    out("  %-58s %-12s %-10s %s" % ("tool", "self-test", "answered", "run by"))
+    out("  %-58s %-12s %-10s %-10s %s"
+        % ("tool", "self-test", "answered", "codes", "run by"))
     for name in local_names + external:
         rec = tools[name]
         if rec.get("disagreed"):
@@ -357,8 +466,9 @@ def main():
         reached = rec.get("reached", NA)
         if isinstance(reached, list):
             reached = ", ".join(sorted(set(reached))) if reached else "nothing"
-        out("  %-58s %-12s %-10s %s"
-            % (name[:58], flag, rec["answered"], reached))
+        out("  %-58s %-12s %-10s %-10s %s"
+            % (name[:58], flag, rec["answered"],
+               rec.get("codes", {}).get("state", UNREADABLE), reached))
 
     findings = []
     for name in local_names:
@@ -399,10 +509,41 @@ def main():
     else:
         out("  probe: not run (--no-probe). The answered column reads %s - never "
             "run - and is never read as a 0." % NEVER_RUN)
-    out("  NOT ASSERTED: R39's `reaches each exit code it can return`. No "
-        "self-test here reports which exit codes it drove, so this run "
-        "measures that a self-test exists and answers, never that it is "
-        "complete.")
+    # --- R39.b: the second clause, counted and never enforced --------------
+    by_state = {}
+    for name in local_names:
+        if not tools[name].get("flags"):
+            continue                                # no self-test: n/a, not 0
+        by_state.setdefault(tools[name]["codes"]["state"], []).append(name)
+    complete = by_state.get(CODES_COMPLETE, [])
+    incomplete = by_state.get(CODES_INCOMPLETE, [])
+    silent = by_state.get(CODES_SILENT, [])
+    unparsed_decl = by_state.get(CODES_UNPARSED, [])
+    not_run = by_state.get(NEVER_RUN, []) + by_state.get(UNREADABLE, [])
+    declaring = len(complete) + len(incomplete)
+
+    out("  R39.b protocol: a self-test declares its own exit-code coverage as "
+        "one line - `exit codes reached: <codes>   documented: <codes>` - both "
+        "halves bare lists of integers. check-selftest-coverage.sh carries the "
+        "full definition.")
+    out("  R39.b: %d of %d check tools carrying a self-test declare which exit "
+        "codes it drove and which their contract documents; %d of those %d "
+        "drove every code they document." % (declaring, carried,
+                                             len(complete), declaring))
+    for name in incomplete:
+        out("  R39.b INCOMPLETE: %s %s. Counted, not a finding - see NOT "
+            "ASSERTED below." % (name, tools[name]["codes"]["detail"]))
+    out("  R39.b unmeasured: %d of %d - %d emit no declaration (`not asked`), "
+        "%d emit a line this protocol could not parse (`unparsed`), %d were "
+        "not run. None of those is a measurement of zero: a self-test nobody "
+        "asked which codes it drove has not been shown incomplete."
+        % (len(silent) + len(unparsed_decl) + len(not_run), carried,
+           len(silent), len(unparsed_decl), len(not_run)))
+    out("  NOT ASSERTED: R39's `reaches each exit code it can return` is "
+        "COUNTED HERE AND NOT ENFORCED. No exit code of this check rests on "
+        "the R39.b figures, because a tool that does not declare has not been "
+        "shown incomplete - and a declaration is still the self-test's own "
+        "account of itself, not an observation of the codes it drove.")
 
     if unreadable:
         for name in sorted(set(unreadable)):

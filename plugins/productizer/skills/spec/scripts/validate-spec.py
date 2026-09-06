@@ -49,11 +49,24 @@ Input formats
                           `references/speckit-format.md`.
 
 Scope
-    EVERY CHECK HERE IS PER FILE. Ids, counts, the counter and citations are
-    all judged inside one document, even when several are given on one command
-    line. That is invisible while the spec is one file and becomes load-bearing
-    the moment it is split: see the note on `check_spec_counts`, which records
-    what was measured on a real two-file split and what stops being enforced.
+    MOST CHECKS HERE ARE PER FILE. Counts, the id allocator, EARS and
+    supersession are judged inside one document, even when several are given
+    on one command line. TWO ARE NOT, and both exist because the spec header
+    promises ids "stay unique across the whole repo even if this spec is later
+    split into several files" -- a promise no per-file check can keep:
+
+      - ID_DEFINED_TWICE: an id defined in one spec file of the run and again
+        in another spec file of the same run is an ERROR in both.
+      - citations resolve against EVERY spec file of the run, so a plan or an
+        acceptance row citing a requirement that lives in a sibling spec file
+        is not CITATION_UNKNOWN.
+
+    Both are inert on a single-file spec: the sibling index is empty, and the
+    code paths they guard do not run. See the note on `check_spec_counts` for
+    what was measured on a real two-file split, and for the one cost of a
+    split that is STILL not enforced after this -- nothing sums the parts, so
+    once each header carries its own total the product-level total is stated
+    nowhere and checked by nothing.
 
 Deterministic: no wall clock, no environment, no network is read, and problems
 are emitted sorted by (line, code, message). Two runs of the same input are
@@ -466,7 +479,41 @@ def collect_citations(doc, lineno, raw):
 # Spec checks
 # --------------------------------------------------------------------------
 
-def check_spec(doc):
+def spec_id_locations(documents):
+    """`{id: [(path, line), ...]}` for every requirement id in this run.
+
+    Built in command-line order, so the message a duplicate produces is the
+    same on every run of the same command. Only spec documents contribute: a
+    constitution's `Enforced by` ids and a backlog's citations name
+    requirements, they do not define them.
+    """
+    index = {}
+    for doc in documents:
+        if doc.kind != "spec":
+            continue
+        for requirement in doc.requirements:
+            index.setdefault(requirement.ident, []).append(
+                (doc.path, requirement.line))
+    return index
+
+
+def siblings_for(index, doc):
+    """The ids of this run defined in a spec file OTHER than `doc`.
+
+    Empty for a run holding one spec, which is exactly why nothing below
+    changes on a repository whose spec is a single file. Sameness is decided
+    on the path as given, so passing the same file twice on one command line
+    reports nothing rather than reporting every id as a duplicate of itself.
+    """
+    siblings = {}
+    for ident, places in index.items():
+        elsewhere = [place for place in places if place[0] != doc.path]
+        if elsewhere:
+            siblings[ident] = elsewhere
+    return siblings
+
+
+def check_spec(doc, siblings=None):
     if "requirements" not in doc.sections:
         doc.add(1, ERROR, "NO_REQUIREMENTS_SECTION",
                 "no `## Requirements` heading: nothing in this file was "
@@ -486,7 +533,8 @@ def check_spec(doc):
     check_spec_ears(doc)
     check_spec_status(doc)
     check_spec_counts(doc)
-    check_spec_citations(doc)
+    check_spec_siblings(doc, siblings)
+    check_spec_citations(doc, siblings)
 
 
 def check_spec_ids(doc, counter):
@@ -707,31 +755,31 @@ def check_spec_counts(doc):
       1. NOTHING STATES OR CHECKS THE PRODUCT TOTAL any more. Once each header
          carries its own file's total, "35 active" exists nowhere and no check
          sums the parts. The count survives; the product-level claim does not.
-      2. ID_REUSED DOES NOT CROSS FILES, so the header's own promise of
-         repo-wide unique ids stops being enforced by anything at exactly the
-         moment the header starts making it. Measured on the same split: R25
-         was copied into the second file as well, each header corrected to its
-         own count, and the run reported
+      2. FIXED 2026-09-06 - see `check_spec_siblings`. ID_REUSED still does
+         not cross files, and now ID_DEFINED_TWICE does. Measured on the same
+         split: R25 was copied into the second file as well, each header
+         corrected to its own count, and the run reported
              2 file(s) checked: 0 error(s), 88 warning(s)     exit 0
          with R25 defined twice in the repo. Nothing went red. (Before the
          headers were corrected the only red was COUNT_MISMATCH, at 16 rather
          than 15 - a duplicate id caught by accident, as an off-by-one in a
-         count, and lost the moment someone believed the DERIVED line.)
-      3. EVERY CROSS-FILE CITATION BECOMES `CITATION_UNKNOWN`, because
-         check_spec_citations resolves against one document's ids. That is the
-         84 warnings in every run above, none of which is a real defect. A
-         check that emits 84 false warnings on the day of the split is a check
-         somebody switches off that week, which was B44's real worry aimed at
-         the wrong code.
+         count, and lost the moment someone believed the DERIVED line.) The
+         same split re-run with this script now reports 2 error(s), exit 1,
+         one against each copy of R25.
+      3. FIXED 2026-09-06 - see `check_spec_citations`. Every cross-file
+         citation used to become `CITATION_UNKNOWN`, because the check
+         resolved against one document's ids. That was the 84 warnings in
+         every run above, none of which is a real defect, and a check that
+         emits 84 false warnings on the day of the split is a check somebody
+         switches off that week - B44's real worry, aimed at the wrong code.
+         Citations now resolve against every spec file of the run: the same
+         split re-runs at 0 warnings.
 
-    Fixing 2 and 3 means a cross-file pass over every spec document `main`
-    loaded - a union of ids for citations, and a defined-in-two-files ERROR -
-    and it must land IN THE SAME CHANGE AS THE SPLIT, not after: between the
-    two, repo-wide id uniqueness is a sentence in a header with no check under
-    it. It is deliberately NOT done here, because a self-test fixture for it
-    would move the `--self-test` fixture count that
-    `references/speckit-format.md` records as an observed result, and that file
-    belongs to the same change.
+    ONLY 1 IS STILL OPEN, and it is the one this function is about: nothing
+    sums the parts. Both halves of 2 and 3 are a cross-file pass over the spec
+    documents `main` loaded, and they are per-run, not per-repo - a split whose
+    halves are never given to one invocation is unchecked again, so the caller
+    that lists the spec files decides how much of the promise holds.
     """
     lineno, _value, declared, counted = spec_counts(doc)
     if not declared:
@@ -744,15 +792,58 @@ def check_spec_counts(doc):
                     % (declared[word], word, counted[word]))
 
 
-def check_spec_citations(doc):
+def check_spec_siblings(doc, siblings):
+    """ID_DEFINED_TWICE: an id this file defines is defined in another spec file too.
+
+    THE ONLY CHECK HERE THAT LOOKS OUTSIDE ONE DOCUMENT, together with the
+    citation union below. It exists because the spec header promises ids "stay
+    unique across the whole repo even if this spec is later split into several
+    files", and until this landed that promise stopped being enforced by
+    anything at exactly the moment the header started making it -- measured on
+    a real split and recorded under `check_spec_counts`.
+
+    BOTH files are reported, not one. There is no way to tell which copy is the
+    original from the text, and naming one of them the winner would be this
+    script guessing; two errors say plainly that the repo defines one id twice.
+
+    Inert by construction on a single-file spec: `siblings` is empty and this
+    returns before reading a requirement.
+    """
+    if not siblings:
+        return
+    for requirement in doc.requirements:
+        elsewhere = siblings.get(requirement.ident)
+        if not elsewhere:
+            continue
+        where = ", ".join("%s line %d" % (path, line)
+                          for path, line in elsewhere)
+        doc.add(requirement.line, ERROR, "ID_DEFINED_TWICE",
+                "%s is also defined in %s; an id names one requirement for the "
+                "life of the repo, and a spec split across several files is "
+                "still one spec" % (requirement.ident, where))
+
+
+def check_spec_citations(doc, siblings=None):
+    """CITATION_UNKNOWN: a cited id no spec file in this run defines.
+
+    `siblings` widens what counts as defined to every OTHER spec file on the
+    command line. Without it a split spec reports every cross-file citation as
+    unknown -- 84 such warnings on a real two-file split, not one of them a
+    defect -- and a check that emits 84 false warnings on the day of the split
+    is a check somebody switches off that week.
+    """
     known = {requirement.ident for requirement in doc.requirements}
+    if siblings:
+        known.update(siblings)
+        unknown = "cites %s, which no spec file in this run defines"
+    else:
+        unknown = "cites %s, which this file does not define"
     reported = set()
     for lineno, ident in doc.citations:
         if ident in known or (lineno, ident) in reported:
             continue
         reported.add((lineno, ident))
-        doc.add(lineno, WARN, "CITATION_UNKNOWN",
-                "cites %s, which this file does not define" % ident)
+        doc.add(lineno, WARN, "CITATION_UNKNOWN", unknown % ident)
 
 
 # --------------------------------------------------------------------------
@@ -1132,18 +1223,18 @@ def load_document(path, text, kind=None):
     return build_document(path, text, resolved)
 
 
-def check_document(doc, spec=None):
+def check_document(doc, spec=None, siblings=None):
     if doc.kind == "spec":
-        check_spec(doc)
+        check_spec(doc, siblings=siblings)
     elif doc.kind == "constitution":
         check_constitution(doc, spec=spec)
     elif doc.kind == "backlog":
         check_backlog(doc)
 
 
-def validate_text(path, text, kind=None, spec=None):
+def validate_text(path, text, kind=None, spec=None, siblings=None):
     doc = load_document(path, text, kind=kind)
-    check_document(doc, spec=spec)
+    check_document(doc, spec=spec, siblings=siblings)
     return doc
 
 
@@ -1393,6 +1484,67 @@ Next backlog id
 STALE_COUNT_SPEC = VALID_SPEC.replace("2 active, 1 superseded",
                                       "5 active, 9 superseded")
 
+# VALID_SPEC cut in two at the section boundary, the way a real spec is split
+# when it outgrows one file: each part carries its own header, its own count of
+# ITSELF, and the same allocator. Part A's acceptance table cites R3, which
+# lives in part B -- the cross-file citation that used to be a warning.
+SPLIT_A_SPEC = """# Widget — living spec, part A
+
+Next requirement id
+: `R4` — allocate from here.
+
+Requirements
+: 1 active, 0 superseded, 0 withdrawn.
+
+## Requirements
+
+### Ubiquitous — always active
+
+- **R1** — The widget shall hold exactly one living spec.
+
+## Acceptance criteria
+
+| Requirement | Verified by |
+|---|---|
+| R1 | `test_one_spec` |
+| R3 | `test_four_classes` |
+"""
+
+SPLIT_B_SPEC = """# Widget — living spec, part B
+
+Next requirement id
+: `R4` — allocate from here.
+
+Requirements
+: 1 active, 1 superseded, 0 withdrawn.
+
+## Requirements
+
+### Event-driven
+
+- **R2** — When an intent arrives, the widget shall classify it.
+  Superseded by R3. The classification became four-valued.
+- **R3** — When an intent arrives, the widget shall classify it as one of four classes.
+"""
+
+# R1 copied into part B as well, and part B's own count corrected to match --
+# which is the whole point: correcting the count is one edit, and before
+# ID_DEFINED_TWICE it was the edit that turned the run green with an id
+# defined twice in the repo.
+SPLIT_B_DUPLICATE = SPLIT_B_SPEC.replace(
+    ": 1 active, 1 superseded, 0 withdrawn.",
+    ": 2 active, 1 superseded, 0 withdrawn.").replace(
+    "### Event-driven",
+    "### Ubiquitous — always active\n\n"
+    "- **R1** — The widget shall hold exactly one living spec.\n\n"
+    "### Event-driven")
+
+# A citation NO part of the split defines. The union must widen what resolves,
+# not switch the check off.
+SPLIT_A_STRAY = SPLIT_A_SPEC.replace("| R3 | `test_four_classes` |",
+                                     "| R3 | `test_four_classes` |\n"
+                                     "| R9 | `test_absent` |")
+
 RENUMBERED_SPEC = """# Widget — living spec
 
 Next requirement id
@@ -1512,8 +1664,42 @@ SPECKIT_SECTION_MISMATCH = SPECKIT_SPEC.replace(
 def self_test():
     failures = []
 
+    # The fixture count on the last line is DERIVED from this list, not typed.
+    # It used to be a literal, and a literal is a number that goes stale the
+    # first time somebody adds a case -- which is a measurement nobody re-took,
+    # the defect COUNT_MISMATCH exists to catch, in this file's own output.
+    # THE RULE, so a later reader can re-derive it: one entry per named case,
+    # registered by `run`, `run_set`, or an explicit `case(...)` for a fixture
+    # built by hand. Supporting documents another case needs -- a baseline, a
+    # spec a constitution resolves against -- are not cases and are not
+    # registered. Under that rule the fixtures present before the cross-file
+    # checks landed count 26, not the 25 the line used to print.
+    fixtures = []
+
+    def case(name):
+        if name not in fixtures:
+            fixtures.append(name)
+        return name
+
     def run(name, text, kind=None, spec=None):
+        case(name)
         return validate_text(name, text, kind=kind, spec=spec)
+
+    def run_set(name, pairs):
+        """Load several spec files and check them as ONE run, as `main` does.
+
+        Going through `spec_id_locations`/`siblings_for` rather than a
+        hand-built sibling dict is the point: the wiring is what regressed
+        before, and a fixture that assembles its own index would pass over a
+        `main` that never calls them.
+        """
+        case(name)
+        documents = [load_document(path, text, kind="spec")
+                     for path, text in pairs]
+        index = spec_id_locations(documents)
+        for doc in documents:
+            check_spec(doc, siblings=siblings_for(index, doc))
+        return documents
 
     def codes(doc):
         return sorted({p.code for p in doc.problems})
@@ -1599,6 +1785,7 @@ def self_test():
     doc = run("no-section.md", "# S\n\nNext requirement id\n: `R1`\n\n## Scope\n\nx\n")
     expect("no-section", doc, ["NO_REQUIREMENTS_SECTION"])
 
+    case("renumbered")
     baseline = build_document("baseline.md", VALID_SPEC, "spec")
     check_spec(baseline)
     current = build_document("renumbered.md", RENUMBERED_SPEC, "spec")
@@ -1607,6 +1794,7 @@ def self_test():
     expect("renumbered", current, ["RENUMBERED", "SUPERSEDED_TEXT_CHANGED",
                                    "COUNTER_REWOUND"])
 
+    case("deleted")
     baseline = build_document("baseline.md", VALID_SPEC, "spec")
     check_spec(baseline)
     current = build_document("deleted.md", DELETED_SPEC, "spec")
@@ -1631,6 +1819,7 @@ def self_test():
         "withdrawn 2026-05-02 — the product changed."))
     expect("lowercase-withdrawn", doc, ["PRINCIPLE_STATUS_MALFORMED"])
 
+    case("supersede-backward")
     doc = Document(path="crafted.md", kind="spec")
     doc.requirements = [
         Requirement(ident="R2", number=2, line=10, text="The widget shall a.",
@@ -1641,6 +1830,7 @@ def self_test():
     check_spec_status(doc)
     expect("supersede-backward", doc, ["SUPERSEDE_BACKWARD"])
 
+    case("empty-principle-heading")
     doc = Document(path="crafted.md", kind="constitution")
     if read_principle(doc, 1, "") is not None:
         failures.append("empty-principle-heading: should not parse")
@@ -1676,6 +1866,121 @@ def self_test():
     forbid("corrected-counts", doc, WARN)
 
     # ----------------------------------------------------------------------
+    # The two cross-file checks, falsified in both directions on the same
+    # split. Part A alone is measured FIRST: without the sibling, its citation
+    # of R3 has to be seen going red, or the clean set below proves only that
+    # some other change also made it quiet.
+    # ----------------------------------------------------------------------
+    doc = run("split-a-alone.md", SPLIT_A_SPEC)
+    expect("split-a-alone", doc, ["CITATION_UNKNOWN"])
+    unknown = [p.message for p in doc.problems if p.code == "CITATION_UNKNOWN"]
+    if unknown != ["cites R3, which this file does not define"]:
+        failures.append("split-a-alone: reported %s" % unknown)
+
+    documents = run_set("split-clean", [("split-a.md", SPLIT_A_SPEC),
+                                        ("split-b.md", SPLIT_B_SPEC)])
+    for doc in documents:
+        forbid("split-clean:" + doc.path, doc, ERROR)
+        forbid("split-clean:" + doc.path, doc, WARN)
+
+    # The stray citation. The union widens what resolves; it must not switch
+    # the check off, and the message must say what was actually searched.
+    documents = run_set("split-citation-unknown",
+                        [("split-a.md", SPLIT_A_STRAY),
+                         ("split-b.md", SPLIT_B_SPEC)])
+    expect("split-citation-unknown", documents[0], ["CITATION_UNKNOWN"])
+    unknown = [p.message for p in documents[0].problems
+               if p.code == "CITATION_UNKNOWN"]
+    if unknown != ["cites R9, which no spec file in this run defines"]:
+        failures.append("split-citation-unknown: reported %s" % unknown)
+
+    # R1 in both halves, each header counting its own file correctly. Before
+    # ID_DEFINED_TWICE this input was 0 errors, exit 0.
+    documents = run_set("split-duplicate", [("split-a.md", SPLIT_A_SPEC),
+                                            ("split-b.md", SPLIT_B_DUPLICATE)])
+    for doc in documents:
+        expect("split-duplicate:" + doc.path, doc, ["ID_DEFINED_TWICE"])
+        for problem in doc.problems:
+            if problem.code == "ID_DEFINED_TWICE" and problem.severity != ERROR:
+                failures.append("split-duplicate: ID_DEFINED_TWICE is %s, "
+                                "expected %s" % (problem.severity, ERROR))
+    # Named in BOTH directions: an id defined twice has no original, and a
+    # check that reported only the second copy would let the first file pass.
+    if not any("split-b.md line" in p.message for p in documents[0].problems):
+        failures.append("split-duplicate: part A does not name part B")
+    if not any("split-a.md line" in p.message for p in documents[1].problems):
+        failures.append("split-duplicate: part B does not name part A")
+
+    # INERT ON ONE FILE, which is what this repository is today. Both halves:
+    # the sibling index of a one-spec run is empty, and the same spec named
+    # twice on one command line is one file, not two definitions of every id.
+    documents = [load_document("split-a.md", SPLIT_A_SPEC, kind="spec")]
+    if siblings_for(spec_id_locations(documents), documents[0]):
+        failures.append("single-file: a one-spec run built a sibling index")
+    documents = run_set("split-same-file-twice",
+                        [("split-a.md", SPLIT_A_SPEC),
+                         ("split-a.md", SPLIT_A_SPEC)])
+    for doc in documents:
+        for problem in doc.problems:
+            if problem.code == "ID_DEFINED_TWICE":
+                failures.append("split-same-file-twice: %s" % problem.message)
+
+    # THE WIRING, through `main`, on real files. Every case above assembles the
+    # sibling index itself, and that is not the same assertion: deleting the
+    # `spec_id_locations` call from `main` was tried and left all of them
+    # green while a real two-file split went back to 0 errors and 29 false
+    # warnings. This is the only fixture here that touches the filesystem, and
+    # it is why -- a check reached only by the code under test is a check.
+    case("split-main-wiring")
+    import io
+    import os
+    import shutil
+    import tempfile
+    sandbox = tempfile.mkdtemp(prefix="validate-spec-selftest.")
+    try:
+        part_a = os.path.join(sandbox, "spec-a.md")
+        part_b = os.path.join(sandbox, "spec-b.md")
+        with open(part_a, "w", encoding="utf-8") as handle:
+            handle.write(SPLIT_A_SPEC)
+
+        def drive(argv):
+            captured = io.StringIO()
+            saved = sys.stdout
+            sys.stdout = captured
+            try:
+                status = main(argv)
+            finally:
+                sys.stdout = saved
+            return status, captured.getvalue()
+
+        with open(part_b, "w", encoding="utf-8") as handle:
+            handle.write(SPLIT_B_SPEC)
+        status, output = drive([part_a, part_b])
+        if status != EXIT_CLEAN or "0 error(s), 0 warning(s)" not in output:
+            failures.append("split-main-wiring: the clean split exited %d: %s"
+                            % (status, output.strip()))
+
+        with open(part_b, "w", encoding="utf-8") as handle:
+            handle.write(SPLIT_B_DUPLICATE)
+        status, output = drive([part_a, part_b])
+        if status != EXIT_FAILED:
+            failures.append("split-main-wiring: an id defined in both files "
+                            "exited %d, expected %d" % (status, EXIT_FAILED))
+        if output.count("ERROR ID_DEFINED_TWICE") != 2:
+            failures.append("split-main-wiring: %d ID_DEFINED_TWICE line(s), "
+                            "expected one per file: %s"
+                            % (output.count("ERROR ID_DEFINED_TWICE"),
+                               output.strip()))
+        # Single file, same content, through the same entry point: the check
+        # this repository actually runs today must be unreachable.
+        status, output = drive([part_b])
+        if "ID_DEFINED_TWICE" in output:
+            failures.append("split-main-wiring: a one-file run reported "
+                            "ID_DEFINED_TWICE: %s" % output.strip())
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+    # ----------------------------------------------------------------------
     # --format speckit. Four fixtures, one per thing the adapter can be wrong
     # about: the rules firing, a line no rule matched, nothing to adapt at all,
     # and a finding the adapter itself manufactured.
@@ -1688,6 +1993,7 @@ def self_test():
         adapter = None
 
     if adapter is not None:
+        case("speckit-clean")
         doc, adaptation = load_speckit("speckit-clean.md", SPECKIT_SPEC,
                                        adapter)
         check_document(doc)
@@ -1720,6 +2026,7 @@ def self_test():
                     "speckit: speckit_adapt.py matches %s; --format speckit "
                     "adapts in memory and must never write a file" % shape)
 
+        case("speckit-passthrough")
         doc, adaptation = load_speckit("speckit-passthrough.md",
                                        SPECKIT_PASSTHROUGH, adapter)
         check_document(doc)
@@ -1740,6 +2047,7 @@ def self_test():
             failures.append("speckit-passthrough: ID_MALFORMED reported at %s, "
                             "expected the source line %d" % (got, wanted))
 
+        case("speckit-no-fr")
         doc, adaptation = load_speckit(
             "speckit-no-fr.md",
             "# Feature Specification: X\n\n## Requirements *(mandatory)*\n\n"
@@ -1754,6 +2062,7 @@ def self_test():
         # `### Ubiquitous` heading this requirement is judged against, so the
         # mismatch is the adapter's and must not reach the reader -- but it has
         # to be shown firing first, or the drop proves nothing.
+        case("speckit-section")
         doc, adaptation = load_speckit("speckit-section.md",
                                        SPECKIT_SECTION_MISMATCH, adapter)
         check_document(doc)
@@ -1771,7 +2080,8 @@ def self_test():
             sys.stdout.write("SELF-TEST FAIL: " + failure + "\n")
         sys.stdout.write("self-test FAILED: %d problem(s)\n" % len(failures))
         return EXIT_SELFTEST
-    sys.stdout.write("self-test passed: 25 fixtures, 0 failures\n")
+    sys.stdout.write("self-test passed: %d fixtures, 0 failures\n"
+                     % len(fixtures))
     return EXIT_CLEAN
 
 
@@ -1929,15 +2239,38 @@ def main(argv):
             continue
         documents.append(load_document(path, text, kind=args.kind))
 
+    # The two cross-file checks need every spec document of the run in hand
+    # before any of them is checked, which is why loading and checking are
+    # separate passes. `index` is empty for a run holding one spec, so a
+    # single-file repository takes exactly the path it took before.
+    #
+    # NOT UNDER --format speckit. Adapter rule 3 renumbers each file's FR ids
+    # from R1 independently, so two adapted files collide on nearly every id
+    # and every collision would be the adapter's doing rather than the
+    # author's -- the same fairness rule that makes EARS_SECTION_MISMATCH n/a.
+    # Suppressed loudly rather than silently: a cross-file check that quietly
+    # did not run reads to a later reader as a cross-file check that passed.
+    specs = [d for d in documents if d.kind == "spec"]
+    index = {}
+    if speckit and len(specs) > 1:
+        out.write("speckit: %d spec files adapted in one run. The cross-file "
+                  "checks (ID_DEFINED_TWICE, and citations resolved against "
+                  "sibling spec files) were NOT applied: rule 7 synthesises "
+                  "each file's allocator and rule 3 renumbers each file's ids "
+                  "from R1, so ids from two spec-kit files are not comparable. "
+                  "Not applied is not a pass.\n" % len(specs))
+    elif not speckit:
+        index = spec_id_locations(documents)
+
     # The spec is checked first so a constitution given alongside it can have
     # its `Enforced by` ids resolved against real requirements.
-    spec = next((d for d in documents if d.kind == "spec"), None)
+    spec = specs[0] if specs else None
     if spec is not None:
-        check_spec(spec)
+        check_spec(spec, siblings=siblings_for(index, spec))
     for doc in documents:
         if doc is spec:
             continue
-        check_document(doc, spec=spec)
+        check_document(doc, spec=spec, siblings=siblings_for(index, doc))
 
     if args.baseline and spec is not None:
         baseline_text = None

@@ -90,6 +90,17 @@ directory and every directory starts again at `FR-001`, so `R1` in two feature
 directories is two different requirements. A `--baseline` comparison is only
 meaningful against an earlier copy of the same directory's `spec.md`.
 
+That scope is also why the two **cross-file** checks added on 2026-09-06 —
+`ID_DEFINED_TWICE`, and citations resolved against sibling spec files — are
+**not applied** under `--format speckit`. A Productizer spec split across
+several files is one spec with one id space; two spec-kit `spec.md` files are
+two id spaces that both start at `FR-001`, so every id would collide and every
+collision would be rule 3's doing rather than the author's. The same fairness
+rule that makes `EARS_SECTION_MISMATCH` `n/a`. A run given more than one
+spec-kit file prints the suppression on a `speckit:` line and says in it that
+not applied is not a pass; it is **not** counted in the `n/a` family total,
+which reports what `speckit_adapt.py` declares.
+
 ## Being fair to spec-kit
 
 Three corrections to easy but wrong readings, all of them checked rather than
@@ -190,7 +201,37 @@ observed, rather than argued from the code:
 | 4 (`:` → em dash) | 14 `ID_SEPARATOR` warnings where there were none. `--self-test` exit 0 → **3**. |
 
 Restoring each returned the run to exit 0 with one warning and the self-test to
-`25 fixtures, 0 failures`.
+`25 fixtures, 0 failures`, which is what `--self-test` printed when this
+section was written.
+
+**Re-observed 2026-09-06 — the self-test now prints `32 fixtures, 0 failures`.**
+The number above is left as it stands because it is a record of what was
+measured then, not a specification. Two things moved it, neither of them a
+change to the adapter or to any rule in the table:
+
+- **Six fixtures were added**, for the cross-file checks described under *Id
+  scope*: `ID_DEFINED_TWICE`, the citation union, the two directions of
+  inertness on a single file, and one fixture that drives `main` on real files
+  rather than assembling the sibling index itself. That last one earns its
+  place: deleting the index-building call from `main` was tried, and every
+  other new fixture stayed green while a real two-file split went back to
+  0 errors and 29 false warnings.
+- **The count is no longer typed.** `--self-test` derives it from a registry of
+  named cases, under a rule stated beside that registry: one entry per named
+  case, registered by `run`, `run_set` or an explicit `case(...)`; supporting
+  documents another case needs — a baseline, a spec a constitution resolves
+  against — are not cases. Under that rule the fixtures that existed before
+  this change count **26**, not 25. The 25 was a hand-maintained literal whose
+  counting rule was never written down, so the difference is a difference of
+  rule and is not evidence that a fixture was lost.
+
+What was **not** re-measured: the two rows in the table above and the
+`## Being fair to spec-kit` measurements were taken against an external spec-kit
+experiment corpus (`specs/001-archive-old-files/spec.md`) that is not in this
+repository, and it was not re-run. What was re-measured is that single-file
+`--format speckit` output is byte-identical to the same command at `8216ab6` —
+so nothing in this document's spec-kit behaviour changed, only the count on the
+last line of `--self-test`.
 
 ## Known limitations
 

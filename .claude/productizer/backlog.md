@@ -106,8 +106,12 @@ An item may name a Jira key. When it does:
   item's state disagree within a week, and the one people update is the one
   people look at.
 - **The mapping is declared once**, in `.claude/productizer/config.json` under
-  `jira.status_map`, so "In Progress" and "In Dev" resolve to the same thing
-  without anyone guessing per item.
+  `jira.status_map`, so "In Progress" and "In Review" resolve to the same
+  thing without anyone guessing per item. Both of those are statuses Jira
+  documents as defaults; the map also carries three that it does not, and
+  says so on the block itself. **Read your own project's statuses before
+  trusting any of it** — status NAMES are per project, and only the three
+  status CATEGORIES are stable across instances.
 - **Nothing is written back to Jira from here.** Reading is safe; writing puts
   this file in an argument with a workflow, a board and an automation rule that
   it will lose. Moving a Jira ticket happens in Jira.

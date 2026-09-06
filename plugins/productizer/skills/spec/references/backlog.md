@@ -60,6 +60,8 @@ An item may carry a Jira key, and when it does, **Jira owns its status**.
 - The local vocabulary stops applying. The row shows what Jira last said.
 - The mapping between Jira's workflow states and these five is declared once in
   `.claude/productizer/config.json` under `jira.status_map`, not guessed per item.
+  **The shipped map is a starting point that has never met a live Jira** — see
+  *The status map is unverified* below before you trust a row it produced.
 - **Nothing is written back.** This file does not move tickets. A markdown table
   arguing with a Jira workflow, a board filter and three automation rules loses,
   and it loses silently — the write appears to succeed and a rule reverts it an
@@ -76,6 +78,70 @@ An item may carry a Jira key, and when it does, **Jira owns its status**.
   `unknown (Jira unreachable <when>)`. A status shown without qualification is
   read as current, and a stale "In Progress" is worse than no status at all
   because someone will plan around it.
+
+## The status map is unverified
+
+**As of 2026-09-06 not one entry in the shipped `jira.status_map` has been run
+against a real Jira instance.** Eleven states are mapped and zero were tested.
+The template ships them because a map has to start somewhere, not because they
+were confirmed. Read them as a guess with a date on it.
+
+What *was* done on that date is a check against Atlassian's own documentation,
+which is enough to say three useful things.
+
+**One more thing to know before writing a consumer, measured 2026-09-06:**
+`status_map` carries **twelve** keys, not eleven. The twelfth is `_note`,
+the paragraph above living inside the block it documents. Nothing reads
+the map today — `status_map` appears only in these documents, the template
+and a generated page, in no `.sh` and no `.py` — so the extra key is inert.
+The first consumer written will iterate it and find a status named `_note`
+mapping to a wall of prose. Skip keys beginning `_`, or move the note out
+before you read the map; do not discover this from a backlog row that says
+an item is `_note`.
+
+**Status names are per project, so no shipped list can be right everywhere.**
+Atlassian's Jira Cloud platform OpenAPI
+(`developer.atlassian.com/cloud/jira/platform/swagger-v3.v3.json`, retrieved
+2026-09-06) documents `GET /rest/api/3/project/{projectIdOrKey}/statuses` as
+"Returns the valid statuses for a project. The statuses are grouped by issue
+type, as each project has a set of valid issue types and each issue type has a
+set of valid statuses." A status is scoped `PROJECT` or `GLOBAL`, and creating
+one takes any name up to 255 characters. Whatever your board calls its states,
+it is the map that has to move.
+
+**The category is the only thing stable across instances, and there are exactly
+three.** "All statuses, even custom statuses you create yourself, must belong to
+one of three status categories – To do, In progress, or Done."
+(`support.atlassian.com/jira-cloud-administration/docs/what-is-a-workflow-status/`,
+retrieved 2026-09-06). The same OpenAPI types `statusCategory` as a closed enum,
+`TODO | IN_PROGRESS | DONE`. That is why the map keys on names rather than
+categories: three categories cannot express `blocked` or `long-term`, and losing
+those two would cost more than the map's inaccuracy does. But it follows that an
+unmapped name is never *unknown* — it has a category, and the category answers.
+Fall back to `TODO → todo`, `IN_PROGRESS → in-progress`, `DONE → done`, and say
+on the row that the fallback was used, for the same reason an unreachable Jira
+is stated rather than rounded off.
+
+**Seven of the eleven are real defaults, three were invented, one is not a
+status at all.** Measured 2026-09-06 against Atlassian's list of the statuses
+that ship with Jira
+(`support.atlassian.com/jira-cloud-administration/docs/what-are-issue-statuses-priorities-and-resolutions/`):
+
+- **Named there:** `To Do`, `Backlog`, `Selected for Development`,
+  `In Progress`, `In Review`, `Done`, `Closed`.
+- **Not on that page:** `In Dev`, `On Hold`, `Blocked`. Plausible team
+  conventions, and an admin may well have created them — but Jira does not
+  supply them, so a repo that inherits these three has inherited somebody's
+  habits.
+- **Not a status:** `Won't Do`. That page lists "Won't do" under *resolutions*,
+  and spells it with a lower-case d. A resolution never appears where a status
+  name is compared, so the row cannot fire unless someone has separately made a
+  status by that name. It is kept rather than deleted because names are
+  arbitrary and deleting it would be its own guess.
+
+Matching is exact-string, and Atlassian's own pages spell one state both
+"In Progress" and "In progress" — which is the last argument for reading the
+project's statuses instead of trusting the eleven.
 
 See `references/integrations.md` for the binding, and `templates/jira-intent.md`
 for how an intent joins its ticket once work starts.

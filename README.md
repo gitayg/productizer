@@ -37,7 +37,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.52.0"`.
+`plugin.json` sets `"version": "4.53.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -187,8 +187,8 @@ organisation without each person toggling it:
    ships a check that enforces exactly that, and its own scripts are held to
    it. `scripts/contradiction-check.py --selftest` must stay at precision 1.00
    with no false positives, and `evals/solver-probe.py` must stay inside the
-   baseline CI gates it against — at least 8 caught, at most 1 missed, at most
-   0 false positives, at least 10 quiet, measured 2026-09-05. That step parses
+   baseline CI gates it against — at least 9 caught, at most 1 missed, at most
+   0 false positives, at least 10 quiet, measured 2026-09-06. That step parses
    the probe's counts rather than its exit status, because the probe always
    exits 0; a count whose line is missing from the output is treated as **not
    measured** and fails, never as a zero.
@@ -196,6 +196,10 @@ organisation without each person toggling it:
    first. It runs the existing spec checks and changes nothing: `0` clean, `1`
    findings, `2` a section could not run at all — which outranks findings,
    because a report with a hole in it has not found nothing, it has not looked.
+   It carries `--selftest` (32 cases, run by the workflow) and is deliberately
+   NOT a declared check: it calls a `WARN` a finding where `validate-spec.py`
+   exits 0, so gating on it would turn any pre-existing warning red and the
+   first thing anyone did would be to delete the step.
 2. Bump `version` in `plugins/productizer/.claude-plugin/plugin.json`.
    Nothing ships without this.
 3. Run `claude plugin validate ./plugins/productizer --strict` and

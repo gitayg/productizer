@@ -25,8 +25,8 @@ interventions on the checker it measures. WHAT EACH ONE DOES, MEASURED
 2026-09-06 ON THE TREE THIS FILE SHIPS IN — not what it was written to do:
 
     --break guards    disable the guard relation. THIS MOVES THE HALT COLUMN:
-                      true positives 8 -> 12, undecided 7 -> 3, recall
-                      0.89 -> 0.92. The guard relation is what holds this
+                      true positives 9 -> 12, undecided 6 -> 3, recall
+                      0.90 -> 0.92. The guard relation is what holds this
                       corpus's remaining misses at UNDECIDED, so disabling it
                       is the intervention that is live here. Precision does not
                       move (1.00, no negative flips), which is the part worth
@@ -64,6 +64,17 @@ two response clauses, and:
     pair. Four of them already fire on a shipped pair and are held at UNDECIDED
     by guard overlap (0%, 25%, 57%, 0%); P07 is the scope heuristic. The
     lexicon is not the binding constraint on any of them.
+
+    P14 WAS THE ONE OF THOSE FIVE THAT HAD A BINDING CONSTRAINT WORTH LIFTING,
+    and it was the guard side, exactly as the line above says. Its two guards -
+    *an account in arrears for more than 14 days* and *an enterprise account in
+    arrears for more than 30 days* - share 57% of their terms, so they read as
+    UNKNOWN, while the second ENTAILS the first: it says everything the first
+    says and its range on time sits inside the first's. `guard_entailment` in
+    contradiction-check.py now proves that with the interval arithmetic the
+    file already carried, and P14 convicts (2026-09-06). Nothing was added to
+    any lexicon to do it, which is what makes it consistent with the
+    enumeration above rather than a refutation of it.
   * P03, P05, P08 can be flipped, but only by pairs that are not oppositions:
     ('500','second') and ('under','two') for P03, ('every','caller') and
     ('before','identity') for P05, ('cents','minor') for P08. Declaring any of
@@ -80,7 +91,7 @@ true negative to a false positive on the way. So recall is lexicon-movable in
 principle and not by anything true. That is the evidence for withdrawing rather
 than re-pointing.
 
-WHAT IS LEFT IS STILL A LIVE PROBE. `--break guards` moves four cases from
+WHAT IS LEFT IS STILL A LIVE PROBE. `--break guards` moves three cases from
 UNDECIDED into the halt column, so the confusion matrix is demonstrably not a
 constant. The demonstration just runs through the ablation the old docstring
 called the control, and this file now says so.
@@ -316,7 +327,7 @@ def run(cc, brk: str | None) -> int:
 #                     every pair MISSING_PAIRS holds is already in the shipped
 #                     lexicon - and the confusion matrix is identical to the
 #                     un-ablated run.
-#   --break guards    MOVES THE HALT COLUMN, from 8 true positives to 12.
+#   --break guards    MOVES THE HALT COLUMN, from 9 true positives to 12.
 #
 # THE FIGURES BELOW DID NOT MOVE WHEN B40 CLOSED, AND THAT IS SAID PLAINLY
 # BECAUSE THE PREVIOUS VERSION OF THIS BLOCK PREDICTED THEY WOULD. It said
@@ -330,6 +341,15 @@ def run(cc, brk: str | None) -> int:
 # the two claims instead, no measured count changed, and this self-test is
 # green for the same reason it was green before: it pins BEHAVIOUR.
 #
+# THEY MOVED ON 2026-09-06, AND THIS IS WHAT MOVED THEM. `guard_entailment`
+# in contradiction-check.py proves that one guard entails the other when it
+# says everything the other says and its range on a shared dimension sits
+# inside the other's - P14's *more than 30 days* inside *more than 14 days*.
+# P14 leaves the undecided column and convicts: bare and break-lexicon go from
+# (8, 1, 0, 10, 7) to (9, 1, 0, 10, 6). `break-guards` does not move, because
+# disabling the guard relation already convicted P14. Nothing was added to any
+# lexicon, so B40's enumeration above is untouched by this.
+#
 # WHAT IS STILL TRUE OF THESE NUMBERS. They are a drift guard, not a
 # demonstration that the documented control holds - there is no longer a
 # documented control to hold. If they move, the checker underneath moved, and
@@ -341,9 +361,9 @@ def run(cc, brk: str | None) -> int:
 # case -> (true positives, false negatives, false positives, true negatives,
 #          undecided) as measured, plus a substring the run must print.
 _SELFTEST_MATRIX = {
-    "bare": ((8, 1, 0, 10, 7), "This is NOT the classifier's recall"),
+    "bare": ((9, 1, 0, 10, 6), "This is NOT the classifier's recall"),
     "break-guards": ((12, 1, 0, 10, 3), "BROKEN: guard relation disabled"),
-    "break-lexicon": ((8, 1, 0, 10, 7), "--break lexicon adds nothing"),
+    "break-lexicon": ((9, 1, 0, 10, 6), "--break lexicon adds nothing"),
 }
 
 _COUNT_RE = re.compile(
@@ -446,7 +466,7 @@ def selftest() -> int:
     print("  NOT ASSERTED: that either ablation is a control. It is not asserted because the "
           "module no longer claims it - B40 was closed on 2026-09-06 by withdrawing two "
           "inverted claims, not by making either ablation live. The matrix rows above pin what "
-          "the ablations measurably do, so a change is caught; `--break guards` moving four "
+          "the ablations measurably do, so a change is caught; `--break guards` moving three "
           "cases is what shows the matrix is not a constant.")
     if failed:
         sys.stderr.write("solver-probe: %d self-test case(s) did not produce the exit code or "
