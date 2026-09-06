@@ -353,6 +353,27 @@ concern is open with no ruling behind it, when a pending ruling is cited by
 nothing, and when a pending ruling is still wearing the template. A ruling that
 still reads like the template is a file, not an ask.
 
+## A check that counts what nobody is testing
+
+`check-selftest-coverage.sh` reads the tools the declared checks and the workflow actually
+invoke, then reports which carry a self-test and which of those anything runs. It exists because
+R39 obliges a check tool to carry a self-test and R40 obliges the suite to run it.
+
+It is red, and that is the point. Measured 2026-09-06: **4 of 32** repository check tools carry a
+self-test that answers, and **3 of those 4** are invoked by something. It names the other 28 one
+by one, and it reports ITSELF as an R40 finding rather than exempting the tool doing the counting.
+
+A subtlety worth knowing before you read the coverage line: a check that FAILS voids its own
+`spec_units` claim - `run-checks.sh` lists `fail` in `VOID_RUN` - so R39 and R40 still read
+`Missing` even though a check now names them. What changed is the reason, from *no check names
+this requirement* to *a check named it, came back red, and therefore measured nothing here*. The
+only route to `Partial` is writing the 28 self-tests. Nobody was looking; now something is.
+
+A tool that dispatches a self-test in a shape the scanner does not recognise reads as carrying
+none, which over-reports the shortfall - the safe direction, and stated rather than hidden. And
+R39's second clause, *reaches each exit code it can return*, is not measured at all: no self-test
+here reports which exit codes it drove.
+
 ## The system, drawn from the files that define it
 
 The Visualizer's first board is the architecture: the nine lifecycle stages with what each one

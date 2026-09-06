@@ -140,6 +140,17 @@ jobs:
 
       # Precision must stay at 1.00. A contradiction checker that halts on a
       # non-conflict gets switched off, and then nothing is checked.
+      - name: Acceptance rows — check-acceptance-rows self-test
+        # R40 obliges the suite to RUN the self-tests R39 obliges tools to carry.
+        # Measured 2026-09-06: three scripts parse a self-test flag -
+        # validate-spec.py, contradiction-check.py and this one - and this was the
+        # only one no declared check and no workflow step reached. A self-test
+        # nobody runs is a test that has never been observed failing, which is the
+        # thing this repository refuses to call evidence.
+        run: |
+          set -euo pipefail
+          bash plugins/productizer/skills/spec/scripts/check-acceptance-rows.sh --selftest
+
       - name: Solver — contradiction-check self-test
         if: ${{ !cancelled() }}
         run: |

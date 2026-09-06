@@ -1686,10 +1686,19 @@ checks:
   # which is the right asymmetry: a flag you can disagree with is cheap, and
   # not knowing is not.
   #
-  # NO `spec_units`, deliberately. Nothing in the spec demands suspect links
-  # yet, and claiming an id this check does not assert would take coverage
-  # away from the check that does. It is a mechanism the spec has not asked
-  # for; when it does, the claim goes here.
+  # `spec_units` ARRIVED WITH R41, AND ONLY THEN. This block used to say NO
+  # spec_units deliberately - "a mechanism the spec has not asked for; when it
+  # does, the claim goes here". R41 asked for it on 2026-09-06, in almost this
+  # check's words: an active requirement's sentence rewritten in place, and
+  # every artifact citing it whose own line has not changed since that rewrite
+  # reported suspect. So the claim goes here, and it is `Partial` rather than
+  # Covered for a reason this check already declared in its own limitations
+  # BEFORE the requirement existed: it compares against ONE base ref. R41 says
+  # "since that rewrite", which is a baseline PER REQUIREMENT at the commit
+  # that requirement's sentence last changed. A rewrite behind the single base
+  # ref reads here as the agreed text and raises nothing - demonstrated
+  # 2026-09-05 and written into R41's own acceptance row. Claiming Covered
+  # would put a verdict on the half this check is blind to.
   #
   # min_covered: 2 - the spec now AND the spec at the base. One covered path
   # means one version was read and the other was not, which is the run that
@@ -1712,6 +1721,33 @@ checks:
       fail: [1]        # a sentence moved under a citation whose own line did not
       refused: [2]     # no base, a shallow clone, a spec absent at the base, or a spec with no requirements
     coverage:
+      spec_units:
+        - id: R41
+          verdict: Partial
+          reason: >-
+            IT COMPARES AGAINST ONE BASE REF, and R41's "since that rewrite" needs a baseline
+            PER REQUIREMENT, at the commit that requirement's own sentence last changed. A
+            sentence rewritten BEFORE the base reads here as the agreed text and raises nothing,
+            so every artifact citing it stays unflagged. Demonstrated 2026-09-05 on a constructed
+            history and recorded in R41's acceptance row: with the default base the run exits 0
+            PASS reporting `sentence changed in place: 0` while a stale acceptance row goes
+            unreported, and the same tree with a base behind the rewrite exits 1 and flags it.
+            Two narrower gaps are unasserted too: clearing is per LINE, so a coverage claim whose
+            `- id: Rn` line never moves stays flagged when only the evidence beside it was
+            rewritten, and a citation naming no id - a paragraph quoting the sentence - is
+            invisible. Fixture and eval trees are excluded by path.
+          evidence: >-
+            Within one base ref it asserts the whole of R41's sentence. It resolves every active
+            requirement at HEAD and at the base, reports as `sentence changed in place` only
+            those whose id AND status are unchanged and whose normalised sentence moved - a
+            supersede or a withdrawal is routed to check-superseded-text.sh and counted
+            separately - then finds every tracked file citing a moved id and reports as SUSPECT
+            each citation whose OWN LINE did not change in the same range. Per-line clearing is
+            the load-bearing part and was found by running the fixture, not by reading: the
+            first version asked whether the FILE had been edited and cleared the
+            acceptance-criteria row - the primary dependant - because it lives in the spec, the
+            one file a rewrite guarantees was touched. An empty comparison is exit 2 in four
+            distinct ways and never a pass.
       from: stdout_paths
       pattern: '^(\S+)$'
       min_covered: 2
@@ -1722,3 +1758,123 @@ checks:
       - Fixture and eval trees are excluded because they carry their own specs with their own numbering. Measured on this repo, 81 tracked files match R3 and 19 are outside those trees.
       - Clearing is per line, so a coverage claim's `- id: Rn` line never moves and the claim stays flagged when only the evidence beside it is rewritten. The finding says the file was edited, which is the triage signal, not a clearance.
       - A citation that names no id - a paragraph quoting the sentence - is invisible.
+
+  # --- a self-test that exists, and a self-test that runs ---------------------
+  #
+  # R39 and R40, which were split from one intent because they are two
+  # obligations: R39 says a check tool shall CARRY a self-test, R40 says the
+  # suite shall RUN it. A tool carrying one nobody invokes satisfies the first
+  # and fails the second, and that is not a hypothetical - it is the state
+  # `check-acceptance-rows.sh` was in until 2026-09-06.
+  #
+  # THIS IS THE CHECK ON THE CHECKS, AND THE NUMBER IT REPORTS IS BAD. Measured
+  # 2026-09-06 at 1371af4: of the 31 tools in this repository that checks.yaml
+  # or the workflow invokes, 3 carry a self-test that answers. Twenty-eight do
+  # not. That is a real reading of this repository and the check is red on
+  # arrival because of it, deliberately: the maintainer chose R39's subject
+  # noun BROAD over narrow knowing this number, and the red is the work queue.
+  #
+  # WHAT THAT RED COSTS, STATED RATHER THAN DISCOVERED. `block` on a
+  # twenty-eight-item pre-existing condition is the shape this repo has already
+  # been burned by once - the CI comment on `validate-spec.py --strict` says a
+  # step that fails on a pre-existing condition is a step somebody deletes. It
+  # is still `block`, for two reasons. The measurement is UNAMBIGUOUS, unlike
+  # `suspect-links`, which is `advise` precisely because it cannot tell a typo
+  # from an inversion: a tool either dispatches on a self-test flag or it does
+  # not, and the run proves it by executing the flag. And the severity changes
+  # nothing about today's verdict anyway - a failing check voids its own
+  # `spec_units`, so R39 and R40 land back on `Missing` and `spec_coverage:
+  # require` refuses whatever this line says. Severity here is a statement
+  # about what the shortfall MEANS, and an unrun self-test is not advice.
+  #
+  # IT DOES NOT EXEMPT ITSELF, AND ITS OWN NAME IS IN ITS OWN OUTPUT. The
+  # command below runs the MEASUREMENT, not the self-test, so this tool reports
+  # itself as a carried self-test that nothing reaches - one of the R40
+  # findings, on the very first run. Closing it is one workflow step, exactly
+  # like the one that closed `check-acceptance-rows.sh`. It is left open here
+  # because `.github/workflows/checks.yml` had another writer at the time this
+  # was landed, and a verifier that writes itself out of its own denominator to
+  # look better is the defect this whole stage exists to refuse.
+  #
+  # BOTH CLAIMS ARE `Partial` AND BOTH SAY WHY. R39's "reaches each exit code
+  # it can return" is NOT measured at all - no self-test in this repository
+  # reports which exit codes it drove, and inventing a reporting protocol
+  # silently here would produce a claim with no assertion under it. R40 is read
+  # off the two files that decide what executes rather than observed executing.
+  #
+  # min_covered: 20 - the two config files plus the tools. The tool set is 31
+  # today; a run reporting fewer than twenty paths has had its enumeration
+  # collapse, and a collapsed enumeration is the run that reports a small
+  # shortfall because it looked at almost nothing.
+  - id: selftest-coverage
+    why: a self-test nobody runs has never been observed failing, and a check tool with no self-test at all is a verdict this repo has never seen go red - both are the hollow green every other check here exists to refuse, aimed at the checks themselves
+    when:
+      always: true
+    severity: block
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh
+      - ./plugins/productizer/skills/spec/scripts/selftest-coverage.py
+      - python3
+    version_command: [./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a tool with no self-test, or a self-test nothing runs
+      refused: [2]     # no python3, no PyYAML, an unparseable or empty checks.yaml or workflow, or a self-test that did not answer inside the budget
+    coverage:
+      spec_units:
+        - id: R39
+          verdict: Partial
+          reason: >-
+            THE SECOND CLAUSE IS NOT MEASURED. R39 says "a self-test that REACHES EACH EXIT CODE
+            it can return"; this asserts only that a self-test exists and answers. No self-test
+            in this repository reports which exit codes it drove, so there is nothing to read,
+            and inventing a reporting protocol here would be a claim with no assertion under it.
+            Second gap: the structural NEGATIVES are never executed, so a tool dispatching a
+            self-test in a shape the scanner does not recognise reads as carrying none - it
+            over-reports the shortfall, which is the safe direction and still a wrong line.
+            Third: third-party tools the suite invokes, `shellcheck` today, are rendered n/a and
+            excluded from the shortfall, because nobody here can add a self-test to one.
+          evidence: >-
+            Enumerates the tools the suite actually invokes from the two files that decide it -
+            every `command` argv in this file, and every token in a workflow `run:` block that
+            resolves to a repository .sh or .py - then measures each one twice. Structurally: a
+            NON-COMMENT line that DISPATCHES on the flag, a `case` pattern, a comparison or an
+            argparse entry. Then by EXECUTION: every structural positive is run with the flag,
+            and a parser that rejects it - exit 2 with an unknown-option line - overrides the
+            source, because the parser is what runs. Both halves are load-bearing and were
+            falsified: dropping the dispatch-shape rule makes `evals/solver-probe.py` read as
+            carrying a self-test on the strength of a line that invokes somebody else's, and
+            dropping the rejection override makes a tool that refuses the flag count as covered.
+            Measured on this repo 2026-09-06: 3 of 31 carry one that answers.
+        - id: R40
+          verdict: Partial
+          reason: >-
+            IT READS THE TWO FILES THAT DECIDE WHAT EXECUTES; IT DOES NOT WATCH AN EXECUTION. A
+            self-test counts as run when its tool and its flag appear together in a declared
+            check's argv or on one line of a workflow `run:` block. A declared check whose tool
+            is missing at run time reads as reached here while running nothing, and a self-test
+            invoked from anywhere else - a Makefile, a hook, a person - is invisible. It reads
+            ONE checks.yaml and ONE workflow. And the obligation is vacuous for a tool with no
+            self-test to run: that shortfall is R39's, counted there and not here, so this
+            verdict says nothing about the 28 tools R39 reports.
+          evidence: >-
+            For every self-test found, asserts something invokes it AND that its failure can
+            still set the run's exit code - for a declared check, that no non-zero code sits in
+            `exit_codes.pass`; for the workflow, no `continue-on-error` and no `||` guarding the
+            call. A check that runs a self-test and swallows its failure is not running it. Both
+            halves falsified against a committed corpus: removing the reachability test takes
+            the `unreached` case from exit 1 to exit 0, and removing the swallow test takes the
+            `swallowed` case from exit 1 to exit 0. A self-test that does not answer inside the
+            budget is `?` and exits 2 - unmeasured - and is never counted as a tool without one.
+      from: stdout_paths
+      pattern: '^(\S+)$'
+      min_covered: 20
+    limitations:
+      - R39's "reaches each exit code it can return" is not measured at all, and the claim is Partial for it. The only self-test here that demonstrates the clause is this check's own, which drives 10 cases across exit 0, 1 and 2.
+      - Reachability is static. It reads checks.yaml and one workflow file; an invocation from a Makefile, a git hook or a person is invisible, and a declared check whose tool is absent at run time still reads as reaching the self-test it names.
+      - Structural negatives are never executed. A tool dispatching a self-test in an unrecognised shape reads as carrying none, which over-reports the shortfall rather than hiding it.
+      - Third-party tools are n/a, not findings. `shellcheck` is a check tool the suite invokes and nobody here can give it a self-test; it is named and counted separately so neither number contaminates the other.
+      - It reports ITSELF as a self-test nothing reaches, because the declared command runs the measurement and not the self-test. That finding is real and is left standing rather than exempted.
