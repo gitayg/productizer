@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# spec-requirements.sh [--version] [--help] <spec-file>
+# spec-requirements.sh [--version] [--help] [--selftest] [--require-records]
+#                      <spec-file>
 #
 # Parses the `## Requirements` section of a living spec and emits one TSV
 # record per requirement DEFINITION:
@@ -42,28 +43,150 @@
 #
 # EXIT CODES ARE THE CONTRACT.
 #
-#   0  parsed. Zero records is a legitimate parse of a spec with no
-#      requirements, and it is the CALLER's job to refuse that as unmeasured
-#      rather than to read it as nothing wrong.
+#   0  parsed, and something was found. Without `--require-records` a zero
+#      record parse is also a 0: it is a legitimate parse of a spec with no
+#      requirements, and refusing it is the CALLER's job. That division of
+#      responsibility is kept, because every caller in this repository reads
+#      any non-zero as "the parser refused" and dies unmeasured on it.
 #   2  could not run - bad usage, or a file that could not be read.
+#   3  --selftest failed.
+#   4  NOT MEASURED. `--require-records` was asked for and the parse found
+#      nothing: the file was read end to end and no requirement in it was
+#      understood. Opt-in, never the default.
 #
 # There is no exit 1: this parser has no opinion about what it read.
+#
+# THE SHARED CONVENTION, AND WHY IT IS A FLAG. `contradiction-check.py` carries
+# the same one, spelled the same way: `--require-records`, and exit 4 for a
+# clean parse that understood nothing. 4 is not a new number - it is
+# `validate-spec.py`'s EXIT_UNMEASURED, which already answers the identical
+# question with the identical code and the sentence "a file that was not read
+# has not passed". Three tools that read requirement sentences now say
+# "understood nothing" the same way.
+#
+# It is opt-in rather than the default because a parsed-nothing is only WRONG
+# when the caller expected something. This parser is pointed at fixtures and at
+# historical revisions where an empty parse is the expected answer, and making
+# 4 the default would turn those into refusals. Measured before choosing: all
+# 21 committed revisions of this repository's own spec.md parse non-empty, but
+# fixtures that callers do parse (`fixtures/nothing-merged/intent.md`,
+# `fixtures/unmeasured-report/runner/spec.md`) parse to zero records legitimately.
+#
+# A CALLER THAT MEANT "A SPEC" SHOULD PASS THE FLAG. Reading a bare exit 0 as
+# a pass over a file whose format this parser did not recognise - a spec-kit
+# spec, say - is a green over a file nothing understood, which is the shape
+# R15 and R26 exist to block.
 set -euo pipefail
 
-VERSION="spec-requirements 1.0"
+# 1.1 added --require-records and the self-test that drives it. The record
+# format and the default exit codes are unchanged from 1.0.
+VERSION="spec-requirements 1.1"
 
 usage() {
-  printf 'usage: spec-requirements.sh [--version] [--help] <spec-file>\n'
+  printf 'usage: spec-requirements.sh [--version] [--help] [--selftest]\n'
+  printf '                            [--require-records] <spec-file>\n'
   printf '  Emits: <id> TAB <line> TAB <status> TAB <target> TAB <text>\n'
+  printf '  --require-records  exit 4 when the parse found nothing\n'
 }
 
 die_unmeasured() { printf 'spec-requirements: %s\n' "$1" >&2; exit 2; }
 
+# --------------------------------------------------------------------------
+# SELF-TEST. R39: every exit code this parser can return is driven here, and
+# the ones the `--require-records` convention added - a 4 for a clean parse
+# that understood nothing, and the 0 that must still come back when the same
+# file DOES hold requirements - are the reason it exists. Each case names the
+# exit code it expects, so a case that stops driving one is visible rather
+# than quietly passing on a different code. Exit 3 when a case disagrees.
+#
+# It re-invokes this file rather than calling the parser in-process: what a
+# caller sees is a process exit status, and an in-process test of the awk
+# program would not have caught a flag the argument loop never reached.
+SELF="${BASH_SOURCE[0]}"
+ST_DIR=""
+ST_FAILS=0
+ST_TOTAL=0
+
+st_case() {
+  # st_case <name> <expected-exit> <expected-records> [args...]
+  local name="$1" want_rc="$2" want_n="$3"
+  shift 3
+  local rc=0 n=0
+  ST_TOTAL=$((ST_TOTAL + 1))
+  bash "$SELF" "$@" > "$ST_DIR/out" 2> "$ST_DIR/err" || rc=$?
+  n="$(awk 'END { print NR }' "$ST_DIR/out")"
+  if [ "$rc" -eq "$want_rc" ] && [ "$n" -eq "$want_n" ]; then
+    printf '  ok    %-46s exit %s, %s records\n' "$name" "$rc" "$n"
+    return 0
+  fi
+  ST_FAILS=$((ST_FAILS + 1))
+  printf '  FAIL  %-46s exit %s (wanted %s), %s records (wanted %s)\n' \
+    "$name" "$rc" "$want_rc" "$n" "$want_n"
+  sed 's/^/          stderr: /' "$ST_DIR/err"
+  return 0
+}
+
+selftest() {
+  ST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/spec-requirements-selftest.XXXXXX")" ||
+    die_unmeasured "could not create a temporary directory for the self-test"
+  trap 'rm -rf "$ST_DIR"' EXIT HUP INT TERM
+
+  # A spec this parser understands.
+  {
+    printf '## Requirements\n\n'
+    printf -- '- **R1** \342\200\224 When an intent arrives, the lifecycle shall classify it.\n'
+    printf -- '- **R2** \342\200\224 The lifecycle shall hold one living spec.\n'
+  } > "$ST_DIR/good.md"
+
+  # A file shaped like a foreign spec: headings this parser has no grammar
+  # for, and not one line it can read as a requirement. This is the case the
+  # flag exists for - a real spec-kit spec parses to exactly this, zero
+  # records with nothing on stderr.
+  {
+    printf '# Feature Specification: Archive old files\n\n'
+    printf '## User Scenarios & Testing\n\n'
+    printf -- '- **FR-001**: System MUST archive files older than the threshold.\n'
+    printf -- '- **FR-002**: System MUST skip symbolic links.\n'
+  } > "$ST_DIR/foreign.md"
+
+  printf 'spec-requirements self-test\n\n'
+  st_case "a spec with requirements"                 0 2 "$ST_DIR/good.md"
+  st_case "the same spec, --require-records"         0 2 --require-records "$ST_DIR/good.md"
+  st_case "a foreign file, default"                  0 0 "$ST_DIR/foreign.md"
+  st_case "a foreign file, --require-records"        4 0 --require-records "$ST_DIR/foreign.md"
+  st_case "a file that is not there"                 2 0 "$ST_DIR/absent.md"
+  st_case "not there, --require-records"             2 0 --require-records "$ST_DIR/absent.md"
+  st_case "no file given"                            2 0
+  st_case "two spec files"                           2 0 "$ST_DIR/good.md" "$ST_DIR/foreign.md"
+  st_case "an option this parser does not know"      2 0 --nonsense "$ST_DIR/good.md"
+
+  # The refusal must SAY it was not measured, or a caller reading the log
+  # cannot tell 4 from any other non-zero.
+  ST_TOTAL=$((ST_TOTAL + 1))
+  local rc=0
+  bash "$SELF" --require-records "$ST_DIR/foreign.md" > "$ST_DIR/out" 2> "$ST_DIR/err" || rc=$?
+  if grep -q 'NOT MEASURED' "$ST_DIR/err"; then
+    printf '  ok    %-46s exit %s\n' "the 4 names itself NOT MEASURED" "$rc"
+  else
+    ST_FAILS=$((ST_FAILS + 1))
+    printf '  FAIL  %-46s exit %s, stderr said: %s\n' \
+      "the 4 names itself NOT MEASURED" "$rc" "$(cat "$ST_DIR/err")"
+  fi
+
+  printf '\n%s of %s cases held\n' "$((ST_TOTAL - ST_FAILS))" "$ST_TOTAL"
+  [ "$ST_FAILS" -eq 0 ] || return 3
+  return 0
+}
+
 FILE=""
+REQUIRE_RECORDS=0
+SELFTEST=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
+    --selftest) SELFTEST=1; shift ;;
+    --require-records) REQUIRE_RECORDS=1; shift ;;
     -*) printf 'spec-requirements: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *)
       [ -z "$FILE" ] || die_unmeasured "one spec file at a time; got a second argument"
@@ -71,9 +194,19 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "$SELFTEST" -eq 1 ]; then
+  [ -z "$FILE" ] || die_unmeasured "--selftest takes no spec file"
+  # Captured on the same line: `set -e` would otherwise carry a failing case
+  # out of the function before the status could be read back.
+  ST_RC=0
+  selftest || ST_RC=$?
+  exit "$ST_RC"
+fi
+
 [ -n "$FILE" ] || die_unmeasured "no spec file given"
 [ -f "$FILE" ] && [ -r "$FILE" ] || die_unmeasured "cannot read $FILE"
 
+parse_file() {
 awk '
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
 
@@ -150,4 +283,25 @@ curid != "" {
 }
 
 END { emit() }
-' "$FILE"
+' "$1"
+}
+
+if [ "$REQUIRE_RECORDS" -eq 0 ]; then
+  # Unchanged from every release before this flag existed: the records go
+  # straight to stdout and awk's own status is the script's.
+  parse_file "$FILE"
+  exit $?
+fi
+
+OUT="$(mktemp "${TMPDIR:-/tmp}/spec-requirements.XXXXXX")" ||
+  die_unmeasured "could not create a temporary file to count the records in"
+trap 'rm -f "$OUT"' EXIT HUP INT TERM
+parse_file "$FILE" > "$OUT"
+cat "$OUT"
+RECORDS="$(awk 'END { print NR }' "$OUT")"
+if [ "$RECORDS" -eq 0 ]; then
+  printf 'spec-requirements: %s\n' \
+    "$FILE parsed cleanly and no requirement in it was understood. --require-records was asked for, so this is NOT MEASURED and not an empty spec. A file that was not read has not passed." >&2
+  exit 4
+fi
+exit 0

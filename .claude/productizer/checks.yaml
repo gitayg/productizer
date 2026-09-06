@@ -1890,3 +1890,70 @@ checks:
       - Structural negatives are never executed. A tool dispatching a self-test in an unrecognised shape reads as carrying none, which over-reports the shortfall rather than hiding it.
       - Third-party tools are n/a, not findings. `shellcheck` is a check tool the suite invokes and nobody here can give it a self-test; it is named and counted separately so neither number contaminates the other.
       - It reports ITSELF as a self-test nothing reaches, because the declared command runs the measurement and not the self-test. That finding is real and is left standing rather than exempted.
+
+  # --- the retrieval budget, which nothing ran until now -------------------
+  #
+  # `retrieval-budget.sh` was calibrated against the model's own tokeniser and
+  # on 2026-09-06 produced its first real figure about this repository: ten
+  # prompts, budgets 124 to 1532 characters against a 29751-byte spec, all in
+  # band, byte-identical across four runs including under a different timezone
+  # and locale. The prompt set and the baseline were committed. Nothing
+  # invoked it. A recorded baseline that only moves when somebody remembers to
+  # run the tool by hand is a number with no gate under it, which is the same
+  # hollow green every other check in this file exists to refuse - the
+  # measurement simply happened to be aimed at the spec rather than at a tool.
+  #
+  # THE BAND IS A MEASUREMENT, NOT A TARGET. +/-20% around figures taken from
+  # this spec at this commit. The remedy for a legitimate move - a requirement
+  # inserted above a target, a term that starts matching more of the file - is
+  # a deliberate `--record` in a diff somebody signs, not a wider band. A band
+  # widened to make a red go green measures nothing at all.
+  #
+  # `mix` is recorded beside every budget and is NEVER banded: nothing has
+  # measured what a healthy markup-and-code percentage is, so a pass or fail
+  # on it would be invented. It exists so a content shift under a flat
+  # character budget is visible instead of silent.
+  #
+  # SEVERITY IS `block`, deliberately. An advisory number is one nobody reads
+  # and nobody defends; this repository's own record is that an unread
+  # advisory failure is the hollow green. The cost is real - a spec edit can
+  # turn this red - and that is the check working.
+  - id: retrieval-budget
+    why: the spec's retrieval cost had been measured once and gated by nothing, so it could double between two commits and every run would still be green
+    when:
+      always: true
+    severity: block
+    # ONLY THE SCRIPT. `awk` is refused in every argv position by this
+    # runner - it takes its program as a positional argument, so no rule can
+    # tell a safe awk from an arbitrary one - and the tool fails loudly on its
+    # own if awk is not there.
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/retrieval-budget.sh
+    version_command: [./plugins/productizer/skills/spec/scripts/retrieval-budget.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/retrieval-budget.sh]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [4]        # out of band, a target the spec no longer holds, or a fallback to a full scan
+      refused: [2, 3, 5, 6]  # usage or a malformed prompt set; no spec; no baseline recorded; no prompt set
+    coverage:
+      # `stdout_count`, and the number counted is the prompts the run actually
+      # measured - the `of N` on its own summary line. Not a path count: this
+      # tool reads one spec and reports ten figures from it, so a set of paths
+      # would be a set of one and would say nothing about whether the eval ran.
+      # A floor of 10 is the committed prompt set: a prompt silently deleted
+      # takes the count below it and the check refuses rather than passing on
+      # a shrunken eval.
+      from: stdout_count
+      pattern: '^in-band \d+\s+red \d+\s+no-baseline \d+\s+of (\d+)$'
+      min_covered: 10
+      # NO `spec_units`. This check asserts no requirement in the spec, and
+      # claiming one it does not prove is the exact defect the rest of this
+      # file is built against. There is no requirement about retrieval cost
+      # today; if one is written, the claim belongs here and not before.
+    limitations:
+      - It claims no requirement. Nothing in the spec obliges a retrieval budget, so this check names none rather than borrowing one it does not assert.
+      - The unit is characters, a PROXY for a token budget calibrated at 3.79-4.31 bytes per token on candidate runs, and no factor is applied. A spec that starts quoting interfaces in fenced blocks moves its real retrieval cost by up to 82% at an unchanged character count; that is why `mix` is printed, and `mix` is not banded.
+      - The proxy models retrieval as substring search then read-in-file-order. An agent that greps differently, or reads a section rather than a line, costs something this does not measure.
+      - The band is a percentage around a recorded baseline. It cannot tell a budget that grew because the spec grew from one that grew because retrieval got worse; both are red, and which it was is read off the table by hand.

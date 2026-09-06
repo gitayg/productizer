@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # retrieval-budget.sh [repo-root] [--record] [--band PCT] [--prompts PATH] [--baseline PATH]
+# retrieval-budget.sh --selftest | --version | --help
 #
 # The regression eval for spec retrieval: fixed prompts, each naming the one
 # requirement it must reach, and a measurement of how much of the spec has to be
@@ -103,6 +104,13 @@
 #       4 out of band, target missing, or full scan - the check is RED
 #       5 no baseline recorded - not a pass, and not a zero
 #       6 no prompt set - nothing to measure
+#
+# --selftest drives every one of those six codes over fixtures built under
+# `mktemp -d`, and asserts both that each case exits the code it declares and
+# that the set of codes reached is the whole documented set. `--self-test` is
+# an alias. Nothing in the repository is read or written by it - in particular
+# not the committed prompt set or baseline. Its own exits: 0 every case held,
+# 1 one did not or a documented code was never reached, 2 it could not run.
 set -euo pipefail
 
 # Byte semantics for awk's length() and for every comparison below. Without it
@@ -110,8 +118,18 @@ set -euo pipefail
 # a regression eval may not do.
 export LC_ALL=C
 
+# Resolved before anything cds anywhere, because the self-test drives its
+# cases through this same file and `$0` is relative for most callers.
+SELF="$(cd -P "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+
+# A blocking check records the version of the tool that produced its verdict,
+# so a silent regression in this file is visible as a diff rather than as an
+# unchanged green.
+VERSION="retrieval-budget 1.0"
+
 ROOT=""
 RECORD=0
+SELFTEST=0
 BAND=20
 PROMPTS=""
 BASELINE=""
@@ -124,11 +142,201 @@ while [ $# -gt 0 ]; do
     --prompts=*)  PROMPTS="${1#--prompts=}"; shift ;;
     --baseline)   BASELINE="${2:-}"; [ -n "$BASELINE" ] || { echo "retrieval-budget: --baseline needs a path" >&2; exit 2; }; shift 2 ;;
     --baseline=*) BASELINE="${1#--baseline=}"; shift ;;
+    --selftest|--self-test) SELFTEST=1; shift ;;
+    --version)    printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help)    echo "usage: retrieval-budget.sh [repo-root] [--record] [--band PCT] [--prompts PATH] [--baseline PATH]"; exit 0 ;;
     -*)           echo "retrieval-budget: unknown option: $1" >&2; exit 2 ;;
     *)            [ -z "$ROOT" ] || { echo "retrieval-budget: only one repo-root" >&2; exit 2; }; ROOT="$1"; shift ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest: drive the whole exit-code contract over throwaway fixtures.
+#
+# R39 obliges a check tool to carry a self-test that REACHES EACH EXIT CODE it
+# can return, and this tool documents six: 0, 2, 3, 4, 5 and 6. So the cases
+# below are organised by exit code rather than by feature, and the run asserts
+# two separate things - that every case exited the code its line declares, AND
+# that the set of codes actually reached is the whole documented set. The
+# second assertion is the one that catches a contract growing a seventh code
+# nobody drove.
+#
+# NOTHING IN THE REPOSITORY IS READ OR WRITTEN. Every fixture is a spec, a
+# prompt set and a baseline built under `mktemp -d` and removed on every exit
+# path, signal included. The committed prompt set and the committed baseline
+# are never opened here: a self-test that re-records the baseline it is meant
+# to be protecting would launder a regression into a new normal.
+#
+# EXIT CODES OF THE SELF-TEST ITSELF: 0 every case held, 1 at least one did
+# not or a documented code was never reached, 2 the self-test could not run -
+# no temporary directory. That last one is a guard and is NOT driven by any
+# case below, which is said again in the NOT ASSERTED line the run prints.
+# ---------------------------------------------------------------------------
+if [ "$SELFTEST" -eq 1 ]; then
+  SCRATCH="$(mktemp -d)" || { echo "retrieval-budget: cannot create a temporary directory, so no case was driven" >&2; exit 2; }
+  trap 'rm -rf "$SCRATCH"' EXIT HUP INT TERM
+
+  # A fixture spec. The `pad` candidate lines sit ABOVE the target, so a budget
+  # can be made to rise or fall without touching the prompt set - which is how
+  # both out-of-band directions are driven without retuning a single term.
+  write_spec() { # write_spec <dir> <pad-lines>
+    mkdir -p "$1/.claude/productizer"
+    {
+      echo '# fixture spec'
+      echo
+      j=0
+      while [ "$j" -lt "$2" ]; do
+        echo "- Note $j about the login session, here to widen the candidate scan."
+        j=$((j + 1))
+      done
+      echo
+      echo '- **R1** - When a session ends, the lifecycle shall expire the login session.'
+      echo
+      echo '- **R2** - The lifecycle shall report an absent tool as missing.'
+    } > "$1/.claude/productizer/spec.md"
+  }
+
+  write_prompt() { # write_prompt <dir> <id> <target> <terms>
+    mkdir -p "$1/.claude/productizer"
+    { printf '# id\ttarget\tterms\n'; printf '%s\t%s\t%s\n' "$2" "$3" "$4"; } \
+      > "$1/.claude/productizer/retrieval-prompts.tsv"
+  }
+
+  CASES=0
+  UPHELD=0
+  REPORT=""
+  CODES=""
+
+  # Each case is driven through THIS file, so the argument handling and the
+  # guards ahead of the measurement are on the path too. `|| got=$?` because
+  # most of these exit non-zero on purpose and `set -e` would otherwise end the
+  # run at the first one - right exit code, nothing reported.
+  drive() { # drive <name> <expected> <reason> [argv...]
+    name="$1"; expected="$2"; reason="$3"; shift 3
+    got=0
+    bash "$SELF" "$@" > "$SCRATCH/$name.out" 2> "$SCRATCH/$name.err" || got=$?
+    CASES=$((CASES + 1))
+    if [ "$got" = "$expected" ]; then
+      UPHELD=$((UPHELD + 1)); verdict="held"
+    else
+      verdict="NOT HELD"
+    fi
+    CODES="$CODES$got
+"
+    REPORT="$REPORT      $name  expected $expected  got $got  $verdict  $reason
+"
+  }
+
+  # --- 0: usage, a recorded baseline, and a spec inside its own band --------
+  drive help 0 "--help prints the usage line and exits 0" --help
+  drive version 0 "--version states which build produced a verdict, and exits 0" --version
+
+  OK_DIR="$SCRATCH/in-band"
+  write_spec "$OK_DIR" 2
+  write_prompt "$OK_DIR" login R1 "login session expiry"
+  drive no-baseline 5 "budgets measured and nothing compared - not a pass, and not a zero" "$OK_DIR"
+  drive record 0 "--record writes a baseline for every prompt that reached its target" "$OK_DIR" --record
+  drive in-band 0 "the same spec read against its own baseline is in band" "$OK_DIR"
+
+  ALT_DIR="$SCRATCH/alt-paths"
+  write_spec "$ALT_DIR" 2
+  mkdir -p "$ALT_DIR/evals"
+  { printf '# id\ttarget\tterms\n'; printf 'login\tR1\tlogin session expiry\n'; } > "$ALT_DIR/evals/p.tsv"
+  drive record-alt 0 "premise for alt-paths: the = forms record to the paths they name" \
+    "$ALT_DIR" --record --prompts=evals/p.tsv --baseline=evals/b.tsv
+  drive alt-paths 0 "--prompts=, --baseline= and --band= read and band the files they name" \
+    "$ALT_DIR" --prompts=evals/p.tsv --baseline=evals/b.tsv --band=25
+
+  # --- 4: out of band both ways, a missing target, a full scan, a refusal ---
+  HIGH_DIR="$SCRATCH/out-high"
+  write_spec "$HIGH_DIR" 2
+  write_prompt "$HIGH_DIR" login R1 "login session expiry"
+  drive record-high 0 "premise for out-of-band-high: a baseline taken on the narrow spec" "$HIGH_DIR" --record
+  write_spec "$HIGH_DIR" 40
+  drive out-of-band-high 4 "forty more candidate lines above the target puts the budget over +20%" "$HIGH_DIR"
+
+  LOW_DIR="$SCRATCH/out-low"
+  write_spec "$LOW_DIR" 40
+  write_prompt "$LOW_DIR" login R1 "login session expiry"
+  drive record-low 0 "premise for out-of-band-low: a baseline taken on the wide spec" "$LOW_DIR" --record
+  write_spec "$LOW_DIR" 0
+  drive out-of-band-low 4 "the same candidate lines removed puts the budget under -20%" "$LOW_DIR"
+
+  GONE_DIR="$SCRATCH/target-missing"
+  write_spec "$GONE_DIR" 2
+  write_prompt "$GONE_DIR" ghost R9 "login session expiry"
+  drive target-missing 4 "a target that is not in the spec is red and prints a word, never a number" "$GONE_DIR"
+  drive record-refused 4 "--record over a prompt that cannot retrieve refuses, rather than making the failure the norm" "$GONE_DIR" --record
+
+  SCAN_DIR="$SCRATCH/full-scan"
+  write_spec "$SCAN_DIR" 2
+  write_prompt "$SCAN_DIR" scan R2 "login session expiry"
+  drive full-scan 4 "a target line matching no term is a fallback to reading the whole file, and fails whatever the band" "$SCAN_DIR"
+
+  # --- 6: nothing to measure ------------------------------------------------
+  NOPROMPT_DIR="$SCRATCH/no-prompts"
+  write_spec "$NOPROMPT_DIR" 2
+  drive no-prompt-set 6 "a spec with no prompt set beside it measured nothing, which is not a pass" "$NOPROMPT_DIR"
+
+  BLANK_DIR="$SCRATCH/blank-prompts"
+  write_spec "$BLANK_DIR" 2
+  printf '# only a comment\n\n' > "$BLANK_DIR/.claude/productizer/retrieval-prompts.tsv"
+  drive empty-prompt-set 6 "a prompt set of blanks and comments holds no prompt to measure" "$BLANK_DIR"
+
+  # --- 3: no spec to retrieve from ------------------------------------------
+  NOSPEC_DIR="$SCRATCH/no-spec"
+  mkdir -p "$NOSPEC_DIR"
+  drive no-spec 3 "a directory with no spec is nothing to retrieve from, not a budget of zero" "$NOSPEC_DIR"
+  drive no-such-directory 3 "a root that cannot be entered is refused before anything is measured" "$SCRATCH/absent-root"
+
+  # --- 2: usage, and a prompt set that is not the declared shape ------------
+  drive band-not-a-number 2 "--band takes a whole percentage" "$OK_DIR" --band abc
+  drive band-over-100 2 "a band above 100 leaves no lower bound at all" "$OK_DIR" --band 150
+  drive band-without-value 2 "--band with nothing after it is a usage error, never a silent default" "$OK_DIR" --band
+  drive prompts-without-value 2 "--prompts with nothing after it is a usage error" "$OK_DIR" --prompts
+  drive baseline-without-value 2 "--baseline with nothing after it is a usage error" "$OK_DIR" --baseline
+  drive unknown-option 2 "an option this tool does not know is refused rather than ignored" "$OK_DIR" --nope
+  drive two-roots 2 "two repo roots is a usage error - the second would silently win" "$OK_DIR" "$OK_DIR"
+
+  BADLINE_DIR="$SCRATCH/bad-line"
+  write_spec "$BADLINE_DIR" 2
+  printf 'login R1 login session expiry\n' > "$BADLINE_DIR/.claude/productizer/retrieval-prompts.tsv"
+  drive malformed-prompt-line 2 "a line that is not id TAB target TAB terms is refused by line number" "$BADLINE_DIR"
+
+  BADTARGET_DIR="$SCRATCH/bad-target"
+  write_spec "$BADTARGET_DIR" 2
+  write_prompt "$BADTARGET_DIR" login X1 "login session expiry"
+  drive target-not-an-r-id 2 "a target that is not an R-id is refused before any measurement" "$BADTARGET_DIR"
+
+  # --- the two assertions ---------------------------------------------------
+  [ "$CASES" -gt 0 ] || { echo "retrieval-budget: no case was driven, so nothing was measured" >&2; exit 2; }
+
+  printf '    selftest cases driven: %d\n' "$CASES"
+  printf '%s' "$REPORT"
+
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+  MISSING=""
+  for want in 0 2 3 4 5 6; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 2 3 4 5 6\n' "$REACHED"
+
+  if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
+  printf '    R39.a  %-40s examined %3d  upheld %3d  %s: %s\n' \
+    "each-case-exits-the-declared-code" "$CASES" "$UPHELD" "$SELF_VERDICT" \
+    "every case exits with the code its line declares"
+  if [ -n "$MISSING" ]; then CODE_VERDICT="NOT HELD"; else CODE_VERDICT="held"; fi
+  printf '    R39.b  %-40s examined %3d  upheld %3d  %s: %s\n' \
+    "every-documented-exit-code-reached" 6 "$((6 - $(printf '%s' "$MISSING" | wc -w | tr -d ' ')))" "$CODE_VERDICT" \
+    "the codes the header documents are the codes the cases drove"
+  [ -z "$MISSING" ] || echo "retrieval-budget: documented exit code(s) never reached by any case:$MISSING" >&2
+
+  printf '    NOT ASSERTED: the cases drive the exit CODE, never the wording of a finding, so a case red for the wrong reason is invisible here. The self-test own exit 2 - no temporary directory - is a guard no case drives. The band figures are fixture figures; nothing here reads or rewrites the committed prompt set or baseline.\n'
+
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  [ -z "$MISSING" ] || exit 1
+  exit 0
+fi
 
 case "$BAND" in
   ''|*[!0-9]*) echo "retrieval-budget: --band must be a whole percentage, not: $BAND" >&2; exit 2 ;;

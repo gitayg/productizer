@@ -180,6 +180,7 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/check-view-publish-refused.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-view-readonly.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-waiver-rendering.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
           bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
           bash scripts/check-hygiene.sh --selftest
 

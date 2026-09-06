@@ -48,6 +48,13 @@ Input formats
                           `speckit_adapt.py` and
                           `references/speckit-format.md`.
 
+Scope
+    EVERY CHECK HERE IS PER FILE. Ids, counts, the counter and citations are
+    all judged inside one document, even when several are given on one command
+    line. That is invisible while the spec is one file and becomes load-bearing
+    the moment it is split: see the note on `check_spec_counts`, which records
+    what was measured on a real two-file split and what stops being enforced.
+
 Deterministic: no wall clock, no environment, no network is read, and problems
 are emitted sorted by (line, code, message). Two runs of the same input are
 byte-identical. Python 3.8+, standard library only.
@@ -671,6 +678,61 @@ def derived_count_value(value, counted):
 
 
 def check_spec_counts(doc):
+    """COUNT_MISMATCH: the header states a number about THIS FILE that nobody re-counted.
+
+    IF YOU ARE SPLITTING THE SPEC ACROSS SEVERAL FILES, READ THIS FIRST.
+
+    The spec header says ids "stay unique across the whole repo even if this
+    spec is later split into several files". Every check in this script is
+    nevertheless per-FILE, and a split is where that stops being a distinction
+    without a difference. B44 was raised on the theory that COUNT_MISMATCH goes
+    permanently red under a split, with no correct value to write in either
+    header. That theory is WRONG, and it was measured rather than argued:
+    `.claude/productizer/spec.md` at 91318de was really split in two - 15
+    active + 2 superseded in part A, 20 + 4 in part B, summing to the 35 and 6
+    the single file held - and both header states were run.
+
+        both headers left at the PRODUCT total (35 active, 6 superseded):
+            2 file(s) checked: 4 error(s), 84 warning(s)     exit 1
+        each header rewritten to its OWN file's total:
+            2 file(s) checked: 0 error(s), 84 warning(s)     exit 0
+
+    So green IS reachable, in one edit, and the severity here stays ERROR. The
+    message already scopes the claim to "this file", and per-file is the only
+    thing a per-file count can honestly assert.
+
+    WHAT A SPLIT ACTUALLY COSTS is three things, none of which is this check
+    being too loud, and all three of which are this script going QUIET:
+
+      1. NOTHING STATES OR CHECKS THE PRODUCT TOTAL any more. Once each header
+         carries its own file's total, "35 active" exists nowhere and no check
+         sums the parts. The count survives; the product-level claim does not.
+      2. ID_REUSED DOES NOT CROSS FILES, so the header's own promise of
+         repo-wide unique ids stops being enforced by anything at exactly the
+         moment the header starts making it. Measured on the same split: R25
+         was copied into the second file as well, each header corrected to its
+         own count, and the run reported
+             2 file(s) checked: 0 error(s), 88 warning(s)     exit 0
+         with R25 defined twice in the repo. Nothing went red. (Before the
+         headers were corrected the only red was COUNT_MISMATCH, at 16 rather
+         than 15 - a duplicate id caught by accident, as an off-by-one in a
+         count, and lost the moment someone believed the DERIVED line.)
+      3. EVERY CROSS-FILE CITATION BECOMES `CITATION_UNKNOWN`, because
+         check_spec_citations resolves against one document's ids. That is the
+         84 warnings in every run above, none of which is a real defect. A
+         check that emits 84 false warnings on the day of the split is a check
+         somebody switches off that week, which was B44's real worry aimed at
+         the wrong code.
+
+    Fixing 2 and 3 means a cross-file pass over every spec document `main`
+    loaded - a union of ids for citations, and a defined-in-two-files ERROR -
+    and it must land IN THE SAME CHANGE AS THE SPLIT, not after: between the
+    two, repo-wide id uniqueness is a sentence in a header with no check under
+    it. It is deliberately NOT done here, because a self-test fixture for it
+    would move the `--self-test` fixture count that
+    `references/speckit-format.md` records as an observed result, and that file
+    belongs to the same change.
+    """
     lineno, _value, declared, counted = spec_counts(doc)
     if not declared:
         return

@@ -18,8 +18,34 @@ an SMT solver when z3-solver happens to be importable; it is never required.
 
 Usage:
     contradiction-check.py --selftest
-    contradiction-check.py FILE            (one requirement per line)
+    contradiction-check.py [--require-records] FILE   (one requirement per line)
     contradiction-check.py --pair "R1 ..." "R2 ..."
+
+Exit codes
+    0  ran, and nothing halts the pipeline. Without --require-records a FILE
+       in which NO line parsed as EARS is also a 0 - a legitimate reading of
+       a file that holds no requirements, and refusing it is the caller's job.
+    1  a halt. In FILE mode that is any pair decided CONTRADICTION or handed
+       back UNDECIDED; in --pair mode, CONTRADICTION only, unchanged.
+    2  usage error, or a --pair statement that is not EARS
+    4  NOT MEASURED. --require-records was asked for and not one line of the
+       file parsed as EARS: the file was read end to end and nothing in it was
+       understood. Opt-in, never the default.
+
+THE SHARED CONVENTION. `spec-requirements.sh` carries the same one, spelled
+the same way: `--require-records`, and exit 4 for a clean parse that
+understood nothing. 4 is `validate-spec.py`'s EXIT_UNMEASURED, which already
+answers this question with this code and the sentence "a file that was not
+read has not passed". Three tools that read requirement sentences now say
+"understood nothing" the same way, instead of one of them saying it and two
+reporting success over a file they made no sense of.
+
+It is a flag and not the default because these two tools are pointed at
+fixtures and at foreign notations where an empty parse is the expected answer,
+and because every caller in this repository reads any non-zero from them as a
+refusal. A caller that meant "a file of requirements" passes the flag; a bare
+exit 0 over a file this grammar did not recognise is a green over a file
+nothing read, which is the shape R15 and R26 exist to block.
 """
 
 from __future__ import annotations
@@ -27,6 +53,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import math
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -34,6 +61,13 @@ from dataclasses import dataclass, field
 # --------------------------------------------------------------------------
 # EARS grammar
 # --------------------------------------------------------------------------
+
+# The same four numbers validate-spec.py already uses, and 4 means the same
+# thing in all three tools. See the module docstring.
+EXIT_CLEAN = 0
+EXIT_HALT = 1
+EXIT_USAGE = 2
+EXIT_UNMEASURED = 4
 
 ID_RE = re.compile(r"^\s*(?:\*\*)?(R\d+)(?:\*\*)?\s*[:.\-]\s*", re.I)
 
@@ -885,12 +919,78 @@ def selftest(use_z3: bool) -> int:
 
     if use_z3:
         print("\n" + verify_with_z3(reqs))
-    return 1 if fp else 0
+
+    file_failures = selftest_file_mode()
+    return 1 if (fp or file_failures) else 0
+
+
+# The corpus above is about verdicts. This half is about the exit code a
+# CALLER sees over a whole file, and it exists because the number that was
+# wrong was that one: a file in which nothing parsed came back as 0, which
+# reads as "no contradictions" and was really "nothing was read". Every exit
+# code FILE mode can return is driven here, 4 included.
+FILE_CASES = [
+    ("two EARS lines, no conflict", False, EXIT_CLEAN,
+     "R1: When a batch completes, the widget shall stop polling the queue.\n"
+     "R2: When a batch starts, the widget shall open the queue.\n"),
+    ("the same file, --require-records", True, EXIT_CLEAN,
+     "R1: When a batch completes, the widget shall stop polling the queue.\n"
+     "R2: When a batch starts, the widget shall open the queue.\n"),
+    ("a real contradiction, --require-records", True, EXIT_HALT,
+     "R1: When a client requests a report, the api gateway shall respond in "
+     "under 500 ms.\n"
+     "R2: When a client requests a report, the api gateway shall respond in "
+     "over 2 s.\n"),
+    # A foreign notation: spec-kit writes its requirements as `- **FR-001**:
+    # System MUST ...`, which carries no `shall` and no EARS trigger, so not
+    # one line of it parses. The default still reports 0, deliberately.
+    ("a foreign notation, default", False, EXIT_CLEAN,
+     "# Feature Specification: Archive old files\n"
+     "- **FR-001**: System MUST archive files older than the threshold.\n"
+     "- **FR-002**: System MUST skip symbolic links.\n"),
+    ("a foreign notation, --require-records", True, EXIT_UNMEASURED,
+     "# Feature Specification: Archive old files\n"
+     "- **FR-001**: System MUST archive files older than the threshold.\n"
+     "- **FR-002**: System MUST skip symbolic links.\n"),
+    ("an empty file, --require-records", True, EXIT_UNMEASURED, ""),
+    # One line that parses is enough: the flag asks whether anything was
+    # understood, not whether everything was.
+    ("one line among foreign ones, --require-records", True, EXIT_CLEAN,
+     "- **FR-001**: System MUST archive files older than the threshold.\n"
+     "R1: When a batch completes, the widget shall stop polling the queue.\n"),
+]
+
+
+def selftest_file_mode() -> int:
+    """Drive FILE mode over temporary files. Returns the number of failures."""
+    import contextlib
+    import io as _io
+    import tempfile
+
+    print("\nFILE mode - the exit code a caller reads")
+    failures = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, (name, require, want, body) in enumerate(FILE_CASES):
+            path = os.path.join(tmp, "case%d.txt" % i)
+            with open(path, "w") as fh:
+                fh.write(body)
+            buf, errbuf = _io.StringIO(), _io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(errbuf):
+                got = run_file(path, require)
+            said = "NOT MEASURED" in errbuf.getvalue()
+            ok = got == want and (said == (want == EXIT_UNMEASURED))
+            if not ok:
+                failures += 1
+            print("  %-5s %-44s exit %d (wanted %d)%s"
+                  % ("ok" if ok else "FAIL", name, got, want,
+                     ", said NOT MEASURED" if said else ""))
+    print("  %d of %d held" % (len(FILE_CASES) - failures, len(FILE_CASES)))
+    return failures
 
 
 # --------------------------------------------------------------------------
 
-def run_file(path: str) -> int:
+def run_file(path: str, require_records: bool = False) -> int:
     reqs, unparsed = [], []
     with open(path) as fh:
         for n, line in enumerate(fh, 1):
@@ -912,7 +1012,18 @@ def run_file(path: str) -> int:
     if not halts:
         print(f"{len(reqs)} requirements, {len(reqs) * (len(reqs) - 1) // 2} pairs: "
               f"nothing decidable as a contradiction")
-    return 1 if halts else 0
+    if halts:
+        return EXIT_HALT
+    # A halt is reported as a halt even under the flag: something WAS read and
+    # it conflicts, which is a stronger answer than "nothing was read".
+    if require_records and not reqs:
+        print(f"NOT MEASURED: {path} was read end to end and not one line in it "
+              f"parsed as EARS ({len(unparsed)} lines unparsed). --require-records "
+              f"was asked for, so this is not a file with no contradictions - it "
+              f"is a file nothing here understood. A file that was not read has "
+              f"not passed.", file=sys.stderr)
+        return EXIT_UNMEASURED
+    return EXIT_CLEAN
 
 
 def main() -> int:
@@ -922,22 +1033,35 @@ def main() -> int:
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--verify-z3", action="store_true",
                     help="cross-check the interval arithmetic against an SMT solver")
+    ap.add_argument("--require-records", action="store_true",
+                    help="FILE mode: exit 4 when no line parsed as EARS")
     args = ap.parse_args()
 
     if args.selftest:
+        if args.require_records:
+            print("--require-records applies to FILE mode; the self-test drives "
+                  "it on its own fixtures", file=sys.stderr)
+            return EXIT_USAGE
         return selftest(args.verify_z3)
     if args.pair:
+        # Refused rather than ignored. A flag that is silently dropped is a
+        # caller believing it asked for a refusal it will never get, which is
+        # the defect this flag was added to close.
+        if args.require_records:
+            print("--require-records applies to FILE mode; --pair already "
+                  "refuses a statement it cannot parse", file=sys.stderr)
+            return EXIT_USAGE
         a, b = parse(args.pair[0], "A"), parse(args.pair[1], "B")
         if a is None or b is None:
             print("one or both statements are not EARS", file=sys.stderr)
-            return 2
+            return EXIT_USAGE
         v = compare(a, b)
         print(f"{v.verdict}: {v.reason}")
-        return 1 if v.verdict == CONTRADICTION else 0
+        return EXIT_HALT if v.verdict == CONTRADICTION else EXIT_CLEAN
     if args.file:
-        return run_file(args.file)
+        return run_file(args.file, args.require_records)
     ap.print_help()
-    return 2
+    return EXIT_USAGE
 
 
 if __name__ == "__main__":

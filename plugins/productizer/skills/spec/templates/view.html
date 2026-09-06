@@ -1,3 +1,12 @@
+<!doctype html>
+<!-- Standards mode, deliberately. Without this line every browser falls
+     back to quirks mode, where <body> is the viewport scroller and a table
+     does not inherit font or line-height from its ancestors. The whole page
+     was rendered in both modes before this was added: at 1440, 1024, 760 and
+     375px, eight of the nine tabs are pixel-identical, nothing gains a
+     horizontal scrollbar, nothing clips, and every control behaves the same.
+     The one difference is the files table, which had been the only block on
+     the page escaping the sheet's own line-height:1.55 - see .ftbl below. -->
 <meta charset="utf-8">
 <title>@@TITLE@@</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -210,6 +219,15 @@ white-space:pre-wrap;word-break:break-word}
 /* files table */
 .tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 table{border-collapse:collapse;width:100%;min-width:760px}
+/* No line-height is declared here, so these cells take the sheet's 1.55 by
+   inheritance, like every other block. That only became true when the doctype
+   was added: in quirks mode a table does not inherit font or line-height from
+   its ancestors, so these cells were silently getting line-height:normal and
+   the whole table was 17% denser than the sheet said. Nobody chose that
+   density - it was the one value on the page inherited from a rendering mode
+   rather than from this file. Measured at 700px wide, 564 rows: a one-line row
+   went 32.0 -> 36.4px and the table 22937 -> 26825px. If a denser table is
+   wanted it is one declaration here, chosen on purpose, not taken by accident. */
 .ftbl th,.ftbl td{padding:8px 13px;font-size:12.5px;border-bottom:1px solid var(--line);vertical-align:middle}
 .ftbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
 background:var(--bg);white-space:nowrap}
@@ -769,12 +787,21 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
    way round - as an opt-in under no-preference - and a reader who asked for
    less motion gets the browser's own instant jump with nothing to override.
 
-   BOTH ELEMENTS, because this page has no doctype and therefore renders in
-   quirks mode, where the viewport's scroller is <body> and a scroll-behavior
-   declared only on <html> is dropped on the floor. Measured in a browser, not
-   reasoned about: the rule was on <html> alone first and the jump was instant.
-   Declaring both is what makes the same sheet correct if a doctype is ever
-   added and the scroller moves to <html>. */
+   BOTH ELEMENTS, and the reason this comment used to give was wrong. It said
+   the missing doctype put the page in quirks mode, where <body> is the
+   scroller, so a rule on <html> alone would be dropped on the floor. That was
+   re-measured in both modes before the doctype landed: declared on <html>
+   alone the browser honoured it in BOTH, and declared on <body> alone the
+   browser ignored it in BOTH. The viewport's scroll-behavior comes from the
+   ROOT element, not from whichever element happens to be the scroller - so
+   <html> is the half doing the work and <body> has never done anything here.
+   The earlier "the jump was instant" reading has a likelier cause than a
+   dropped rule: a smooth scroll in a hidden or background tab never advances,
+   because the frame callbacks driving it are frozen, and a page that has not
+   moved at all is exactly what that looks like. A rule genuinely dropped
+   lands on the target immediately instead. <body> stays because it was only
+   ever measured in one engine and deleting it would be an unmeasured change
+   to the rest. */
 @media (prefers-reduced-motion:no-preference){html,body{scroll-behavior:smooth}}
 
 /* Narrow: the rail stops being a column and becomes a strip that scrolls
