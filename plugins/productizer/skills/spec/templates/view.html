@@ -709,6 +709,88 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
 @media (prefers-reduced-motion:reduce){
   .vz-node,.vz-act,.vz-row,.vz-wire{transition:none}}
 
+/* ---------- the rail, and why it is assembled rather than written ----------
+   Six drawings is a long scroll, and a long scroll with no map is a reader
+   guessing how much is left and never learning what they skipped. The rail is
+   that map, and it sits beside the drawings rather than above them so the
+   answer to "where am I" is on screen the whole way down.
+
+   THE RAIL IS NOT A LIST OF SIX KEPT HERE. It is built at load from the
+   sections the generator actually wrote, each label taken from that section's
+   own <h2>. A list written into this sheet would be a second source of truth
+   and would be wrong the first day a seventh section landed - which is the one
+   failure this entire page exists to not commit. So there is no count here,
+   no order here and no wording here: all three are read from the tree, one
+   layer further out, exactly as every figure on this page is.
+
+   A SECTION THAT COULD NOT BE MEASURED STAYS IN THE RAIL, and says which
+   answer it is. Dropping it would hide precisely the absence its .vz-empty
+   block below exists to announce, and a reader counting five entries would
+   conclude there were five things. `not run` and `unknown` keep their own
+   words here for the same reason they keep them there - they are two different
+   answers and collapsing them is how a dashboard starts lying. A measured zero
+   gets no mark, because it was measured.
+
+   Not one colour below is a literal; every one resolves to a token declared at
+   the top of this sheet, so the palette edit that would take this page to a
+   light ground takes the rail with it. The mark spends border STYLE and weight
+   rather than hue for the reason the coverage rail spends density: the three
+   hues on this page already mean added / modified / removed, and a fourth
+   meaning on the same channel is a fabricated signal. */
+.vz.vz-nav-on{display:grid;grid-template-columns:190px minmax(0,1fr);gap:26px;align-items:start}
+/* minmax(0,1fr), not 1fr: a grid track sized to its content would be widened
+   by an 860px board instead of letting the board scroll inside .vz-board, and
+   the page body would scroll sideways - which is the one thing the board's own
+   overflow was written to prevent. */
+.vz-body{display:flex;flex-direction:column;gap:26px;min-width:0}
+.vz-sec{scroll-margin-top:14px}
+
+.vz-rail{position:sticky;top:14px;display:flex;flex-direction:column;gap:1px;
+  min-width:0;max-height:calc(100vh - 28px);overflow-y:auto;
+  border-left:1px solid var(--line)}
+.vz-rl{display:flex;flex-direction:column;align-items:flex-start;gap:3px;
+  margin-left:-1px;border-left:2px solid transparent;border-radius:0 7px 7px 0;
+  padding:7px 10px;color:var(--muted);font-size:12px;line-height:1.4;
+  text-decoration:none;transition:color .15s,border-color .15s,background-color .15s}
+.vz-rl:hover{color:var(--text);background-color:var(--surface);text-decoration:none}
+.vz-rl.on{color:var(--text);background-color:var(--surface);border-left-color:var(--accent)}
+.vz-rl.on .vz-rl-t{font-weight:600}
+/* The global ring is drawn outside the element, and outside a sticky rail with
+   its own scrollbar it gets clipped. Inset, so it survives being scrolled. */
+.vz-rl:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;color:var(--text)}
+.vz-rl-t{display:block}
+.vz-rl-m{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--muted);border:1px dashed color-mix(in srgb,var(--muted) 45%,transparent);
+  border-radius:999px;padding:0 6px;flex:0 0 auto}
+.vz-rl-off .vz-rl-t{color:var(--muted);font-weight:400}
+
+/* Smooth only where motion is welcome. The sheet-wide reduce rule above kills
+   transitions and cannot reach scroll-behavior, so this is stated the other
+   way round - as an opt-in under no-preference - and a reader who asked for
+   less motion gets the browser's own instant jump with nothing to override.
+
+   BOTH ELEMENTS, because this page has no doctype and therefore renders in
+   quirks mode, where the viewport's scroller is <body> and a scroll-behavior
+   declared only on <html> is dropped on the floor. Measured in a browser, not
+   reasoned about: the rule was on <html> alone first and the jump was instant.
+   Declaring both is what makes the same sheet correct if a doctype is ever
+   added and the scroller moves to <html>. */
+@media (prefers-reduced-motion:no-preference){html,body{scroll-behavior:smooth}}
+
+/* Narrow: the rail stops being a column and becomes a strip that scrolls
+   ITSELF, above the drawings. Squeezing 190px out of a 375px viewport would
+   leave the boards unreadable, and hiding the rail there would take the map
+   away from the reader who needs it most. */
+@media (max-width:760px){
+  .vz.vz-nav-on{grid-template-columns:minmax(0,1fr);gap:16px}
+  .vz-rail{position:static;flex-direction:row;gap:2px;max-height:none;
+    overflow-x:auto;overflow-y:hidden;border-left:0;border-bottom:1px solid var(--line);
+    padding-bottom:1px}
+  .vz-rl{flex:0 0 auto;flex-direction:row;align-items:center;gap:6px;margin-left:0;
+    margin-bottom:-1px;border-left:0;border-bottom:2px solid transparent;
+    border-radius:7px 7px 0 0;white-space:nowrap}
+  .vz-rl.on{border-left-color:transparent;border-bottom-color:var(--accent)}}
+
 /* ---------- history: one ratio, over the commits that moved it -------------
    A count answers "how many"; only a ratio answers "is this getting better",
    which is the question this section exists for. Every colour below resolves
@@ -1108,6 +1190,121 @@ document.addEventListener("keydown",function(e){
 // Last, so the ring nodes and every panel exist before a pasted deep link is
 // resolved against them.
 openAnchor(location.hash);
+
+// ---------- the visualizer's rail ------------------------------------------
+// Builds the left-hand nav for the Visualizer panel out of the sections the
+// generator actually wrote, and marks the one you are reading as you scroll.
+//
+// IT DERIVES, IT DOES NOT RESTATE. There is no list of section ids in this
+// block and no list of headings: it walks the panel's own <section> children
+// and takes each label from that section's own <h2>. A list kept here would be
+// a second source of truth about a tree this page's whole point is to read,
+// and it would be wrong the first day a seventh section landed. One section,
+// nine sections and none all work, and none of the three needs an edit here.
+//
+// A SECTION THAT COULD NOT BE MEASURED IS NEVER DROPPED FROM THE RAIL. It is
+// listed and marked with the word its own .vz-empty block used - `not run` or
+// `unknown`, which are two different answers - so a reader who never scrolls
+// that far still learns the thing was not measured. Omitting it would hide the
+// one fact the section exists to report. A measured zero is not marked: it was
+// measured, and the drawing below it says so.
+//
+// It reads the page it is already in and changes nothing outside it: no fetch,
+// no storage, not even a memory of which section you last had open. Reloading
+// gives you the top of the panel, which is where the generator's own ordering
+// says to start.
+(function(){
+  var vz = document.getElementById("panel-visualizer"); if (!vz) return;
+  var secs = [].slice.call(vz.children).filter(function(el){
+    return el.tagName === "SECTION" && el.id && el.classList.contains("vz-sec");
+  });
+  if (!secs.length) return;
+
+  // Which of the three answers this section came back with, read off the block
+  // the generator wrote rather than guessed at from emptiness - an empty canvas
+  // and a measured zero look identical, which is the whole reason .vz-empty
+  // spells the answer out in words in the first place.
+  function stateOf(sec){
+    var bs = sec.querySelectorAll(".vz-empty > b");
+    for (var i = 0; i < bs.length; i++){
+      var t = bs[i].textContent.replace(/\s+/g, " ").trim(), u = t.toUpperCase();
+      if (u.indexOf("NOT RUN") === 0) return {word: "not run", why: t};
+      if (u.indexOf("UNKNOWN") === 0) return {word: "unknown", why: t};
+    }
+    return null;
+  }
+
+  var nav = document.createElement("nav");
+  nav.className = "vz-rail";
+  nav.setAttribute("aria-label", "Sections of the visualizer");
+  var body = document.createElement("div");
+  body.className = "vz-body";
+  var items = [];
+
+  secs.forEach(function(sec){
+    var h = sec.querySelector("h2");
+    var a = document.createElement("a");
+    a.className = "vz-rl";
+    a.setAttribute("href", "#" + sec.id);
+    var t = document.createElement("span");
+    t.className = "vz-rl-t";
+    t.textContent = h ? h.textContent : sec.id;
+    a.appendChild(t);
+    var st = stateOf(sec);
+    if (st){
+      var m = document.createElement("span");
+      m.className = "vz-rl-m";
+      m.textContent = st.word;
+      a.appendChild(m);
+      a.className = "vz-rl vz-rl-off";
+      a.title = st.why;
+    }
+    nav.appendChild(a);
+    body.appendChild(sec);          // moves it; the panel is emptied by this
+    items.push({sec: sec, a: a});
+  });
+
+  vz.appendChild(nav);
+  vz.appendChild(body);
+  vz.classList.add("vz-nav-on");
+
+  var cur = null;
+  function mark(a){
+    if (a === cur) return;
+    items.forEach(function(it){
+      var on = it.a === a;
+      it.a.classList.toggle("on", on);
+      if (on) it.a.setAttribute("aria-current", "true");
+      else it.a.removeAttribute("aria-current");
+    });
+    cur = a;
+  }
+  mark(items[0].a);
+
+  // Scroll-spy through a band near the top of the viewport. The LAST section
+  // crossing that band wins, not the first: two sections cross it at every
+  // hand-over, and the later one is the one whose heading has just arrived.
+  // Measured, not reasoned about - first-crossing was written first, and at the
+  // very bottom of the document, where the page can scroll no further, it left
+  // the second-to-last section marked while the reader was looking at the last
+  // one. That is the one position a top band cannot reach on its own.
+  //
+  // When nothing crosses the band - between two sections, or while the whole
+  // panel is on a tab that is not open - the last answer stands rather than
+  // being cleared, because "no section" is not a place the reader ever is.
+  if (window.IntersectionObserver){
+    var vis = items.map(function(){ return false; });
+    var io = new window.IntersectionObserver(function(es){
+      es.forEach(function(e){
+        for (var i = 0; i < items.length; i++)
+          if (items[i].sec === e.target) vis[i] = e.isIntersecting;
+      });
+      for (var k = items.length - 1; k >= 0; k--) if (vis[k]) { mark(items[k].a); return; }
+    }, {rootMargin: "-10% 0px -70% 0px", threshold: 0});
+    items.forEach(function(it){ io.observe(it.sec); });
+  }
+})();
+
 // ---------- history: one ratio, over the commits that moved it -------------
 // Reads VZ_HISTORY, which the generator embedded in this file's own bytes, and
 // draws it. It fetches nothing, stores nothing and posts nothing: every figure

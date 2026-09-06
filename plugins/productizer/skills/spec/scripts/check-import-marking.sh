@@ -34,11 +34,13 @@
 #
 # 1.1 SPLITS THE QUESTION IN TWO, and answers them in order:
 #
-#   1  DID AN IMPORT EVER RUN HERE?  If nothing in the repository says one did,
-#      R10's premise was never exercised and this check has measured NOTHING.
-#      That is exit 2, UNMEASURED - never 0. A repository that has never been
-#      imported cannot demonstrate that imports are marked correctly, and 1.0
-#      reported that state with the same exit code as a repository that had.
+#   1  DID AN IMPORT EVER RUN HERE?  Four sources are read. If NOT ONE of them
+#      records an import, R10 is an event-driven obligation whose event did not
+#      occur here: that is exit 0, printed as `NO IMPORT ON THE RECORD`, and it
+#      is a measurement of the premise rather than a refusal to look. What is
+#      exit 2 is the state one step further in - an import IS on the record and
+#      no requirement can be attributed to it, so something happened and this
+#      check cannot say what.
 #
 #   2  ARE THE REQUIREMENTS THAT IMPORT DRAFTED MARKED?  Only asked once (1)
 #      says yes. A cohort of which NOT ONE member is marked is a FINDING, exit
@@ -46,12 +48,22 @@
 #      cohort where one marker was forgotten, and reading the same is how the
 #      complete failure hid inside the partial one.
 #
-# The three states print differently and exit differently:
+# The states print differently and exit differently:
 #
-#   no import on the record          exit 2   UNMEASURED
+#   no import on the record          exit 0   the premise, measured and absent
+#   an import, cohort unresolved     exit 2   UNMEASURED
 #   an import, nothing marked        exit 1   findings, under its own heading
 #   an import, some marker missing   exit 1   findings, per id
 #   an import, all settled           exit 0
+#
+# MEASURED 2026-09-06 AND CORRECTED HERE. Until this date the two paragraphs
+# above and the contract below said `no import on the record` was exit 2,
+# UNMEASURED, never 0. The committed suite measures it as 0: `never-imported`
+# and `silent-import` both declare 0 and both hold, and `--selftest` exits 0
+# over all 8 cases. The exit-2 row above is the state the suite actually
+# declares as 2 - `stage-in-the-backlog`, `IMPORT ON THE RECORD, COHORT
+# UNRESOLVED`. No behaviour was changed by this correction; only the prose,
+# which described an earlier draft's intent.
 #
 # ==========================================================================
 # HOW AN IMPORT IS DETECTED. READ THIS BEFORE TRUSTING ANY RUN.
@@ -123,10 +135,13 @@
 #
 #   - AN IMPORT THAT MARKED NOTHING *AND* NAMED NO STAGE ANYWHERE - not in the
 #     change log, not in a commit message, not in the spec, not in the backlog
-#     - is still not attributable. It is no longer reported as clean: it is
-#     exit 2, UNMEASURED, because from the outside it is indistinguishable
-#     from a repository that never imported. THAT IS THE HONEST ANSWER, NOT A
-#     CLOSED GAP. The fix is upstream and it is one line of process: have
+#     - is still not attributable. It is reported as NO IMPORT ON THE RECORD,
+#     exit 0, because from the outside it is byte-identical to a repository
+#     that never imported - measured 2026-09-06 as the suite's `silent-import`
+#     case, which declares 0 and holds. This paragraph previously said exit 2,
+#     UNMEASURED. Either way THAT IS THE HONEST LIMIT, NOT A CLOSED GAP, and
+#     the reported state is the one the evidence supports rather than the one
+#     the hole deserves. The fix is upstream and it is one line of process: have
 #     Stage 0c write a machine record of its own id range, and read that here
 #     instead of inferring.
 #   - A SHALLOW CLONE removes evidence from B without removing it from the
@@ -152,21 +167,25 @@
 # EXIT CODES ARE THE CONTRACT.
 #
 #   0  an import is on the record and every requirement it drafted is marked,
-#      refused at import, or promoted out of it
+#      refused at import, or promoted out of it - OR no import is on the
+#      record at all, which is the premise measured and found absent
 #   1  at least one is not - reported by id, line, and the source that
 #      attributed it
 #   2  COULD NOT MEASURE - bad usage, a spec that could not be parsed, a git
-#      history that could not be walked, no import on the record at all, or an
-#      import on the record that no requirement could be attributed to
+#      history that could not be walked, or an import on the record that no
+#      requirement could be attributed to
 #
-# ONE LINE OF THAT CONTRACT IS STALE, AND IT IS RECORDED HERE RATHER THAN
-# QUIETLY CORRECTED. `no import on the record at all` is listed above under 2
-# and the committed suite measures it as 0 - the `never-imported` and
-# `silent-import` cases both declare exit 0, and both hold. The suite's own
-# comment gives the reason and it is the better argument: R10 is event-driven,
-# four sources were read and none records an import, and that is a measurement
-# of the premise rather than a refusal to look. The exits below are what runs;
-# the sentence above is what an earlier draft intended. Believe the cases.
+# ONE LINE OF THAT CONTRACT WAS STALE UNTIL 2026-09-06 AND IS NOW CORRECTED
+# ABOVE RATHER THAN LEFT WITH A NOTE UNDER IT. `no import on the record at all`
+# used to be listed under 2; the committed suite measures it as 0 - the
+# `never-imported` and `silent-import` cases both declare exit 0, and both
+# hold. The suite's own comment gives the reason and it is the better argument:
+# R10 is event-driven, four sources were read and none records an import, and
+# that is a measurement of the premise rather than a refusal to look. Nothing
+# in this file's behaviour changed with the correction. NOTE, NOT FIXED HERE:
+# `fixtures/import-marking/selftest.sh`'s own header block still describes
+# cases 1 and 5 as `exit 2, UNMEASURED` while its `run_case` lines declare 0.
+# That file is the suite, not this check, and it is left for whoever owns it.
 #
 # --SELFTEST RUNS THE COMMITTED FALSIFICATION SUITE, `fixtures/import-marking/
 # selftest.sh`, against THIS file. That suite already existed and already

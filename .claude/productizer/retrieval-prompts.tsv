@@ -1,0 +1,24 @@
+# retrieval-budget prompt set for this repository.
+#
+# One line per prompt: <id>TAB<target R-id>TAB<terms>
+#
+# Each row is a question someone actually asks of this spec, and the terms are
+# the content words that question would be searched with - not strings chosen
+# to make the budget small. The budget each one costs is a measurement of this
+# spec, including where its own vocabulary is high-frequency and expensive.
+#
+# The set spans all five EARS patterns and one SUPERSEDED requirement (R14),
+# because a citation that lands on a superseded sentence has to be reachable
+# too - that is what R3 keeps the original text in the file for.
+#
+# id                  target  terms
+id-permanence	R2	requirement ids reused renumbered
+view-read-only	R4	published view read-only
+override-record	R37	override overrides authority reason
+unruled-merge	R12	unruled contradiction merge
+missing-tool	R13	check tool absent missing skipped
+waived-not-pass	R38	waived waiver failed passed
+hollow-check	R15	check examined declared hollow
+merge-nothing	R24	contradicts merge nothing
+unmeasured-zero	R26	measured unmeasured zero
+superseded-r14	R14	contradicts stop ask wins merge

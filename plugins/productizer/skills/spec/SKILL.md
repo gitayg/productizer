@@ -291,7 +291,7 @@ commit choose what runs on the puller's machine — a `when` trigger of `always`
 path globs or **requirement tags**, `block` or `advise`, mapped exit codes, and
 a mandatory **coverage** assertion. Tags are what makes scrutiny per-item: an
 auth requirement earns the auth ruleset, a copy edit does not.
-`scripts/run-checks.sh` runs them and fails closed six ways — bad config,
+`scripts/run-checks.sh` runs them and fails closed seven ways — bad config,
 missing tool, timeout, unmapped exit code, nothing triggered, and **hollow**: a
 check that exited clean having examined less than it declared. That last one is
 the point. A scanner reporting *Grade A (100/100)* after opening one file of

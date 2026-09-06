@@ -1304,9 +1304,21 @@ checks:
   # command, which the gate's own closing paragraph argues against - it
   # describes the failure it causes. Tracked as B30.
   #
-  # It carries NO coverage claim. A claim from a failing check is void anyway,
-  # and claiming Covered for an obligation with no implementation is the exact
-  # defect R18's acceptance row already had.
+  # CORRECTED 2026-09-06, measured. The paragraph above is kept because its FACTS
+  # still hold - 14 agent-writable consent signals were tried and none lifts the
+  # block - but the CONCLUSION drawn from them was wrong, and this comment went on
+  # asserting it long after it stopped being true. It read: "The gate implements
+  # blocking and implements no deciding" and "It carries NO coverage claim". Both
+  # are false against this file's own contents: the block below declares R17
+  # verdict Covered, and the deciding half IS implemented - a recognised publish
+  # carrying a fresh, command-matching checklist returns permissionDecision `ask`,
+  # handing the decision to a prompt the gated process can neither draw nor answer.
+  # That is deciding by ESCALATION rather than by a signal, which is why no signal
+  # lifting the block was ever evidence against it.
+  #
+  # Found by an agent correcting the same defect class in two script headers, one
+  # file over. A comment that contradicts the declaration beneath it is a second
+  # source of truth, and this one was wrong long enough to be quoted as current.
   - id: publish-gate-decides
     why: the deciding half is the one an agent could forge, so it is asserted by construction - a signal the agent can write must never turn a publish into allow
     when:

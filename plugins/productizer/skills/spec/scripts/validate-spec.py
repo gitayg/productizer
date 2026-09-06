@@ -33,7 +33,20 @@ Usage
     validate-spec.py [--strict] [--quiet] [--kind spec|constitution|backlog] FILE...
     validate-spec.py --baseline OLD_SPEC.md NEW_SPEC.md
     validate-spec.py --counts SPEC.md
+    validate-spec.py --format speckit SPEC.md
     validate-spec.py --self-test
+
+Input formats
+    --format productizer  (default) the grammar above, read as written.
+    --format speckit      a GitHub spec-kit `spec.md`. Seven mechanical
+                          rewrites move the notation into this grammar IN
+                          MEMORY -- the file on disk is never written -- and
+                          the checks then run unchanged. Diagnostics are
+                          reported against the SOURCE line. The checks that
+                          cannot apply to spec-kit input are printed as `n/a`
+                          and suppressed rather than passing silently. See
+                          `speckit_adapt.py` and
+                          `references/speckit-format.md`.
 
 Deterministic: no wall clock, no environment, no network is read, and problems
 are emitted sorted by (line, code, message). Two runs of the same input are
@@ -1085,6 +1098,120 @@ def emit(doc, out):
 
 
 # --------------------------------------------------------------------------
+# spec-kit input
+#
+# The adapter lives in its own module and is imported LAZILY, so the default
+# path -- `--format productizer`, which is every existing caller -- executes
+# exactly the code it executed before, including when the adapter is absent or
+# unimportable. A missing adapter is then NOT MEASURED and says so, rather than
+# a run that quietly checked nothing.
+# --------------------------------------------------------------------------
+
+def import_adapter():
+    """Import the adapter WITHOUT leaving a `__pycache__` beside it.
+
+    `.gitignore` ignores `__pycache__/` on the stated premise that "nothing
+    here imports these scripts as modules in normal use". This is the first
+    thing that does, and an installed plugin directory is not the place to
+    drop build output -- it may be read-only, and it is nobody's git work tree
+    to have ignored the artefact for them. The flag is restored either way, so
+    a caller that imported this module keeps whatever setting it had.
+    """
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        import speckit_adapt
+    finally:
+        sys.dont_write_bytecode = previous
+    return speckit_adapt
+
+
+def load_speckit(path, text, adapter):
+    """Adapt in memory, then parse the adapted text as a spec.
+
+    Returns `(doc, adaptation)`. Nothing is written anywhere.
+    """
+    adaptation = adapter.adapt(text)
+    if adaptation.refusal:
+        doc = Document(path=path, kind="unknown")
+        doc.add(1, ERROR, "SPECKIT_NOT_ADAPTED", adaptation.refusal)
+        doc.unmeasured = True
+        return doc, adaptation
+    return load_document(path, adaptation.text, kind="spec"), adaptation
+
+
+def resolve_speckit(doc, adaptation, adapter):
+    """Map diagnostics back to source lines and drop the ones declared n/a.
+
+    Both halves are the same obligation. A line number into a file that only
+    existed in memory sends the reader to the wrong line, and a finding from a
+    check this run has already declared inapplicable is a finding the adapter
+    manufactured."""
+    dropped = adapter.inapplicable_codes()
+    doc.problems = [
+        Problem(adaptation.source_line(problem.line), problem.severity,
+                problem.code, problem.message)
+        for problem in doc.problems if problem.code not in dropped
+    ]
+
+
+def report_adaptation(path, adaptation, adapter, out, baseline=False):
+    """Print what the adapter did, what it did not do, and what cannot apply.
+
+    Returns the number of check families reported `n/a`, which the summary
+    line carries so a clean exit is never read as a clean bill of health.
+
+    NOT SUPPRESSED BY --quiet, deliberately. `--quiet` drops the summary line,
+    and a quiet spec-kit run that also dropped this block would be a run that
+    silently skipped seven families of check and printed nothing about it --
+    which is the failure this whole block exists to prevent. Every line is
+    prefixed `speckit:` so a caller reading `path:line:` records can filter it.
+    """
+    out.write("speckit: %s adapted in memory; the file on disk was not "
+              "written.\n" % path)
+    if adaptation.refusal:
+        out.write("speckit:   %s\n" % adaptation.refusal)
+        return 0
+
+    for number, name, _detail in adapter.RULES:
+        if number == 7:
+            shown = "R%d" % adaptation.next_id
+        else:
+            shown = "%d line(s)" % adaptation.count(number)
+        out.write("speckit:   rule %d  %-28s %s\n" % (number, name, shown))
+    out.write("speckit:   %-36s %d line(s)\n"
+              % ("requirement bullets adapted", adaptation.requirements))
+    out.write("speckit:   %-36s %d line(s)\n"
+              % ("passed through, no rule matched", len(adaptation.passthrough)))
+    for lineno, what, excerpt in adaptation.passthrough:
+        out.write("speckit:     line %d: %s: %s\n" % (lineno, what, excerpt))
+
+    out.write("speckit: n/a -- the checks below CANNOT apply to spec-kit "
+              "input and were not run. n/a is never a pass.\n")
+    families = 0
+    for codes, reason in adapter.INAPPLICABLE:
+        families += 1
+        out.write("speckit:   n/a  %s\n" % ", ".join(codes))
+        out.write("speckit:        %s\n" % reason)
+    codes, reason = adapter.BASELINE_NOTE
+    if baseline:
+        out.write("speckit:   run  %s\n" % ", ".join(codes))
+        out.write("speckit:        --baseline was given, so these DID run. "
+                  "Scope: %s\n" % reason)
+    else:
+        families += 1
+        out.write("speckit:   n/a  %s\n" % ", ".join(codes))
+        out.write("speckit:        %s\n" % reason)
+    out.write("speckit: %d check family(ies) n/a for %s. A check that could "
+              "not apply has not passed.\n" % (families, path))
+    return families
+
+
+# --------------------------------------------------------------------------
 # Self-test fixtures
 # --------------------------------------------------------------------------
 
@@ -1279,6 +1406,46 @@ Requirements
 
 NOT_A_SPEC = "# Some other document\n\nJust prose.\n"
 
+# spec-kit notation, in the shape `specify-cli` actually emits: an annotated
+# `## Requirements` heading, one `### Functional Requirements` sub-heading,
+# RFC-2119 `MUST` bullets under `FR-0NN` ids, `### Key Entities` nested at
+# level 3, and no id allocator anywhere in the file.
+SPECKIT_SPEC = """# Feature Specification: Widget
+
+**Feature Branch**: `001-widget`
+
+**Status**: Draft
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: System MUST hold exactly one living spec.
+- **FR-002**: Users MUST be able to classify an intent.
+- **FR-003**: System MUST NOT lose a requirement id.
+
+### Key Entities
+
+- **Widget**: the thing being specified.
+
+## Success Criteria *(mandatory)*
+
+- **SC-001**: A user can classify an intent in one command.
+"""
+
+# One FR whose body no modal rule matches, and one bullet that is not an FR at
+# all. Both are carried through byte for byte and both are reported.
+SPECKIT_PASSTHROUGH = SPECKIT_SPEC.replace(
+    "- **FR-003**: System MUST NOT lose a requirement id.",
+    "- **FR-003**: The tool SHALL retain every requirement id.\n"
+    "- a bullet with no id at all.")
+
+# An event-driven sentence under the `### Ubiquitous` heading rule 2 wrote.
+# The mismatch is the adapter's, which is why it is dropped.
+SPECKIT_SECTION_MISMATCH = SPECKIT_SPEC.replace(
+    "- **FR-003**: System MUST NOT lose a requirement id.",
+    "- **FR-003**: When an intent arrives, the system shall classify it.")
+
 
 def self_test():
     failures = []
@@ -1446,12 +1613,103 @@ def self_test():
     forbid("corrected-counts", doc, ERROR)
     forbid("corrected-counts", doc, WARN)
 
+    # ----------------------------------------------------------------------
+    # --format speckit. Four fixtures, one per thing the adapter can be wrong
+    # about: the rules firing, a line no rule matched, nothing to adapt at all,
+    # and a finding the adapter itself manufactured.
+    # ----------------------------------------------------------------------
+    try:
+        adapter = import_adapter()
+    except ImportError as exc:
+        failures.append("speckit: speckit_adapt.py could not be imported, so "
+                        "the adapter was not measured at all: %s" % exc)
+        adapter = None
+
+    if adapter is not None:
+        doc, adaptation = load_speckit("speckit-clean.md", SPECKIT_SPEC,
+                                       adapter)
+        check_document(doc)
+        resolve_speckit(doc, adaptation, adapter)
+        forbid("speckit-clean", doc, ERROR)
+        forbid("speckit-clean", doc, WARN)
+        counts = {n: adaptation.count(n) for n in range(1, 8)}
+        if counts != {1: 2, 2: 1, 3: 3, 4: 3, 5: 3, 6: 1, 7: 1}:
+            failures.append("speckit-clean: rules fired %s" % counts)
+        if adaptation.next_id != 4:
+            failures.append("speckit-clean: rule 7 synthesised R%d, expected R4"
+                            % adaptation.next_id)
+        if [r.ident for r in doc.requirements] != ["R1", "R2", "R3"]:
+            failures.append("speckit-clean: parsed %s"
+                            % [r.ident for r in doc.requirements])
+        if adaptation.passthrough:
+            failures.append("speckit-clean: %d line(s) passed through, "
+                            "expected none" % len(adaptation.passthrough))
+        # NEVER REWRITE THE USER'S FILE, asserted structurally on the adapter's
+        # own source. Comparing the fixture string with itself afterwards would
+        # be the obvious assertion and is a hollow one -- Python strings are
+        # immutable, so it cannot fail whatever the adapter does. This one can:
+        # it goes red the moment a write appears in the module.
+        import inspect
+        source = inspect.getsource(adapter)
+        for shape in (r"\bopen\s*\(", r"\.write\s*\(", r"\bos\.replace\b",
+                      r"\bshutil\b"):
+            if re.search(shape, source):
+                failures.append(
+                    "speckit: speckit_adapt.py matches %s; --format speckit "
+                    "adapts in memory and must never write a file" % shape)
+
+        doc, adaptation = load_speckit("speckit-passthrough.md",
+                                       SPECKIT_PASSTHROUGH, adapter)
+        check_document(doc)
+        resolve_speckit(doc, adaptation, adapter)
+        if len(adaptation.passthrough) != 2:
+            failures.append("speckit-passthrough: reported %d pass-through "
+                            "line(s), expected 2"
+                            % len(adaptation.passthrough))
+        expect("speckit-passthrough", doc, ["ID_MALFORMED", "EARS_PATTERN"])
+        # Rule 7 inserts four lines, so an unremapped diagnostic points four
+        # lines past the bullet it is about. Asserted on a real line number
+        # rather than on the mapping function, which would only prove the
+        # mapping agrees with itself.
+        wanted = SPECKIT_PASSTHROUGH.splitlines().index(
+            "- a bullet with no id at all.") + 1
+        got = [p.line for p in doc.problems if p.code == "ID_MALFORMED"]
+        if got != [wanted]:
+            failures.append("speckit-passthrough: ID_MALFORMED reported at %s, "
+                            "expected the source line %d" % (got, wanted))
+
+        doc, adaptation = load_speckit(
+            "speckit-no-fr.md",
+            "# Feature Specification: X\n\n## Requirements *(mandatory)*\n\n"
+            "### Functional Requirements\n\nNone yet.\n", adapter)
+        expect("speckit-no-fr", doc, ["SPECKIT_NOT_ADAPTED"])
+        if not doc.unmeasured:
+            failures.append("speckit-no-fr: should be reported as NOT MEASURED")
+        if not adaptation.refusal:
+            failures.append("speckit-no-fr: the adapter did not refuse")
+
+        # The n/a drop, falsified in both directions. Rule 2 wrote the
+        # `### Ubiquitous` heading this requirement is judged against, so the
+        # mismatch is the adapter's and must not reach the reader -- but it has
+        # to be shown firing first, or the drop proves nothing.
+        doc, adaptation = load_speckit("speckit-section.md",
+                                       SPECKIT_SECTION_MISMATCH, adapter)
+        check_document(doc)
+        if "EARS_SECTION_MISMATCH" not in codes(doc):
+            failures.append("speckit-section: EARS_SECTION_MISMATCH did not "
+                            "fire before the n/a drop, so the drop below "
+                            "asserts nothing: %s" % codes(doc))
+        resolve_speckit(doc, adaptation, adapter)
+        if "EARS_SECTION_MISMATCH" in codes(doc):
+            failures.append("speckit-section: EARS_SECTION_MISMATCH survived "
+                            "the n/a drop")
+
     if failures:
         for failure in failures:
             sys.stdout.write("SELF-TEST FAIL: " + failure + "\n")
         sys.stdout.write("self-test FAILED: %d problem(s)\n" % len(failures))
         return EXIT_SELFTEST
-    sys.stdout.write("self-test passed: 21 fixtures, 0 failures\n")
+    sys.stdout.write("self-test passed: 25 fixtures, 0 failures\n")
     return EXIT_CLEAN
 
 
@@ -1535,6 +1793,11 @@ def main(argv):
                         help="print the header's declared requirement totals "
                              "beside the totals counted from the file, and "
                              "the header line the counts derive")
+    parser.add_argument("--format", choices=["productizer", "speckit"],
+                        default="productizer",
+                        help="input notation. `speckit` adapts a GitHub "
+                             "spec-kit spec.md into this grammar in memory "
+                             "before checking it; the file is never written")
     parser.add_argument("--self-test", "--selftest", dest="self_test",
                         action="store_true",
                         help="run the built-in fixtures and exit")
@@ -1551,22 +1814,56 @@ def main(argv):
         sys.stderr.write("validate-spec.py: --baseline takes exactly one "
                          "file to compare against\n")
         return EXIT_USAGE
+    speckit = args.format == "speckit"
+    if speckit and args.kind not in (None, "spec"):
+        sys.stderr.write("validate-spec.py: --format speckit produces a spec; "
+                         "it cannot be read as a %s\n" % args.kind)
+        return EXIT_USAGE
     if args.counts:
         if args.baseline:
             sys.stderr.write("validate-spec.py: --counts and --baseline "
                              "answer different questions; run them "
                              "separately\n")
             return EXIT_USAGE
+        if speckit:
+            sys.stderr.write("validate-spec.py: --counts compares the header's "
+                             "declared totals with the file; a spec-kit spec "
+                             "declares none, so there is nothing to compare "
+                             "and nothing to report\n")
+            return EXIT_USAGE
         return report_counts(args.files, args.kind, out)
+
+    adapter = None
+    if speckit:
+        try:
+            adapter = import_adapter()
+        except ImportError as exc:
+            out.write("%s:1: %s ADAPTER_MISSING: --format speckit needs "
+                      "speckit_adapt.py beside this script: %s. Nothing was "
+                      "checked\n" % (args.files[0], ERROR, exc))
+            if not args.quiet:
+                out.write("NOT MEASURED: %s. No counts are reported for it -- "
+                          "a file that was not read has not passed.\n"
+                          % args.files[0])
+            return EXIT_UNMEASURED
 
     documents = []
     unmeasured = []
+    adaptations = {}
+    families = 0
     for path in args.files:
         try:
             text = read_text(path)
         except OSError as exc:
             out.write("%s:1: %s IO: %s\n" % (path, ERROR, exc))
             unmeasured.append(path)
+            continue
+        if speckit:
+            doc, adaptation = load_speckit(path, text, adapter)
+            adaptations[id(doc)] = adaptation
+            families += report_adaptation(path, adaptation, adapter, out,
+                                          baseline=bool(args.baseline))
+            documents.append(doc)
             continue
         documents.append(load_document(path, text, kind=args.kind))
 
@@ -1581,12 +1878,26 @@ def main(argv):
         check_document(doc, spec=spec)
 
     if args.baseline and spec is not None:
+        baseline_text = None
         try:
             baseline_text = read_text(args.baseline)
         except OSError as exc:
             out.write("%s:1: %s IO: %s\n" % (args.baseline, ERROR, exc))
             unmeasured.append(args.baseline)
-        else:
+        # The baseline is adapted by the same seven rules as the file it is
+        # compared with. Comparing an adapted spec against an unadapted one
+        # would report every id as renumbered, which is the adapter's doing
+        # and not the author's.
+        if baseline_text is not None and speckit:
+            baseline_adapted = adapter.adapt(baseline_text)
+            if baseline_adapted.refusal:
+                out.write("%s:1: %s SPECKIT_NOT_ADAPTED: %s\n"
+                          % (args.baseline, ERROR, baseline_adapted.refusal))
+                unmeasured.append(args.baseline)
+                baseline_text = None
+            else:
+                baseline_text = baseline_adapted.text
+        if baseline_text is not None:
             baseline = build_document(args.baseline, baseline_text, "spec")
             check_spec(baseline)
             if baseline.unmeasured:
@@ -1597,6 +1908,13 @@ def main(argv):
             else:
                 baseline.problems = []
                 check_baseline(spec, baseline)
+
+    # Source-line remapping and the n/a drop happen once every check that can
+    # add a problem has run, `--baseline` included.
+    for doc in documents:
+        adaptation = adaptations.get(id(doc))
+        if adaptation is not None and not adaptation.refusal:
+            resolve_speckit(doc, adaptation, adapter)
 
     errors = warnings = 0
     for doc in documents:
@@ -1619,8 +1937,12 @@ def main(argv):
         return EXIT_UNMEASURED
 
     if not args.quiet:
-        out.write("%d file(s) checked: %d error(s), %d warning(s)\n"
-                  % (len(documents), errors, warnings))
+        # Under --format speckit the n/a families ride on the summary line, so
+        # a zero-error run cannot be quoted as a clean bill of health for
+        # obligations this input shape cannot carry.
+        suffix = (", %d check family(ies) n/a" % families) if speckit else ""
+        out.write("%d file(s) checked: %d error(s), %d warning(s)%s\n"
+                  % (len(documents), errors, warnings, suffix))
     if errors or (args.strict and warnings):
         return EXIT_FAILED
     return EXIT_CLEAN

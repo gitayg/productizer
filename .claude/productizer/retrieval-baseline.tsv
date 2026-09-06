@@ -1,0 +1,17 @@
+# retrieval-budget baseline
+# unit: candidate-scan characters (bytes) - a PROXY for a token budget, not a token count
+# calibration: 3.79-4.31 bytes/token on candidate runs, 2026-09-05, evals/token-calibration.sh
+# fields: id, characters (compared against the band), mix percent (recorded, never compared)
+# spec: .claude/productizer/spec.md
+# spec-bytes: 29751
+# spec-sha256: 7204e9cb8f7fcb103efd53a9a74e9be2ea67f0e89f0aec6f389f03019adcadee
+hollow-check	1172	17
+id-permanence	1227	21
+merge-nothing	1532	0
+missing-tool	1031	27
+override-record	153	0
+superseded-r14	994	0
+unmeasured-zero	471	0
+unruled-merge	579	0
+view-read-only	212	0
+waived-not-pass	124	0

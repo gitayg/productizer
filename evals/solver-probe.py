@@ -21,29 +21,69 @@ all — a principle is not a requirement and the checker never sees one. Those a
 recorded as `no-pair`, which is a structural miss, not an unlucky one.
 
 A probe whose numbers never move is measuring nothing, so it ships with two
-interventions on the checker it measures:
+interventions on the checker it measures. WHAT EACH ONE DOES, MEASURED
+2026-09-06 ON THE TREE THIS FILE SHIPS IN — not what it was written to do:
 
-    --break guards    disable the guard relation, the defence that produces the
-                      checker's precision. Nothing in the halt column should move
-                      on this corpus, because these negatives are quiet for a
-                      different reason — the lexicon never fires on them at all.
-    --break lexicon   add the six disposition pairs these misses would need.
-                      Recall must rise. If it does not, the false-negative column
-                      is a constant and this probe is decorative.
+    --break guards    disable the guard relation. THIS MOVES THE HALT COLUMN:
+                      true positives 8 -> 12, undecided 7 -> 3, recall
+                      0.89 -> 0.92. The guard relation is what holds this
+                      corpus's remaining misses at UNDECIDED, so disabling it
+                      is the intervention that is live here. Precision does not
+                      move (1.00, no negative flips), which is the part worth
+                      reading: the negatives are quiet for a reason the guard
+                      relation is not carrying.
+    --break lexicon   add the disposition pairs MISSING_PAIRS holds. THIS MOVES
+                      NOTHING, and announces that rather than reporting a zero
+                      delta. All six pairs shipped in contradiction-check.py —
+                      the ablation measured what adding them was worth, they
+                      were added, and the ablation became a duplicate of the
+                      un-ablated run. Its zero is a closed gap, not a control.
 
 Usage:
     solver-probe.py                    table, confusion matrix, recall
-    solver-probe.py --break lexicon    the intervention that must move recall
-    solver-probe.py --break guards     the intervention that must not
+    solver-probe.py --break guards     the intervention that moves the matrix
+    solver-probe.py --break lexicon    a spent ablation, kept for its notice
     solver-probe.py --selftest         drive this probe's own exit contract
 
-BOTH INTERVENTIONS ABOVE ARE INVERTED IN PRACTICE, AND THIS PARAGRAPH IS THE
-WARNING RATHER THAN THE FIX. Measured: `--break lexicon` moves nothing and says
-so - every pair it holds is already in the shipped lexicon - and `--break
-guards` moves the halt column from 8 true positives to 12. So the sentences
-above describe what each ablation was written to do, not what it does. That is
-backlog B40 and it is open; `--selftest` pins the measured behaviour so a
-change to it is caught, and does NOT assert the promise.
+TWO CLAIMS WERE WITHDRAWN FROM THIS DOCSTRING ON 2026-09-06 (backlog B40).
+Until that date it advertised `--break lexicon` as "the intervention that must
+move recall. If it does not, the false-negative column is a constant and this
+probe is decorative", and `--break guards` as the control on which "nothing in
+the halt column should move". BOTH WERE INVERTED, exactly reversing which one
+demonstrated the matrix was live — and a self-check that reads as passed while
+being inverted is worse than no claim, so the claims are gone rather than
+restated.
+
+THE OTHER FIX WAS TRIED FIRST AND IS NOT AVAILABLE HONESTLY. Re-pointing
+MISSING_PAIRS at dispositions this corpus opposes and the lexicon still lacks
+would have made `--break lexicon` live again. There are none. Every remaining
+must-halt case was enumerated against every candidate pair drawn from its own
+two response clauses, and:
+
+  * P04, P07, P12, P14, P15 cannot be flipped to CONTRADICTION by ANY lexicon
+    pair. Four of them already fire on a shipped pair and are held at UNDECIDED
+    by guard overlap (0%, 25%, 57%, 0%); P07 is the scope heuristic. The
+    lexicon is not the binding constraint on any of them.
+  * P03, P05, P08 can be flipped, but only by pairs that are not oppositions:
+    ('500','second') and ('under','two') for P03, ('every','caller') and
+    ('before','identity') for P05, ('cents','minor') for P08. Declaring any of
+    those an antonym is fabricating a lexicon entry to make an ablation work,
+    which is the failure this whole tool exists to detect. P03 and P08 are also
+    cases the solver is meant to miss — an unquantified adjective, and a rename
+    only a person can tell from an addition.
+
+An upper bound was run to make the negative measurable rather than argued: with
+EXCLUSIVE_PAIRS replaced by every response stem opposed to every other — the
+maximal lexicon, which no honest addition can exceed — recall does reach 1.00,
+and it does so by opposing 'abandon' to 'day' and 'data' to 'export', losing a
+true negative to a false positive on the way. So recall is lexicon-movable in
+principle and not by anything true. That is the evidence for withdrawing rather
+than re-pointing.
+
+WHAT IS LEFT IS STILL A LIVE PROBE. `--break guards` moves four cases from
+UNDECIDED into the halt column, so the confusion matrix is demonstrably not a
+constant. The demonstration just runs through the ablation the old docstring
+called the control, and this file now says so.
 """
 
 from __future__ import annotations
@@ -157,7 +197,13 @@ PAIRS = [
 ]
 
 
-# The dispositions this corpus opposes that the shipped lexicon does not carry.
+# The dispositions this corpus opposes that the shipped lexicon DID NOT carry
+# when this list was written. All six have since shipped in
+# contradiction-check.py, which is why `--break lexicon` is now a no-op. The
+# list is kept because it is the record of what the ablation measured before
+# the gap was closed, and because computing the difference against the shipped
+# lexicon is what lets the ablation ANNOUNCE its emptiness instead of reporting
+# a zero delta. See the module docstring for why it was not re-pointed.
 MISSING_PAIRS = [
     ("remove", "retain"), ("remove", "preserve"), ("expunge", "move"),
     ("decline", "honour"), ("suspend", "keep"), ("abandon", "retry"),
@@ -179,9 +225,10 @@ def run(cc, brk: str | None) -> int:
         if not add:
             print("--break lexicon adds nothing: every pair it holds is already in\n"
                   "the shipped lexicon, so this run is identical to the un-ablated one.\n"
-                  "The gap it was written to measure is closed. Re-point MISSING_PAIRS\n"
-                  "at dispositions the corpus opposes and the lexicon still lacks\n"
-                  "before reading any delta from it.\n")
+                  "The gap it was written to measure is closed, and re-pointing this\n"
+                  "ablation was tried on 2026-09-06 and refused: no remaining miss in\n"
+                  "this corpus is held back by a pair the lexicon lacks. Read no delta\n"
+                  "from this run - the live intervention is `--break guards`.\n")
         cc.EXCLUSIVE_PAIRS = list(cc.EXCLUSIVE_PAIRS) + add
 
     rows = []
@@ -254,16 +301,16 @@ def run(cc, brk: str | None) -> int:
 # does in order to have something to test.
 #
 # ---------------------------------------------------------------------------
-# THE TWO ABLATIONS ARE PINNED TO WHAT THEY MEASURABLY DO, WHICH IS NOT WHAT
-# THE DOCSTRING ABOVE SAYS THEY DO. THIS IS BACKLOG B40 AND IT IS STILL OPEN.
+# THE TWO ABLATIONS ARE PINNED TO WHAT THEY MEASURABLY DO. AS OF 2026-09-06
+# THAT IS ALSO WHAT THE DOCSTRING SAYS THEY DO - B40 IS CLOSED BY WITHDRAWAL.
 #
-# The docstring promises:
+# The docstring used to promise:
 #
 #   --break lexicon   "Recall must rise. If it does not, the false-negative
 #                     column is a constant and this probe is decorative."
 #   --break guards    "Nothing in the halt column should move on this corpus."
 #
-# Measured, on the tree this self-test ships in:
+# Both were inverted. Measured, on the tree this self-test ships in:
 #
 #   --break lexicon   moves NOTHING. It prints its own "adds nothing" notice -
 #                     every pair MISSING_PAIRS holds is already in the shipped
@@ -271,14 +318,24 @@ def run(cc, brk: str | None) -> int:
 #                     un-ablated run.
 #   --break guards    MOVES THE HALT COLUMN, from 8 true positives to 12.
 #
-# So both advertised controls are inverted. The numbers below pin the BEHAVIOUR
-# and not the promise, deliberately: a self-test written to the docstring would
-# be red today against a tool that is working exactly as it currently works,
-# and one that asserted nothing about the ablations would let the real numbers
-# drift with nobody noticing. Neither of those is fixed here. When B40 is
-# closed these figures MUST move, this self-test will go red saying so, and the
-# right response is to update them and the docstring together - not to loosen
-# the assertion.
+# THE FIGURES BELOW DID NOT MOVE WHEN B40 CLOSED, AND THAT IS SAID PLAINLY
+# BECAUSE THE PREVIOUS VERSION OF THIS BLOCK PREDICTED THEY WOULD. It said
+# "when B40 is closed these figures MUST move, this self-test will go red
+# saying so". That prediction assumed the fix would be to re-point
+# MISSING_PAIRS at pairs that genuinely move recall. Those pairs were looked
+# for on 2026-09-06 and do not exist - every remaining must-halt miss is held
+# by the guard relation, by a scope heuristic, or is a case the solver is meant
+# to miss, and the only pairs that would flip any of them are not oppositions
+# at all. The evidence is in the module docstring. So the fix was to withdraw
+# the two claims instead, no measured count changed, and this self-test is
+# green for the same reason it was green before: it pins BEHAVIOUR.
+#
+# WHAT IS STILL TRUE OF THESE NUMBERS. They are a drift guard, not a
+# demonstration that the documented control holds - there is no longer a
+# documented control to hold. If they move, the checker underneath moved, and
+# the right response is to find out why before updating them. CI's baseline in
+# `.github/workflows/checks.yml` gates the same four counts and must be kept in
+# step with this dict.
 # ---------------------------------------------------------------------------
 
 # case -> (true positives, false negatives, false positives, true negatives,
@@ -386,10 +443,11 @@ def selftest() -> int:
     print("  NOT REACHED: exit 1. This tool has no failure exit - `run` returns 0 over any "
           "corpus, including one where every case missed - so there is no code 1 to drive, "
           "and no case here pretends to drive one.")
-    print("  NOT ASSERTED: that the ablations do what the module docstring says they do. They "
-          "do not, both are inverted, and that is backlog B40 - still open. The matrix rows "
-          "above pin what they measurably do so a change is caught; they are not a claim that "
-          "the documented control holds.")
+    print("  NOT ASSERTED: that either ablation is a control. It is not asserted because the "
+          "module no longer claims it - B40 was closed on 2026-09-06 by withdrawing two "
+          "inverted claims, not by making either ablation live. The matrix rows above pin what "
+          "the ablations measurably do, so a change is caught; `--break guards` moving four "
+          "cases is what shows the matrix is not a constant.")
     if failed:
         sys.stderr.write("solver-probe: %d self-test case(s) did not produce the exit code or "
                          "the measurement they declare.\n" % failed)

@@ -85,9 +85,46 @@ terms) and `.claude/productizer/retrieval-baseline.tsv` (`id`, chars, mix). Both
 are committed; the baseline moves in a reviewed commit, like any other threshold.
 The third field is optional and a two-field baseline still reads correctly.
 
-**Neither file exists in this repository yet**, so `retrieval-budget.sh .` exits 6
-and this instrument has never produced a figure about this product. The unit was
-calibrated on 2026-09-05; the check itself is still unrun here.
+**Both files now exist here, and the instrument has run.** First measured
+**2026-09-06** against `spec.md` at 29751 bytes, sha256 `7204e9cb…`: ten prompts,
+all ten reaching their target, none falling back to `full-scan` and none
+`target-missing`. The per-prompt budget spans **124 to 1532 characters**, median
+786.5, total 7495 — so the most expensive question in the set reads 5.2% of the
+file and the cheapest 0.4%. Recorded `mix` is 0% on seven prompts and 17%, 21%
+and 27% on the three whose candidate lines pass through this file's tables and
+backticked prose; mix is recorded and never banded, so not one of those figures
+is a pass or a fail. The 2026-09-05 calibration puts candidate slices of this
+spec at 3.79–4.31 bytes per token, which makes these budgets of the order of 30
+to 400 tokens — an order derived from a measured range, not itself a
+measurement, which is why the check prints no token count and neither does this
+sentence.
+
+The set spans all five EARS patterns, and one prompt targets a **superseded**
+requirement — R14, superseded by R33 — at 994 characters. Deleting R14's
+original sentence, the thing R3 forbids, turns that row into `target-missing`
+with the budget printed as `unmeasured` and exit 4. So a deletion R3 already
+forbids now has a second, independent instrument that notices it.
+
+**The unflattering part, reported rather than tuned away.** Three budgets are
+small enough that a ±20% band is only tens of characters wide: `waived-not-pass`
+124 (band 99..148), `override-record` 153 (122..183), `view-read-only` 212
+(169..254). One new spec line carrying one of those prompts' terms, anywhere
+above the target, moves the row out of band by itself — which is exactly what
+the falsification did, taking `waived-not-pass` to 242 with a single added
+requirement. That is a real property of a percentage band over a small absolute
+figure, and these three will be the noisiest rows in the set. It was not fixed
+by widening the band or by choosing blander search terms, because both would be
+tuning the instrument until it agreed with the answer.
+
+**A measured limitation of the `mix` heuristic.** It tests whether a line
+*begins* with a table pipe, so a markdown table row indented by two spaces —
+which is how the status table in `spec.md` is written — is counted as prose. Of
+the 19 candidate lines behind the `id-permanence` budget, one indented table row
+scores as prose and its neighbour scores as markup only because it happens to
+contain a backtick. The recorded mix figures are therefore a floor, not a
+bracket. This is not corrected here: mix is never compared against anything, and
+changing the heuristic would move a recorded figure without any measurement
+saying which value is right.
 
 **The calibration, and why there is still no printed token count.** Measured
 2026-09-05 against the model's own tokeniser via `/v1/messages/count_tokens`, with

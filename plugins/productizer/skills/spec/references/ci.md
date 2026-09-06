@@ -38,10 +38,23 @@ that a contributor gets all of it in one run instead of four.
 ## `--base`, not `--changed`
 
 `run-checks.sh --changed PATH` wants a **file listing** the changed paths, one
-per line. Handing it a changed file instead is accepted, reads as a change set
-of one path, and passes having examined almost nothing — a hollow green that
-looks identical to a real one. `--base REF` derives the set from `git diff`
-against the merge base, which is the thing CI actually has.
+per line. **Corrected 2026-09-06:** handing it a changed FILE instead is now
+REFUSED with exit 2, not accepted. This paragraph previously said it was
+accepted, read as a change set of one path, and passed having examined almost
+nothing - which was true, and was B45. The runner now checks the change set
+before anything runs: an entry that exists is never questioned, and an entry
+that does not exist must at least be SHAPED like a path. A leading `#`, any
+whitespace, or a shell metacharacter is refused, naming the offending line.
+Existence alone could not be the rule - three checks build sandboxes whose
+fixtures name files that are never created, and refusing on absence would turn
+3 of 31 checks red. Two holes remain and are stated in the code: a path-shaped
+non-word like `fi` is still accepted, and a deleted path containing a space is
+falsely refused.
+
+`--base REF` remains the right flag for CI regardless: it derives the set from
+`git diff` against the merge base, which is the thing CI actually has. The
+refusal above narrows one failure mode; it does not make `--changed` the better
+choice.
 
 That is also why the checkout is `fetch-depth: 0`. A shallow clone has no merge
 base; `run-checks.sh` calls that a usage error and exits 2, which is correct and

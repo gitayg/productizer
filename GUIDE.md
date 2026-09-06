@@ -353,6 +353,41 @@ concern is open with no ruling behind it, when a pending ruling is cited by
 nothing, and when a pending ruling is still wearing the template. A ruling that
 still reads like the template is a file, not an ask.
 
+## Checking a spec this lifecycle did not write
+
+`validate-spec.py --format speckit <file>` adapts a spec-kit spec in memory and validates it. The
+file on disk is never written.
+
+Seven mechanical rules, no semantic rewriting: `FR-0NN` becomes `R<n>`, `System MUST` becomes `The
+system shall`, the id separator becomes an em dash, headings are normalised, and an id allocator is
+synthesized. A line matching no rule passes through untouched and is counted, so nothing is
+silently reshaped.
+
+**Seven check families report `n/a` and are never counted as passes** - supersession, per-requirement
+status, the id counter, count-mismatch, citations, section-match and the permanence baseline. They
+are not skipped because they are hard; spec-kit's format has no such concept, so a pass would be a
+claim about something that does not exist.
+
+It earns its keep: on a real spec-kit spec it reported `EARS_UNQUANTIFIED: R7 uses the unquantified
+term 'sufficient'` - in a feature whose own spec-kit-generated checklist had ticked *Requirements
+are testable and unambiguous*.
+
+Be accurate about what this does and does not show. spec-kit's per-feature directory scope is a
+design choice, not a defect, and its ids are stable within it - measured, by diffing an adapted
+pre-update snapshot against the current file: byte-identical for the first twelve requirements,
+zero renumbering. Its `analyze` step does detect conflicting requirements; the difference is
+deterministic arithmetic against LLM judgement, not presence against absence.
+
+## A rail to move between the drawings
+
+The Visualizer builds its own left navigation at load, from the sections actually present, taking
+each label from that section's heading. Nothing lists the sections twice - a hardcoded rail would
+go stale the day a seventh drawing is added.
+
+A section that could not run stays in the rail and is marked, quoting its own reason. A section
+reporting a measured zero is left unmarked, because it was measured. Hiding an unmeasurable section
+from navigation would conceal exactly what this product exists to surface.
+
 ## The ratio, and when it moved
 
 The Visualizer opens with one number: the share of check tools carrying a self-test, with its

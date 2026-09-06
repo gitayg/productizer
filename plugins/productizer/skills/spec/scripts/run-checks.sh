@@ -24,6 +24,10 @@
 #                    Looked for relative to the working directory first, which
 #                    is what someone typing a path means, then under the
 #                    repository root. A miss names both places searched.
+#                    Its CONTENTS are read as a change set and are checked
+#                    for being one: a line that is not there AND could never
+#                    have been a path - whitespace in it, a leading `#`, a
+#                    shell metacharacter - refuses the run and is quoted back.
 #   --base REF       derive the changed paths from git diff against REF
 #   --tags LIST      comma-separated requirement tags carried by this change
 #   --root DIR       repo root the checks run in, and what every relative path
@@ -64,6 +68,12 @@
 #   - A check that examined nothing FAILS, whatever it printed and whatever it
 #     returned. This is the point of the whole script; see the coverage
 #     section of `references/checks.md`.
+#   - A change set that is not a list of paths is exit 2, with the offending
+#     line quoted. `--changed` handed a script was accepted and the script's
+#     own source lines became the change under test; the result read like a
+#     real run and the dashboard published it. Absence is NOT what is refused
+#     - a file this change deleted is legitimately absent - only a line that
+#     could never have been a path.
 #   - The coverage denominator is derived from the spec, not from the check.
 #     A check that shrinks what it claims does not shrink what it is measured
 #     against: every active requirement in `policy.spec` gets a row, and a row
@@ -247,8 +257,10 @@ done
 # ---------------------------------------------------------------------------
 # --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
 #
-# Six cases, one per way the contract at the top of this file can be reached,
-# each driven through THIS script - so the argument handling, the config
+# Eight cases: six of them one per way the contract at the top of this file can
+# be reached, and two for the change set the runner is handed - the one shape
+# that must be refused and the one that must not be. Each is driven through
+# THIS script, so the argument handling, the change-set check, the config
 # parser, the executor and the on_exit rewriting are all on the path. No case
 # is asserted by reading source: the exit code is read off a real run.
 #
@@ -260,6 +272,11 @@ done
 #   crashed       a result path under a directory this process is not
 #                 allowed to create, which fails AFTER the config was
 #                 accepted - the case on_exit rewrites to 1            -> 1
+#   not-a-list    --changed handed a file whose lines are a shebang, a
+#                 comment and a sentence rather than paths             -> 2
+#   deleted       a change set naming a path that is NOT there because
+#                 this change deleted it, which is legitimate and must
+#                 still run                                            -> 0
 #
 # IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
 # writes over `policy.output`, so a self-test that did it would be slower than
@@ -304,6 +321,17 @@ if [ "$MODE" = "selftest" ]; then
   printf 'RUN-CHECKS-SELFTEST-NEEDLE\n'          > "$SB/fixture/clean.txt"
   printf 'fixture/clean.txt\n'                   > "$SB/changed-clean.txt"
   printf 'fixture/finding.txt\n'                 > "$SB/changed-finding.txt"
+  # NOT a change set: the first three lines of a shell script. This is the
+  # shape that was accepted, recorded and published - see the change-set block
+  # further down - so the corpus holds it verbatim rather than a tidied stand-in.
+  printf '#!/usr/bin/env bash\n# a comment, not a path\nthis is not a file at all\n' \
+    > "$SB/changed-not-a-list.txt"
+  # A change set with a DELETION in it. The second path is created and then
+  # removed, so it is absent for the same reason a deleted file is absent, and
+  # the run must still reach a verdict over the file that is there.
+  printf 'fixture/clean.txt\nfixture/deleted-by-this-change.txt\n' > "$SB/changed-deleted.txt"
+  printf 'gone\n' > "$SB/fixture/deleted-by-this-change.txt"
+  rm -f "$SB/fixture/deleted-by-this-change.txt"
 
   # PREMISE. The scanned files must really differ in the needle, or `clean` and
   # `refused` are the same case twice and one of them is reported as a
@@ -313,6 +341,12 @@ if [ "$MODE" = "selftest" ]; then
   fi
   if grep -q RUN-CHECKS-SELFTEST-NEEDLE "$SB/fixture/clean.txt"; then :; else
     self_unmeasured "the fixture's clean file does not hold the needle, so its check would fail and the clean case would stop being clean. Unmeasured, not a pass"
+  fi
+  # PREMISE for the `deleted` case. If the removal did not take, the case is a
+  # change set of two files that are both there - the clean case a second time
+  # - and it would pass without ever asking about an absent path.
+  if [ -e "$SB/fixture/deleted-by-this-change.txt" ]; then
+    self_unmeasured "the path the deleted case names is still there, so nothing absent was ever handed to the runner. Unmeasured, not a pass"
   fi
 
   # One check, one file, one tool, `spec_coverage` off so no spec has to exist
@@ -475,9 +509,19 @@ SELFTEST_CFG_OFF
     --config "$SB/checks-pass.yaml" --root "$SB" \
     --changed "$SB/changed-clean.txt" --out "$SB/locked/sub/result.json"
 
+  self_drive not-a-list 2 \
+    "--changed handed a file that is not a list of paths: a shebang, a comment and a sentence. Believing it makes every line a changed file and writes a result that reads like a real run" \
+    --config "$SB/checks-pass.yaml" --root "$SB" \
+    --changed "$SB/changed-not-a-list.txt" --out "$SB/not-a-list.json"
+  self_drive deleted 0 \
+    "a change set naming a path this change deleted: absent, path-shaped and legitimate, so the run still reaches a verdict over what is there" \
+    --config "$SB/checks-pass.yaml" --root "$SB" \
+    --changed "$SB/changed-deleted.txt" --out "$SB/deleted.json"
+
   printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2, 3. Cases that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_FAILED"
   printf '  NOT ASSERTED: the content of any result file. Each case reads the exit CODE, so a run that reached the right code by the wrong route is invisible here and is read off the case output by hand.\n'
+  printf '  NOT ASSERTED: the `deleted` case proves the absent path was ACCEPTED, not that the verdict script counted it as deleted rather than as unexamined - the path it names falls outside the scope of the one check, so no tool was asked to open it.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
     exit 1
@@ -586,6 +630,99 @@ elif [ -n "$BASE" ]; then
 else
   die_usage "no change given. Pass --changed <file> or --base <ref>."
 fi
+
+# --- IS THIS A CHANGE SET AT ALL, OR IS IT A FILE SOMEBODY HANDED OVER? ----
+#
+# The contents of `--changed` used to be believed, whatever they were. A file
+# holding `#!/usr/bin/env bash`, a comment line and an English sentence was
+# accepted without a word: those three lines became the change under test, they
+# were recorded verbatim in `change.files`, coverage was computed against them,
+# and a result was written that reads exactly like a real run. That is not a
+# hypothetical shape. `checks-result.json` in this repository once held 2611
+# entries of which 9 existed - the other 2602 were a script's own source lines,
+# put there by a run that was handed the script instead of its change set.
+#
+# THE DAMAGE TRAVELS. `change.files` is rendered into the published dashboard,
+# so what is accepted here decides what a published page SAYS. A defect in what
+# this runner takes IN does not stay inside the runner.
+#
+# ABSENCE IS NOT THE TEST, and that is the part that has to be got right. A
+# file DELETED by the change under test is legitimately absent - the verdict
+# script below already counts those separately instead of demanding coverage
+# for them - and this repository's own check fixtures hand the runner paths
+# that were never created at all. Refusing on absence would break both. So the
+# question asked here is the narrower one absence cannot answer: COULD THIS
+# LINE EVER HAVE BEEN A PATH? Whitespace in it, a leading `#`, a shell
+# metacharacter - those are a line of a script or a sentence of prose, and no
+# change set holds one. An entry that IS there is never asked.
+#
+# IT REFUSES, IT DOES NOT FILTER. Dropping the unusable lines and running on
+# what survived would measure a scope nobody declared - the same failure with
+# tidier output - and the run would still report itself as covering a change.
+#
+# EXIT 2, NOT 3, and the contract at the top of this file decides that. 3 is a
+# deliberate no ABOUT THE CHANGE: a blocking check that ran and failed. Nothing
+# here has run. `--changed` named the wrong kind of file, which is the same
+# fault as `--changed` naming no file at all - already a 2, a few lines up.
+#
+# WHAT IT DOES NOT CATCH, said here rather than left to be discovered. A line
+# that is not a path but is SHAPED like one - `fi`, `esac`, a bare word -
+# cannot be told apart from a path this change deleted, and is accepted. The
+# hole is real and it is bounded: in every instance observed the same file also
+# held lines that could not be paths, and one of those refuses the whole run.
+# The cost in the other direction is stated too - a DELETED path with a space
+# in its name is refused, because nothing here can confirm it ever existed.
+cs_line=0
+cs_raw=""
+while IFS= read -r cs_raw || [ -n "$cs_raw" ]; do
+  cs_line=$((cs_line + 1))
+  # Same reading the plan below takes: surrounding whitespace is trimmed and a
+  # blank line is nothing. A rule that judged a different string than the one
+  # that becomes a changed path would refuse and record two different things.
+  cs_entry="${cs_raw#"${cs_raw%%[![:space:]]*}"}"
+  cs_entry="${cs_entry%"${cs_entry##*[![:space:]]}"}"
+  if [ -z "$cs_entry" ]; then continue; fi
+
+  cs_probe="${cs_entry#./}"
+  case "$cs_probe" in
+    /*) ;;
+    *) cs_probe="$ROOT/$cs_probe" ;;
+  esac
+  # It is there. Nothing else is anyone's business - not its shape, not its
+  # name. This is the same question the verdict script asks about a path a
+  # check did not cover, asked earlier and of the whole set.
+  if [ -e "$cs_probe" ]; then continue; fi
+
+  # `git diff --name-only` renders a path holding a non-ASCII or a control
+  # character in C-quoted form - "sm\303\266rg\303\245s.txt" - so a change set
+  # derived from git and handed over as a file arrives that way. git named it,
+  # which is the one thing this rule is trying to establish.
+  case "$cs_entry" in
+    '"'*'"') continue ;;
+  esac
+
+  cs_why=""
+  case "$cs_entry" in
+    "#"*) cs_why="it opens with \`#\`, which is a comment or a shebang line" ;;
+  esac
+  if [ -z "$cs_why" ]; then
+    case "$cs_entry" in
+      *[[:space:]]*) cs_why="it holds whitespace, so it is a line of text and not one path" ;;
+    esac
+  fi
+  if [ -z "$cs_why" ]; then
+    case "$cs_entry" in
+      *[\"\'\`\$\&\;\|\<\>\(\)\{\}\\]*) cs_why="it holds shell metacharacters" ;;
+    esac
+  fi
+  if [ -n "$cs_why" ]; then
+    # Quoted, because the whole point is that the reader sees what arrived
+    # instead of a file list - and collapsed to one short printable run first,
+    # because it is a line out of a file a stranger may have written.
+    cs_shown="$(printf '%s' "$cs_entry" | tr -c '[:print:]' ' ' | cut -c1-100)"
+    die_usage "the change set is not a list of paths. Line $cs_line of it reads \"$cs_shown\", and $cs_why. It is not under the repository root ($ROOT) either, so it is not a path this change deleted - it was never a path. This is what handing the runner a script, a diff or a log instead of its change set looks like: every line becomes a changed file, the coverage denominator is computed against them, and the result reads like a real run. Refusing rather than dropping the line: a run over a scope nobody declared is the same hollow green. Pass a file holding one path per line, or use --base <ref>."
+  fi
+done < "$WORK/changed.txt"
 
 # --- plan: parse, validate, decide what this change attracts ---------------
 

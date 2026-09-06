@@ -44,6 +44,30 @@
 # "$AB_OUT_DIR/cost.usd"; anything else is recorded as `unavailable`, which is
 # what an unreported cost is.
 #
+# WHERE THE CAPTURED OUTPUT GOES
+#
+# A run's index is its position within its arm IN ITS OWN RUNS FILE, so two runs
+# files each allocate index 1 for their first run. While the output tree was a
+# fixed path, those two runs both wrote `ab-out/<task>/<arm>/1/stdout` and the
+# second silently replaced the first - leaving the first runs file recording a
+# run whose captured stdout belongs to the other file. Deriving the tree from
+# `dirname $RUNS` alone does not fix it: two runs files in one directory still
+# meet.
+#
+# So the tree is a function of the RUNS FILE ITSELF - its directory AND its
+# name:
+#
+#   <dir>/ab-runs.tsv   ->  <dir>/ab-out/<task>/<arm>/<index>
+#   <dir>/<other>       ->  <dir>/ab-out--<other>/<task>/<arm>/<index>
+#
+# That map is injective: the directory carries the runs file's own directory,
+# and its name determines the basename back again - `ab-out` means exactly
+# `ab-runs.tsv`, and `ab-out--X` means exactly `X`, which is never
+# `ab-runs.tsv`. Two DIFFERENT runs files therefore cannot share an output
+# directory, whether they sit in one directory or in two. The canonical
+# `ab-runs.tsv` keeps the `ab-out/` layout it already has, so runs recorded
+# before this rule still point at their own captured output.
+#
 # Runs - `.claude/productizer/ab-runs.tsv`, appended by `run`, read by `report`:
 #
 #   task  arm  run  status  duration_ms  cost_usd  output_bytes
@@ -53,7 +77,8 @@
 #
 # Exit: 0 run completed, or report emitted
 #       2 usage
-#       3 no such directory, no config, or the task has no two arms
+#       3 no such directory, no config, the task has no two arms, or the output
+#         directory for the next run index already exists
 #       5 no runs recorded for the task - not a zero difference
 #       6 an arm has no complete run (`report` only) - there is no result to read
 #       7 an arm did not complete (`run` only) - recorded as incomplete
@@ -91,6 +116,17 @@ case "$MIN_N" in ''|*[!0-9]*) echo "ab-harness: --min-n must be a whole number, 
 cd "$ROOT" || { echo "ab-harness: no such directory: $ROOT" >&2; exit 3; }
 [ -n "$CONFIG" ] || CONFIG=".claude/productizer/ab-task.tsv"
 [ -n "$RUNS" ]   || RUNS=".claude/productizer/ab-runs.tsv"
+
+# The captured-output tree, derived from the runs file - see WHERE THE CAPTURED
+# OUTPUT GOES above. Nothing else may name this path: a second definition is how
+# the two files drifted apart in the first place.
+RUNS_DIR="$(dirname "$RUNS")"
+RUNS_BASE="$(basename "$RUNS")"
+if [ "$RUNS_BASE" = "ab-runs.tsv" ]; then
+  OUT_ROOT="$RUNS_DIR/ab-out"
+else
+  OUT_ROOT="$RUNS_DIR/ab-out--$RUNS_BASE"
+fi
 
 ARMS="bare process"   # fixed order, so two reports over the same runs match byte for byte
 
@@ -133,7 +169,19 @@ if [ "$MODE" = "run" ]; then
   for arm in $ARMS; do
     eval "cmd=\$CMD_$arm"
     idx=$(( $(records_for "$arm" | wc -l | tr -d ' ') + 1 ))
-    out=".claude/productizer/ab-out/$TASK/$arm/$idx"
+    out="$OUT_ROOT/$TASK/$arm/$idx"
+    # $idx is the next index this runs file has never used, so its directory
+    # should not exist. If it does, the two accounts disagree - rows were
+    # removed from the runs file, or an earlier run was killed between capturing
+    # its output and recording it. Overwriting would leave a recorded row
+    # pointing at another run's stdout, which is the failure this refuses to
+    # make quietly.
+    if [ -e "$out" ]; then
+      echo "ab-harness: $out already exists - refusing to overwrite a captured run." >&2
+      echo "  $TASK/$arm run $idx is the next index in $RUNS, so nothing should be there." >&2
+      echo "  Move it aside or point --runs at a different file; do not overwrite it." >&2
+      exit 3
+    fi
     mkdir -p "$out"
 
     # An `x && y` list is the classic way to trip `set -e`: when x is false the

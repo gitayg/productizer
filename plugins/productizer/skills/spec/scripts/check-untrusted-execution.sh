@@ -42,16 +42,32 @@
 #   empty afterwards.
 #
 # R17, second half - a person decides (`--assert r17-decision`).
-#   THIS IS EXPECTED TO FAIL, and it is not narrowed to stop it failing. R17
-#   says the gate blocks UNTIL A PERSON DECIDES. The gate implements the block
-#   and implements no deciding: there is no environment variable, no marker
-#   file, no field in the payload by which someone who has already said yes can
-#   say so, and the only remaining route is retyping the command in their own
-#   shell - which the gate's own closing paragraph argues against. So two
-#   assertions: that the refusal names a route by which a decision reaches the
-#   gate, and that at least one of the consent signals listed in the fixture
-#   actually lifts a block. Both fail today. Rewriting them to match what the
-#   code does would reproduce exactly the defect described above.
+#   MEASURED 2026-09-06: THIS PASSES. `--assert r17-decision` exits 0, three
+#   assertions evaluated and three upheld. Until this date this paragraph said
+#   it was EXPECTED TO FAIL - that the gate implemented the block and no
+#   deciding, that there was no route by which someone who had already said yes
+#   could say so, and that "both fail today". That was true of the gate as it
+#   then stood; the deciding half was subsequently built and the assertions
+#   were rewritten with it, and the rewrite is documented at length beside
+#   assertion 1 below. What is asserted now is three things, and none of them
+#   is the old pair:
+#
+#     1  a recognised publish, with a fresh checklist naming that exact
+#        command, in a mode documented to prompt, returns
+#        `permissionDecision: "ask"` - the route to a person is Claude Code's
+#        own permission prompt, drawn by the harness and unreachable from
+#        inside the process being gated.
+#     2  NO signal the agent can write for itself - environment variable,
+#        marker file, payload field - turns a publish into `allow`. This is the
+#        old probe set with its meaning INVERTED: the earlier assertion
+#        demanded that one of them lift the block, which would have gone green
+#        on a gate the agent could open for itself.
+#     3  a mode not documented to show a prompt gets the hard refusal, not an
+#        ask.
+#
+#   So this group is no longer a declared failure. It is still declared as its
+#   own check rather than folded into the others - see the exit-code note
+#   below for what that separation now buys.
 #
 # R18 - the lifecycle refuses (`--assert r18`).
 #   Each argv payload in the fixture becomes one checks.yaml in a temporary
@@ -103,11 +119,20 @@
 #   2  could not run - bad usage, a missing fixture, a missing tool, or a
 #      premise that did not hold
 #
-# The default selection is `all`, which includes R17's second half, so a bare
-# run EXITS 1 TODAY and says why. `--assert` exists so the implemented
-# obligations can be declared as a blocking check without the unimplemented one
-# voiding their coverage claims, not so that the unimplemented one can be
-# forgotten: it is declared too, and it is visibly red.
+# The default selection is `all`. MEASURED 2026-09-06: a bare run EXITS 0, 63
+# assertions evaluated and 63 upheld. Until this date this paragraph said a
+# bare run EXITS 1 TODAY and says why, because `all` included R17's second half
+# and that half was unimplemented; it is implemented now and that group exits 0
+# on its own (3 of 3 upheld).
+#
+# `--assert` therefore no longer exists to keep a red group from voiding the
+# others' coverage claims. It stays for the reason that outlives that one: the
+# two declared checks bind to DIFFERENT SPEC UNITS - `untrusted-execution`
+# selects `r17-block,r18,r22`, `publish-gate-decides` selects `r17-decision`,
+# R17's deciding half alone - so a regression in either is attributed to the
+# obligation it broke instead
+# of arriving as one undifferentiated red. Nothing here is narrowed to stay
+# green: if the deciding half regresses, its own check goes red by itself.
 #
 # WHAT IT PRINTS. One BARE PATH per line, relative to the repository, for every
 # file examined - the runner parses those as coverage. Everything else is
@@ -209,11 +234,15 @@ python3 -c 'import yaml' || die_unmeasured "python3 has no yaml module; the fixt
 #   bad-group       an --assert group this tool does not know             -> 2
 #   no-fixture      a fixture directory that is not there                 -> 2
 #
-# THE SELECTION MATTERS AND IS NOT COSMETIC. A bare run asserts `all`, and this
-# file's own contract says a bare run exits 1 today - so `all` is useless as
-# the clean case. The clean case drives exactly the argv the declared check
-# `untrusted-execution` declares, which is the invocation whose exit code the
-# suite actually reads.
+# THE SELECTION MATTERS AND IS NOT COSMETIC. The clean case drives exactly the
+# argv the declared check `untrusted-execution` declares, which is the
+# invocation whose exit code the suite actually reads - not `all`, which is a
+# selection nothing in checks.yaml runs. MEASURED 2026-09-06: this reason is
+# now the only one. Until this date the paragraph led with a second one, that a
+# bare `all` run exited 1 and so was useless as a clean case; `all` exits 0
+# today (63 of 63 upheld) and would serve, but driving the declared argv is
+# still the stricter choice because it is the argv whose regression the suite
+# would actually see.
 #
 # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If the committed gate and corpus
 # do not exit 0 over that selection, every case below would be red for that
