@@ -588,7 +588,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Thirty-two requirements are active**, and they are the whole of what has
+**Thirty-five requirements are active**, and they are the whole of what has
 been agreed.
 
 Six more are superseded and none withdrawn, and neither kind is listed here.
@@ -597,8 +597,7 @@ years ago still leads somewhere — but a guide is read by someone deciding what
 to do next, and a superseded sentence gives them no sign it stopped being
 true.
 
-**Always, with no trigger.** Five requirements hold whatever else is
-happening:
+**Always, with no trigger.** Six requirements hold whatever else is happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
 - **R2** — The lifecycle shall keep requirement ids permanent: never reused,
@@ -608,8 +607,10 @@ happening:
 - **R4** — Every published view shall be read-only with respect to the spec.
 - **R5** — Every check shall declare what it must have examined for its pass
   to count.
+- **R39** — Every check tool shall carry a self-test that reaches each exit
+  code it can return.
 
-**When something arrives.** Eleven things happen on a discrete trigger:
+**When something arrives.** Nine things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -621,10 +622,6 @@ happening:
   every figure in it from a file in the repository.
 - **R32** — When a classification changes the spec, the lifecycle shall record
   it in the spec's change log.
-- **R33** — If an intent contradicts an active requirement, then the lifecycle
-  shall stop.
-- **R34** — If an intent contradicts an active requirement, then the lifecycle
-  shall ask which wins.
 - **R35** — When a requirement is added, the lifecycle shall allocate the next
   unused id.
 - **R36** — When a requirement is added, the lifecycle shall record it in the
@@ -632,19 +629,21 @@ happening:
 - **R37** — When a person overrides a failing check, the lifecycle shall
   record the override in a file naming the check, the authority and the
   reason.
-- **R38** — While a failing check is overridden, the lifecycle shall render it
-  as failed and waived, and never as passed.
+- **R40** — When the check suite runs, the lifecycle shall run the self-test
+  of every check tool it invokes.
 
-**For as long as a state lasts.** Two requirements are true for the duration
+**For as long as a state lasts.** Three requirements are true for the duration
 of a state, not at a moment inside it:
 
 - **R12** — While a contradiction is unruled, the lifecycle shall merge no
   spec change that depends on it.
 - **R13** — While a check tool named by the configuration is absent, the
   lifecycle shall report that check as missing rather than skipped.
+- **R38** — While a failing check is overridden, the lifecycle shall render it
+  as failed and waived, and never as passed.
 
-**When something goes wrong.** Ten defences, written as `If … then` because a
-designed path and a defended one are not the same thing:
+**When something goes wrong.** Thirteen defences, written as `If … then`
+because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
   the lifecycle shall report it as hollow and treat it as a failure.
@@ -667,6 +666,13 @@ designed path and a defended one are not the same thing:
   to run it.
 - **R31** — If a published view declares a capability that can publish new
   versions of itself, then the lifecycle shall refuse to publish it.
+- **R33** — If an intent contradicts an active requirement, then the lifecycle
+  shall stop.
+- **R34** — If an intent contradicts an active requirement, then the lifecycle
+  shall ask which wins.
+- **R41** — If an active requirement's sentence was rewritten in place, then
+  the lifecycle shall report as suspect every artifact citing that requirement
+  whose own line has not changed since that rewrite.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

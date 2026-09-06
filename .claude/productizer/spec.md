@@ -9,13 +9,13 @@ site generators, doc builds and packaging all skip that directory, so the spec
 is never rendered as a page or shipped in a release.
 
 Next requirement id
-: `R39` — allocate from here, then increment. This is the highest id the spec
+: `R42` — allocate from here, then increment. This is the highest id the spec
 has ever used, not a count of the rows on screen. Ids are never reused and
 never renumbered, and stay unique across the whole repo even if this spec is
 later split into several files.
 
 Requirements
-: 32 active, 6 superseded, 0 withdrawn.
+: 35 active, 6 superseded, 0 withdrawn.
 
 Audit trail
 : `git log -p .claude/productizer/spec.md`. Each commit is one change, joined to the
@@ -94,6 +94,7 @@ file stays skimmable at two hundred. One row per requirement, in id order.
 - **R3** — The lifecycle shall keep a replaced requirement's original text in the spec, marked superseded.
 - **R4** — Every published view shall be read-only with respect to the spec.
 - **R5** — Every check shall declare what it must have examined for its pass to count.
+- **R39** — Every check tool shall carry a self-test that reaches each exit code it can return.
 
 ### Event-driven
 
@@ -106,17 +107,16 @@ file stays skimmable at two hundred. One row per requirement, in id order.
 - **R10** — When a repository with history is imported, the lifecycle shall mark every drafted requirement inferred and unconfirmed.
 - **R11** — When a published view is regenerated, the lifecycle shall read every figure in it from a file in the repository.
 - **R32** — When a classification changes the spec, the lifecycle shall record it in the spec's change log.
-- **R33** — If an intent contradicts an active requirement, then the lifecycle shall stop.
-- **R34** — If an intent contradicts an active requirement, then the lifecycle shall ask which wins.
 - **R35** — When a requirement is added, the lifecycle shall allocate the next unused id.
 - **R36** — When a requirement is added, the lifecycle shall record it in the acceptance criteria table.
 - **R37** — When a person overrides a failing check, the lifecycle shall record the override in a file naming the check, the authority and the reason.
-- **R38** — While a failing check is overridden, the lifecycle shall render it as failed and waived, and never as passed.
+- **R40** — When the check suite runs, the lifecycle shall run the self-test of every check tool it invokes.
 
 ### State-driven
 
 - **R12** — While a contradiction is unruled, the lifecycle shall merge no spec change that depends on it.
 - **R13** — While a check tool named by the configuration is absent, the lifecycle shall report that check as missing rather than skipped.
+- **R38** — While a failing check is overridden, the lifecycle shall render it as failed and waived, and never as passed.
 
 ### Unwanted behaviour
 
@@ -138,6 +138,9 @@ file stays skimmable at two hundred. One row per requirement, in id order.
 - **R26** — If a value could not be measured, then the lifecycle shall not record it as zero.
 - **R29** — If a configured command would let the repository being examined select an executable in any argv position, then the lifecycle shall refuse to run it.
 - **R31** — If a published view declares a capability that can publish new versions of itself, then the lifecycle shall refuse to publish it.
+- **R33** — If an intent contradicts an active requirement, then the lifecycle shall stop.
+- **R34** — If an intent contradicts an active requirement, then the lifecycle shall ask which wins.
+- **R41** — If an active requirement's sentence was rewritten in place, then the lifecycle shall report as suspect every artifact citing that requirement whose own line has not changed since that rewrite.
 
 ### Optional
 
@@ -206,6 +209,9 @@ until a human rules on it.
 | R12 | `pending-ruling-scope` check — refuses a spec change touching the requirement a pending ruling names, and prints the allocations it lets through so the decision not to block is visible. Falsified both ways: the contested requirement blocks, an unrelated one does not. |
 | R13 | `missing-tool-reported` check over a committed fixture in `fixtures/missing-tool/` — six assertions, including that an absent tool changes the VERDICT and not only the status, because a status that does not change the verdict is a skip wearing a different name. The fixture guards its own premise: point it at an installed tool and it reports unmeasured, not a pass. |
 | R19 | `spec-home-stop` check — four constructed trees, two differing only in whether one classification record exists. An unreachable spec home with nothing classified is clean; the same tree with a record is a finding; a record that cannot name its spec commit is a finding; a reachable home with a well-formed record stays clean. Each assertion falsified separately. The row previously named `classification-provenance`, which asserts that a record carries the commit and hash it was made against and claims R6 — related mechanism, different obligation. `acceptance-rows` 1.1 caught the disagreement between this row and the claim |
+| R39 | **Nothing yet.** No check claims this. Measured 2026-09-05: 58 scripts under `plugins/productizer/skills/spec/scripts/`, 4 carry a self-test, and only 2 of those are invoked by CI or a declared check. A verifier would enumerate the tools each declared check invokes and assert every one answers a self-test flag that reaches each exit code in its own documented contract. `spec-doctor.sh --selftest` exits 2 with `unknown argument` today |
+| R40 | **Nothing yet.** Distinct from R39: R39 obliges a self-test to EXIST, this obliges it to RUN. Measured 2026-09-05: `check-acceptance-rows.sh --selftest` and `check-nothing-merged.sh --selftest` both exist and are invoked by nothing. A verifier would assert that every self-test R39 requires is reached by a declared check or by `.github/workflows/checks.yml`, and that its failure sets the run's exit code |
+| R41 | **Nothing yet.** `check-suspect-links.sh` covers the case where the rewrite is INSIDE the range measured, and `checks.yaml` already declares the gap: it compares against ONE base ref. DEMONSTRATED 2026-09-05 on a constructed history outside this repo - R1 inverted in place from `exactly one` to `at most three`, two unrelated commits on top: the default base exits 0 PASS with `sentence changed in place: 0` while the stale acceptance row goes unflagged, and the same tree with a base behind the rewrite exits 1 and flags it. A verifier would choose the baseline PER REQUIREMENT, at the commit that requirement's own sentence last changed |
 
 ## Change log
 
@@ -223,6 +229,7 @@ someone edits one and not the other.
 | Date | Issue | Branch / PR | Added | Refined | Superseded / withdrawn | Summary |
 |---|---|---|---|---|---|---|
 | <YYYY-MM-DD> | <#123 / PROJ-123> | `<branch>` / <pr> | R41–R43 | R12 | R7 → R41 | <what changed and why> |
+| 2026-09-06 | [#8](https://github.com/gitayg/productizer/issues/8), [#9](https://github.com/gitayg/productizer/issues/9) | `main` / — | R39–R41 | — | — | B42 and B43, both classified `extend` at Stage 1 against all 32 active requirements and the 4 principles. B42 was judged to carry TWO obligations and split, the sixth such split in this spec: R39 obliges a check tool to CARRY a self-test, R40 obliges the suite to RUN it. R41 is B43. Every wording was paired by `contradiction-check.py` against all 32 active requirements: no contradiction, no undecided. R39's subject noun was chosen BROAD over narrow by the maintainer, knowing the measured consequence - 58 scripts, 4 with a self-test - so all three land `Missing` under `spec_coverage: require` and the suite goes red on arrival. That red is the work queue, accepted deliberately. R33, R34 and R38 were also moved to the headings their sentence shape requires, clearing the three long-standing EARS_SECTION_MISMATCH warnings; no sentence, id or status changed |
 | 2026-09-02 | [#7](https://github.com/gitayg/productizer/issues/7) | `feature/7-waiver-rendering` / PR | R37–R38 | — | — | B13. A ruling records that a person overruled a failing check; what the CHECK shows afterwards was never decided. Intake split it because the rendering and the FORMAT that records the waiver are two obligations - a ruling file records the decision and no file format records the waiver, which is why this sat blocked by design rather than by effort. P1 constrains the answer: an overridden check WAS measured, so P1 does not forbid this, but a failure rendered green because somebody said so is a judgment wearing a measurement's clothes. So the status stays `fail` and only the rendering and the blocking change. |
 | 2026-09-01 | — | — | R33–R36 | — | R8 → R35, R36; R23 → R33, R34 | B31. Each carried two `shall` clauses under one id. The runner takes the best SINGLE claim per requirement, never a union, so a requirement whose halves are asserted by two different checks reads `Partial` forever - which is what both did. Split so every obligation has its own id and its own claim, the same remedy applied to R14, R16 and R21. Originals retained verbatim, marked superseded. |
 | 2026-08-29 | — | — | R23–R28 | — | R14 → R23, R24; R16 → R25, R26; R21 → R27, R28 | Each of the three carried two `shall` clauses under one id. Split so every obligation has its own id and neither half can be half-tested. Originals retained verbatim, marked superseded. |
