@@ -152,7 +152,7 @@ fi
 python3 - "$ROOT" "$TMP" "$TEMPLATE" "$OUT" "$STALE_AFTER" "$REGEN_CMD" "$HERE" <<'PYEOF'
 # -*- coding: utf-8 -*-
 """Render the lifecycle dashboard. Reads only; writes one HTML file."""
-import io, json, os, re, sys, time
+import io, json, os, re, subprocess, sys, time
 
 ROOT, TMP, TEMPLATE, OUT, STALE_AFTER, REGEN_CMD, SCRIPTS = sys.argv[1:8]
 STALE_AFTER = int(STALE_AFTER)
@@ -3263,17 +3263,489 @@ else:
                    len(_vz_lanes_o), _tot_unc))
     _vz_built += 1
 
+
+# --- section 0, drawn first: does the tooling test itself, and since when --
+# Every other drawing on this panel shows what the repository IS. This one
+# shows what it BECAME, because the number behind it - the share of check
+# tools that carry a self-test - is dull as a level and is the whole story as
+# a shape: eleven days flat at two or three, then one commit that moved it to
+# all of them. A tile reading 100% loses the eleven days, and the eleven days
+# are the finding.
+#
+# THE DENOMINATOR IS THE ARGUMENT. Counting every *.sh and *.py in the tree
+# gives a larger number that includes files nothing in the suite ever runs, so
+# the ratio flatters itself by growing its own denominator. The denominator
+# used here is the one check-selftest-coverage.sh uses: the tools the declared
+# checks and the CI workflow actually invoke, resolved against the tree AT
+# EACH COMMIT rather than against today's. It is written into
+# VZ_HISTORY.denominator and rendered beside the number, because an unlabelled
+# ratio is the failure this section exists to avoid.
+#
+# A SELF-TEST IS A DISPATCH, NOT A MENTION. The grammar is imported from
+# selftest-coverage.py rather than restated here; a second copy would disagree
+# with the check the first time either was edited and the disagreement would
+# be invisible. check-nothing-merged.sh was believed to carry a self-test for
+# exactly this reason - the flag appeared in it as a line-wrapped reference to
+# a different tool - so a file that NAMES the flag is not a file that answers
+# to it.
+#
+# WHAT THIS CANNOT SEE. The live check also PROBES: it runs each self-test to
+# find out whether the parser really accepts the flag. Probing 108 historical
+# checkouts is not something a page build may do, so this is the static
+# reading only, and where a tool's source reads as a dispatch that its parser
+# would reject, this series counts it and the live check does not. At the
+# commit this page was generated from the two agree; earlier they may not, and
+# the provenance below says so rather than leaving it to be discovered.
+#
+# COST. One `git log --raw` and two `git cat-file --batch` reads for the whole
+# history - no per-commit checkout and no per-commit `ls-tree`. The tree at
+# each commit is carried forward from the raw diff lines, which is why this
+# costs a fifth of a second on 108 commits instead of four.
+
+VZ_H_WF_PATH = '.github/workflows/checks.yml'
+# The exact denominator, rendered beside the number. `in this repository` is
+# not decoration: a third-party tool the suite shells out to - shellcheck - is
+# invoked by these same files and is one nobody here can add a self-test to, so
+# counting it would put a shortfall in the denominator that no commit could
+# ever close. It is out, for the same reason the check reports it apart.
+VZ_H_DENOM = ('check tools IN THIS REPOSITORY that %s or %s invokes, resolved '
+              'against the tree at that commit; a third-party tool nobody here '
+              'can add a self-test to is not counted'
+              % (CHECKS_PATH, VZ_H_WF_PATH))
+VZ_H_UNIT = 'tools'
+VZ_H_MOD_PATH = os.path.join(SCRIPTS, 'selftest-coverage.py')
+
+# `:<oldmode> <newmode> <oldsha> <newsha> <status>\t<path>` - the raw diff line
+# git writes under each commit. A new mode of all zeroes is a deletion.
+RE_VZ_H_RAW = re.compile(r'^:\d+ (\d+) [0-9a-f]+ ([0-9a-f]+) ([A-Z])\d*\t(.*)$')
+
+
+def vz_h_git(args, feed=None):
+    """git, with TZ pinned so R11 holds in every timezone.
+
+    stderr is CAPTURED and handed back rather than discarded: this section is
+    allowed to say `not run` and it has to be able to say why, and a silenced
+    error and a clean run look identical."""
+    env = dict(os.environ)
+    env['TZ'] = 'UTC'
+    try:
+        proc = subprocess.Popen(['git', '-C', ROOT] + args,
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, env=env)
+    except OSError as exc:
+        return None, b'', 'git could not be executed (%s)' % exc.__class__.__name__
+    out, err = proc.communicate(feed)
+    return proc.returncode, out, err.decode('utf-8', 'replace')
+
+
+def vz_h_blobs(shas):
+    """{sha: text} for many blobs, in ONE git process rather than one each."""
+    shas = sorted(set(shas))
+    if not shas:
+        return {}, None
+    rc, data, err = vz_h_git(['cat-file', '--batch'],
+                             feed=('\n'.join(shas) + '\n').encode('utf-8'))
+    if rc != 0:
+        return None, err.strip() or 'git cat-file --batch exited %s' % rc
+    out, pos = {}, 0
+    for sha in shas:
+        nl = data.find(b'\n', pos)
+        if nl < 0:
+            return None, 'git cat-file --batch stopped short of %s' % sha[:7]
+        parts = data[pos:nl].split()
+        if len(parts) != 3:
+            return None, 'git cat-file --batch could not read %s' % sha[:7]
+        size = int(parts[2])
+        out[sha] = data[nl + 1:nl + 1 + size].decode('utf-8', 'replace')
+        pos = nl + 1 + size + 1
+    return out, None
+
+
+def vz_h_commands(text):
+    """Every `command:` argv in a checks.yaml, flow style or block style.
+
+    Deliberately NOT a YAML parse, for the reason the limitations panel above
+    gives: run-checks.sh refuses without PyYAML because it decides what
+    EXECUTES; this page only displays, and taking the same dependency would
+    stop the dashboard rendering wherever PyYAML is missing. `version_command`
+    is not matched, because the version probe is not the check."""
+    out, lines, i = [], text.split('\n'), 0
+    while i < len(lines):
+        m = re.match(r'^(\s*)command:\s*(.*)$', lines[i])
+        if not m:
+            i += 1
+            continue
+        indent, rest = m.group(1), m.group(2).strip()
+        if rest.startswith('[') and rest.endswith(']'):
+            out.append([t.strip().strip('"\'') for t in rest[1:-1].split(',')])
+            i += 1
+            continue
+        if rest:
+            i += 1
+            continue
+        argv, j = [], i + 1
+        while j < len(lines):
+            mm = re.match(r'^(\s*)-\s+(.*)$', lines[j])
+            if not mm or len(mm.group(1)) <= len(indent):
+                break
+            argv.append(mm.group(2).strip().strip('"\''))
+            j += 1
+        out.append(argv)
+        i = j
+    return out
+
+
+def vz_h_runs(text):
+    """Every line of every `run:` block in a workflow, kept whole.
+
+    Block scalars are followed to their dedent so a `run: |` is read as the
+    lines under it rather than as the pipe character."""
+    out, lines, i = [], text.split('\n'), 0
+    while i < len(lines):
+        m = re.match(r'^(\s*)(?:-\s+)?run:\s*(.*)$', lines[i])
+        if not m:
+            i += 1
+            continue
+        indent, rest = len(m.group(1)), m.group(2)
+        if not rest.strip().startswith(('|', '>')):
+            out.append(rest)
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines):
+            cur = lines[j]
+            if cur.strip() and len(cur) - len(cur.lstrip()) <= indent:
+                break
+            out.append(cur)
+            j += 1
+        i = j
+    return out
+
+
+VZ_HIST, VZ_H_STATE, VZ_H_WHY, VZ_H_NOTE = None, 'read', '', ''
+vz_h_mod = None
+
+if not IS_GIT:
+    VZ_H_STATE = 'notrun'
+    VZ_H_WHY = ('this is not a git work tree, so there is no history to walk. '
+                'That is not a repository whose tooling never tested itself')
+elif not os.path.exists(VZ_H_MOD_PATH):
+    VZ_H_STATE = 'notrun'
+    VZ_H_WHY = ('there is no %s beside this script, and its dispatch grammar is '
+                'what decides whether a file carries a self-test. Writing a '
+                'second grammar here would answer a different question from the '
+                'check and never say so' % os.path.basename(VZ_H_MOD_PATH))
+else:
+    try:
+        import importlib.util
+        # Same reason as the EARS import above: a __pycache__ entry written
+        # here would be a file this generator moved, and R4 is asserted by
+        # hashing the tree before and after this script runs.
+        _vzh_bc = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        _vzh_spec = importlib.util.spec_from_file_location(
+            'productizer_selftest', VZ_H_MOD_PATH)
+        vz_h_mod = importlib.util.module_from_spec(_vzh_spec)
+        sys.modules['productizer_selftest'] = vz_h_mod
+        _vzh_spec.loader.exec_module(vz_h_mod)
+        sys.dont_write_bytecode = _vzh_bc
+    except Exception:
+        vz_h_mod = None
+    if vz_h_mod is None or not getattr(vz_h_mod, 'DISPATCH', None):
+        VZ_H_STATE = 'notrun'
+        VZ_H_WHY = ('%s is present and its dispatch grammar would not load, so '
+                    'nothing here could tell a self-test from a mention of one'
+                    % os.path.basename(VZ_H_MOD_PATH))
+
+if VZ_H_STATE == 'read':
+    _rc, _raw, _err = vz_h_git(
+        ['log', '--reverse', '--raw', '--no-abbrev',
+         '--date=format-local:%Y-%m-%d', '--pretty=format:%x01%H %ad', 'HEAD'])
+    if _rc != 0:
+        VZ_H_STATE = 'notrun'
+        VZ_H_WHY = ('git could not walk this history: %s'
+                    % (_err.strip().split('\n')[0].rstrip('. ') if _err.strip()
+                       else 'git log exited %s' % _rc))
+    else:
+        _raw = _raw.decode('utf-8', 'replace')
+
+if VZ_H_STATE == 'read':
+    # One pass, carrying the tree forward. The raw diff lines under each
+    # commit are the whole delta, so the path -> blob map after applying them
+    # is that commit's tree; verified against `git ls-tree -r HEAD`, which it
+    # reproduces exactly. A commit that touched no tool, no checks.yaml and no
+    # workflow cannot move this measurement, so it reuses the previous answer
+    # rather than being re-derived into the same one.
+    _vzh_tree, _vzh_walk, _vzh_want, _vzh_cov = {}, [], set(), []
+    for _chunk in _raw.split('\x01')[1:]:
+        _head, _, _body = _chunk.partition('\n')
+        _csha, _, _cdate = _head.partition(' ')
+        _touched = False
+        for _ln in _body.split('\n'):
+            _m = RE_VZ_H_RAW.match(_ln)
+            if not _m:
+                continue
+            _newmode, _newblob, _st, _path = _m.groups()
+            if _st in ('R', 'C'):
+                _old, _, _path = _path.partition('\t')
+                if _st == 'R':
+                    _vzh_tree.pop(_old, None)
+            if _st == 'D' or _newmode == '000000':
+                _vzh_tree.pop(_path, None)
+            else:
+                _vzh_tree[_path] = _newblob
+            if (_path in (CHECKS_PATH, VZ_H_WF_PATH)
+                    or _path.endswith('.sh') or _path.endswith('.py')):
+                _touched = True
+        _vzh_walk.append((_csha, _cdate.strip(),
+                          dict(_vzh_tree) if _touched else None))
+        # Free, because the tree is already in hand: was there a recorded check
+        # run at this commit? This is the ONLY thing a coverage series could
+        # have been built from, and the coverage row below reports what it
+        # found rather than asserting from memory what history contains.
+        _vzh_cov.append((_csha[:7], _cdate.strip(), RESULT_PATH in _vzh_tree))
+        if _touched:
+            for _p in (CHECKS_PATH, VZ_H_WF_PATH):
+                if _p in _vzh_tree:
+                    _vzh_want.add(_vzh_tree[_p])
+
+    _vzh_cfg, _vzh_err = vz_h_blobs(_vzh_want)
+    if _vzh_cfg is None:
+        VZ_H_STATE = 'notrun'
+        VZ_H_WHY = ('the declared checks and the workflow could not be read out '
+                    'of history: %s' % _vzh_err)
+
+if VZ_H_STATE == 'read':
+    # The tool set at each commit, by the same two rules the check uses: the
+    # first token of a `command:` argv that names a file present in THAT
+    # commit's tree, and any .sh or .py token in a workflow `run:` line that
+    # names one. A token carrying a {files} placeholder is not a path.
+    _vzh_sets, _vzh_toolblobs, _vzh_prev = [], set(), None
+    for _csha, _cdate, _snap in _vzh_walk:
+        if _snap is None:
+            _vzh_sets.append((_csha, _cdate, _vzh_prev))
+            continue
+        _tools = set()
+        _ckb = _snap.get(CHECKS_PATH)
+        if _ckb:
+            for _argv in vz_h_commands(_vzh_cfg[_ckb]):
+                for _tok in _argv:
+                    if not _tok or vz_h_mod.PLACEHOLDER_RE.search(_tok):
+                        continue
+                    _cand = os.path.normpath(_tok)
+                    if _cand in _snap:
+                        _tools.add(_cand)
+                        break
+        _wfb = _snap.get(VZ_H_WF_PATH)
+        if _wfb:
+            for _line in vz_h_runs(_vzh_cfg[_wfb]):
+                for _tok in _line.replace('\t', ' ').split():
+                    _tok = _tok.strip('\'"`;()')
+                    if not (_tok.endswith('.sh') or _tok.endswith('.py')):
+                        continue
+                    _cand = os.path.normpath(_tok)
+                    if _cand in _snap:
+                        _tools.add(_cand)
+        _vzh_prev = (len(_tools), tuple(sorted(_snap[t] for t in _tools)))
+        _vzh_toolblobs.update(_vzh_prev[1])
+        _vzh_sets.append((_csha, _cdate, _vzh_prev))
+
+    _vzh_src, _vzh_err = vz_h_blobs(_vzh_toolblobs)
+    if _vzh_src is None:
+        VZ_H_STATE = 'notrun'
+        VZ_H_WHY = ('the tools themselves could not be read out of history: %s'
+                    % _vzh_err)
+
+if VZ_H_STATE == 'read':
+    _vzh_disp = {}
+    for _b, _text in _vzh_src.items():
+        _hit = False
+        for _line in _text.split('\n'):
+            if _line.lstrip().startswith('#'):
+                continue
+            if any(_p.search(_line) for _p in vz_h_mod.DISPATCH):
+                _hit = True
+                break
+        _vzh_disp[_b] = _hit
+
+    # A point per commit that CHANGED THE INPUTS - the tool set or the bytes of
+    # a tool in it. A commit that moved neither cannot move the ratio, and a
+    # point for it would be a measurement nobody made. The last commit is
+    # always emitted so the line ends where the page says it was generated.
+    _vzh_points, _vzh_seen = [], None
+    for _i, (_csha, _cdate, _fp) in enumerate(_vzh_sets):
+        if _fp is None:
+            continue
+        _last = _i == len(_vzh_sets) - 1
+        if _fp == _vzh_seen and not _last:
+            continue
+        if _fp == _vzh_seen and _last and _vzh_points \
+                and _vzh_points[-1]['sha'] == _csha[:7]:
+            continue
+        _vzh_seen = _fp
+        _total, _blobs = _fp
+        _tested = len([_b for _b in _blobs if _vzh_disp[_b]])
+        _vzh_points.append({
+            'd': _cdate, 'sha': _csha[:7], 'total': _total, 'tested': _tested,
+            'ratio': (round(float(_tested) / _total, 6) if _total else None)})
+
+    if not _vzh_points:
+        VZ_H_STATE = 'notrun'
+        VZ_H_WHY = ('this history has no commit that declares a check or a '
+                    'workflow, so there is no tool set to measure a ratio over. '
+                    'That is nothing to divide by, not a ratio of zero')
+
+if VZ_H_STATE == 'read':
+    # The hero answers the two questions the section is for: what the share is
+    # now, and WHEN IT LAST MOVED. A delta against the previous point would
+    # read 0 on every quiet day and say nothing; a delta against the last point
+    # that held a DIFFERENT value names the inflection.
+    _cur = _vzh_points[-1]
+    _hero = {'value': _cur['ratio'], 'delta': None, 'since': _cur['d'],
+             'label': 'share of check tools carrying a self-test'}
+    if _cur['ratio'] is not None:
+        _prior = [p for p in _vzh_points[:-1]
+                  if p['ratio'] is not None and p['ratio'] != _cur['ratio']]
+        if _prior:
+            _hero['delta'] = round(_cur['ratio'] - _prior[-1]['ratio'], 6)
+            _hero['since'] = _prior[-1]['d']
+    VZ_HIST = {'denominator': VZ_H_DENOM, 'unit': VZ_H_UNIT,
+               'points': _vzh_points, 'hero': _hero,
+               # ALWAYS null. See the coverage row rendered below: covered /
+               # partial / missing over time needs the suite RUN at each
+               # commit, and the file that would hold it is gitignored.
+               'coverage': None}
+
+# --- the markup. VIEW styles and animates these; it never creates them. ----
+# COVERAGE. Not drawn, and the reason is measured here rather than asserted.
+# Covered / Partial / Missing per requirement is not a property of the source:
+# it is what a RUN of the suite recorded, so a series needs one recorded run
+# per commit. This history does hold some - the result file was tracked for a
+# stretch and then removed and gitignored - but it stops well before the step
+# this section exists to show, and a coverage line that ends before the event
+# is worse than no line, because a reader takes the end of a line for the end
+# of the story. So VZ_HISTORY.coverage is null, the row is rendered rather
+# than dropped, and it carries the same em dash the stat tiles use for never
+# run so that nobody reads its absence as coverage being fine.
+_vzh_cov_seen = [c for c in (_vzh_cov if VZ_H_STATE == 'read' else []) if c[2]]
+if _vzh_cov_seen:
+    _vzh_cov_last = _vzh_cov_seen[-1]
+    _vzh_cov_since = len(_vzh_cov) - 1 - max(
+        i for i, c in enumerate(_vzh_cov) if c[2])
+    _vzh_cov_detail = (
+        'It is recorded at %d of the %d commit(s) walked here, the last at '
+        '<span class="mono">%s</span> on %s — and at none of the %d commit(s) '
+        'since, because it was removed from the tree and is gitignored. The '
+        'step this section is about is one of those %d. A coverage line drawn '
+        'from what history holds would stop before the thing the page is '
+        'showing you, and a line that stops reads as a story that stopped.'
+        % (len(_vzh_cov_seen), len(_vzh_cov), esc(_vzh_cov_last[0]),
+           esc(_vzh_cov_last[1]), _vzh_cov_since, _vzh_cov_since))
+else:
+    _vzh_cov_detail = (
+        'No commit walked here carries one, so there is nothing to plot at all. '
+        'That is an absence of observations, not a run in which nothing was '
+        'covered.')
+
+VZ_H_COVERAGE_ROW = (
+    '<div class="vz-coverage-notrun"><b>—</b>'
+    '<span><b>Covered / Partial / Missing over time: not run.</b> Reconstructing '
+    'it needs the check suite RUN at each commit, and the only record of a run '
+    'is <span class="mono">%s</span>. %s Interpolating between what survives '
+    'would draw coverage this repository never measured, which is the one thing '
+    'every panel on this page refuses to do.</span></div>'
+    % (esc(RESULT_PATH), _vzh_cov_detail))
+
+if VZ_H_STATE != 'read':
+    # The coverage row is a SIBLING of the absence, not nested inside its
+    # paragraph: the row is a div, and a div inside a p is a p the browser has
+    # already closed. It is still emitted, because the one thing this section
+    # may never do is let a reader take a missing row for a measured one.
+    p_vz_hist = (vz_empty('NOT RUN — the self-test ratio was not measured.',
+                          '%s. This is not a measured zero and not a flat line: '
+                          'nothing was counted, so nothing is drawn.'
+                          % esc(VZ_H_WHY))
+                 + VZ_H_COVERAGE_ROW)
+else:
+    _h = VZ_HIST['hero']
+    _pct = ('%.1f%%' % (_h['value'] * 100)) if _h['value'] is not None else '—'
+    if _h['delta'] is None:
+        _dtxt = 'no change within measured history'
+    else:
+        _dtxt = ('%+.1f points' % (_h['delta'] * 100))
+    _first, _lastp = VZ_HIST['points'][0], VZ_HIST['points'][-1]
+    p_vz_hist = (
+        '<div class="vz-hist">'
+        '<div class="vz-hero">'
+        '<div class="vz-hero-label">%s &mdash; denominator: %s</div>'
+        '<div class="vz-hero-value" id="vz-hero-value">%s</div>'
+        '<div class="vz-hero-delta" id="vz-hero-delta">%s</div>'
+        '<div class="vz-hero-since">%s of %s %s at %s &middot; last moved %s</div>'
+        '</div>'
+        '<div class="vz-ranges" id="vz-ranges">'
+        '<button class="vz-range" data-days="7">7 days</button>'
+        '<button class="vz-range" data-days="30">30 days</button>'
+        '<button class="vz-range" data-days="90">90 days</button>'
+        '<button class="vz-range" data-days="0">All</button>'
+        '</div>'
+        '<div class="vz-chartwrap">'
+        '<svg id="vz-chart" viewBox="0 0 900 260" preserveAspectRatio="none"></svg>'
+        '<div class="vz-tip" id="vz-tip" hidden></div>'
+        '</div>'
+        '<svg id="vz-brush" viewBox="0 0 900 48" preserveAspectRatio="none"></svg>'
+        '%s'
+        '<p class="provenance">Walked from <span class="mono">git log --reverse '
+        '--raw</span> over %d commit(s), %s to %s. At each commit the tool set is '
+        'resolved the way <span class="mono">check-selftest-coverage.sh</span> '
+        'resolves it — the first token of a <span class="mono">command:</span> '
+        'argv in <span class="mono">%s</span> that names a file present in that '
+        'commit’s tree, plus every <span class="mono">.sh</span> or '
+        '<span class="mono">.py</span> token in a <span class="mono">run:</span> '
+        'line of <span class="mono">%s</span> that names one — and each of '
+        'those files is read at that commit and asked whether it DISPATCHES on a '
+        'self-test flag. The dispatch grammar is imported from '
+        '<span class="mono">selftest-coverage.py</span>, not restated here, so '
+        'this page and that check cannot drift apart. A file that merely mentions '
+        'the flag in a comment does not count. %d point(s) are drawn, one per '
+        'commit that changed the tool set or the bytes of a tool in it; a commit '
+        'that changed neither cannot move the ratio and is not redrawn as if it '
+        'had been measured again. <b>What this does not do is probe.</b> The live '
+        'check runs each self-test to see whether the parser really accepts the '
+        'flag; running %d historical checkouts is not something a page build may '
+        'do, so a tool whose source reads as a dispatch its parser would reject '
+        'is counted here and is not counted there. At <span class="mono">%s</span> '
+        'the two agree — %d of %d — and earlier in this series they may '
+        'not.</p>'
+        '</div>'
+        % (esc(_h['label']), esc(VZ_HIST['denominator']), esc(_pct), esc(_dtxt),
+           _lastp['tested'], _lastp['total'], esc(VZ_H_UNIT), esc(_lastp['d']),
+           esc(_h['since']),
+           VZ_H_COVERAGE_ROW,
+           len(_vzh_walk), esc(_first['d']), esc(_lastp['d']),
+           esc(CHECKS_PATH), esc(VZ_H_WF_PATH), len(VZ_HIST['points']),
+           len(_vzh_walk), esc(_lastp['sha']), _lastp['tested'], _lastp['total']))
+    _vz_built += 1
+
 p_vz = ('<div class="h">Visualizer — the lifecycle as a drawing</div>'
-        '<p class="lede">Five pictures of things the rest of this page reports as numbers, '
+        '<p class="lede">Six pictures of things the rest of this page reports as numbers, '
         'drawn because in each case the shape is the fact and a count loses it. The first is '
-        'the system itself and the other four are details of it, which is the order they are '
-        'in: a reader wants the shape of the thing before its parts. Everything '
+        'a line over time, because the one question a level cannot answer is whether it is '
+        'moving; the second is the system itself and the other four are details of it, which '
+        'is the order they are in: a reader wants to know the direction, then the shape of '
+        'the thing, then its parts. Everything '
         'here is read from the repository at generation time, and a section that could not be '
         'built says which of <b>not run</b>, <b>unknown</b> and <b>a measured zero</b> it '
         'is — an empty drawing and a drawing of nothing look identical, which is why no '
         'section is ever left blank.</p>'
-        '<div class="vz" id="panel-visualizer">%s%s%s%s%s</div>'
-        % (vz_sec('vz-architecture', 'The system, and what it is allowed to do',
+        '<div class="vz" id="panel-visualizer">%s%s%s%s%s%s</div>'
+        % (vz_sec('vz-history', 'Does the tooling test itself, and since when',
+                  'The share of the check tools this suite actually invokes that carry a '
+                  'self-test, at every commit that changed them. The level is the least '
+                  'interesting thing on it: what the line shows is a long flat stretch and '
+                  'then a step, and a bar of today\u2019s figure would show neither. The '
+                  'denominator is printed beside the number, because a ratio without one is '
+                  'the thing this drawing exists to stop.', p_vz_hist),
+           vz_sec('vz-architecture', 'The system, and what it is allowed to do',
                   'The nine stages in the order the skill writes them, the artifacts each one '
                   'names, the three layers that can refuse work, and the principles every '
                   'requirement sits under. Nothing on this drawing is a list kept in the '
@@ -3604,9 +4076,14 @@ BODY = (
 BODY = BODY + DL + STALE
 
 DATA = ('var PROD = %s;\nvar CUR0 = %d;\nvar HUMAN = %d;\nvar DEFERRED = %d;\nvar HUMANL = %s;\nvar S = %s;\n'
+        'var VZ_HISTORY = %s;\n'
         % (json.dumps(PRODUCT), CUR0, HUMAN_ITEMS, len(_deferred),
            json.dumps(HUMAN_LIST, ensure_ascii=False),
-           json.dumps(S, indent=1, sort_keys=True, ensure_ascii=False)))
+           json.dumps(S, indent=1, sort_keys=True, ensure_ascii=False),
+           # null, not an empty series: a chart drawn from [] is a chart of a
+           # repository whose tooling never tested itself, and that is a
+           # different claim from "this was not measured".
+           json.dumps(VZ_HIST, sort_keys=True, ensure_ascii=False)))
 
 tpl = slurp(TEMPLATE)
 # @@STALECSS@@ sits flush against the end of the last rule in the stylesheet,

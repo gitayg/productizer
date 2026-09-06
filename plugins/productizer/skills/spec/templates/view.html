@@ -708,6 +708,134 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
    lines and survives that rule being edited. */
 @media (prefers-reduced-motion:reduce){
   .vz-node,.vz-act,.vz-row,.vz-wire{transition:none}}
+
+/* ---------- history: one ratio, over the commits that moved it -------------
+   A count answers "how many"; only a ratio answers "is this getting better",
+   which is the question this section exists for. Every colour below resolves
+   to a token declared at the top of this sheet - there is not one literal
+   colour in the block, so the palette edit that would take this page to a
+   light ground takes this section with it and needs nothing changed here.
+
+   THE DELTA IS NOT COLOURED BY DIRECTION. Up is better for THIS ratio and the
+   generator does not know that about the next one; painting a rise green here
+   would be the page asserting a direction it never read, which is the same
+   fabricated-signal error as drawing an unknown as a zero. The SIGN carries
+   the direction instead, and it is always written - never a bare number the
+   reader has to compare against a remembered one. */
+.vz-hist{display:flex;flex-direction:column;gap:12px}
+
+.vz-hero{display:flex;flex-direction:column;gap:2px;background:var(--surface);
+  border:1px solid var(--line);border-radius:10px;padding:13px 16px}
+.vz-hero-label{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;
+  letter-spacing:.09em;color:var(--muted)}
+.vz-hero-value{font-size:38px;font-weight:600;letter-spacing:-.03em;line-height:1.12;
+  color:var(--text);font-variant-numeric:tabular-nums}
+/* An unreadable hero is the `?` the rest of this page already means by "read,
+   and could not be determined". Drawn quiet, and never as 0.00 - a zero here
+   would claim somebody measured the ratio and found none of it. */
+.vz-hero-value.unk{font-family:var(--mono);font-size:30px;color:var(--muted);opacity:.55}
+.vz-hero-delta{font-family:var(--mono);font-size:12.5px;color:var(--text);
+  font-variant-numeric:tabular-nums}
+.vz-hero-delta.unk{color:var(--muted);opacity:.6}
+.vz-hero-since{font-size:11.5px;color:var(--muted)}
+
+.vz-ranges{display:flex;gap:6px;flex-wrap:wrap}
+/* An author `display` beats the user agent's [hidden] rule, so a hidden
+   flex row goes on being drawn unless this says otherwise - which left the
+   range buttons standing over a NOT RUN chart until it was looked at. */
+.vz-ranges[hidden]{display:none}
+.vz-range{appearance:none;background:none;border:1px solid var(--line);border-radius:999px;
+  color:var(--muted);font-family:var(--mono);font-size:10.5px;padding:3px 11px;cursor:pointer;
+  white-space:nowrap;transition:color .15s,border-color .15s,background-color .15s}
+.vz-range:hover{color:var(--text);border-color:var(--muted)}
+.vz-range.on{color:var(--accent);border-color:var(--accent);
+  background-color:color-mix(in srgb,var(--accent) 12%,transparent)}
+.vz-range:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Anything wider than the box scrolls inside the box, the rule .vz-board
+   already follows, so the page body never scrolls sideways. The two SVGs are
+   preserveAspectRatio="none" and stretch rather than overflow, so this is a
+   guard rather than a scrollbar anyone will see. */
+.vz-chartwrap{position:relative;overflow-x:auto;border:1px solid var(--line);
+  border-radius:10px;background:var(--surface);padding:12px 12px 0}
+#vz-chart{display:block;width:100%;height:260px;touch-action:pan-y}
+#vz-chart:focus{outline:none}
+#vz-chart:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px}
+.vz-grid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.vz-area{fill:color-mix(in srgb,var(--accent) 13%,transparent);stroke:none}
+.vz-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;
+  stroke-linejoin:round;vector-effect:non-scaling-stroke}
+/* The window change fades the plot in rather than drawing the line on. A
+   stroke-dashoffset reveal was tried first and is wrong here: non-scaling-stroke
+   puts the dash pattern in device space, `pathLength` stops normalising it, and
+   the line settles as a 1px dotted rule instead of a line. */
+.vz-plot{transition:opacity .32s ease}
+/* A commit whose denominator was zero has no ratio, so the line BREAKS there
+   rather than joining across it. An interpolated segment would draw a value
+   nobody read. */
+.vz-dot{fill:var(--bg);stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.vz-gap{fill:var(--muted);opacity:.5}
+.vz-cursor{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
+.vz-mark{fill:var(--accent);stroke:var(--bg);stroke-width:2;vector-effect:non-scaling-stroke}
+
+.vz-axes{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none}
+.vz-ylab,.vz-xlab{position:absolute;font-family:var(--mono);font-size:9.5px;
+  color:var(--muted);white-space:nowrap;line-height:1}
+.vz-ylab{transform:translate(-100%,-50%)}
+.vz-xlab.l{transform:translate(0,0)}
+.vz-xlab.c{transform:translate(-50%,0)}
+.vz-xlab.r{transform:translate(-100%,0)}
+
+/* The three lines are date, inputs, and the quotient they make. The third one
+   is the whole point: a tooltip that stops at the two inputs makes the reader
+   do the division, and a ratio nobody divides is a ratio nobody reads. The
+   division is left visible beside the answer so the answer can be checked. */
+.vz-tip{position:absolute;z-index:5;pointer-events:none;background:var(--raised);
+  border:1px solid var(--line);border-radius:8px;padding:7px 10px;
+  box-shadow:0 6px 20px rgba(0,0,0,.34);transition:left .1s ease,top .1s ease}
+.vz-tip[hidden]{display:none}
+.vz-tipd{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;color:var(--muted)}
+.vz-tipi{display:block;font-size:11.5px;color:var(--text);margin-top:3px}
+.vz-tipr{display:block;font-family:var(--mono);font-size:11.5px;color:var(--accent);
+  margin-top:3px;font-variant-numeric:tabular-nums}
+.vz-tipr.unk{color:var(--muted)}
+
+/* The brush narrows what the chart above draws and writes nothing anywhere -
+   not to the repository, not to this page's own storage, not to a server. It
+   is a lens on data already embedded in these bytes. Both handles are real
+   sliders: focusable, arrow-driven, and announced with the date they sit on,
+   because a control only a mouse can reach is a control half the readers do
+   not have. */
+#vz-brush{display:block;width:calc(100% - 26px);margin:2px 13px 0;height:48px;touch-action:none}
+.vz-btrack{fill:var(--bg);stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.vz-bspark{fill:none;stroke:var(--muted);stroke-width:1.5;opacity:.5;vector-effect:non-scaling-stroke}
+.vz-bsel{fill:color-mix(in srgb,var(--accent) 15%,transparent);stroke:var(--accent);
+  stroke-width:1;vector-effect:non-scaling-stroke;cursor:grab}
+.vz-bh{fill:var(--raised);stroke:var(--accent);stroke-width:1.5;cursor:ew-resize;
+  vector-effect:non-scaling-stroke;transition:fill .15s}
+.vz-bh:hover{fill:color-mix(in srgb,var(--accent) 45%,var(--raised))}
+.vz-bh:focus{outline:none}
+.vz-bh.kb{fill:var(--accent);stroke:var(--text);stroke-width:2.5}
+
+/* Covered / partial / missing over time is the honest hole. It is drawn as the
+   em dash this page already means by "has not run", with the reason beside it,
+   and it is NOT omitted: a row that says why a thing is missing is worth more
+   than a section that quietly never mentions it. */
+.vz-coverage-notrun{display:flex;gap:10px;align-items:flex-start;background:var(--surface);
+  border:1px dashed var(--line);border-radius:9px;padding:11px 13px;font-size:11.5px;
+  color:var(--muted);line-height:1.6;max-width:88ch}
+.vz-coverage-notrun b{color:var(--text);font-weight:600}
+/* The row opens with the glyph itself, as the generator writes it: a direct
+   child, told from the <b> the sentence uses for emphasis by being the first
+   one. It is grey and light - an absence is not a failure. */
+.vz-coverage-notrun>.gl,.vz-coverage-notrun>b:first-child{flex:0 0 auto;
+  font-family:var(--mono);font-size:14px;font-weight:400;color:var(--muted);line-height:1.35}
+
+@media (prefers-reduced-motion:reduce){
+  .vz-plot,.vz-tip,.vz-range,.vz-bh{transition:none}}
+@media (max-width:620px){
+  .vz-hero-value{font-size:30px}
+  #vz-chart{height:210px}}
 @media (max-width:620px){.vz-board{padding:10px}.vz{gap:20px}}@@STALECSS@@
 </style>
 @@BODY@@
@@ -980,6 +1108,423 @@ document.addEventListener("keydown",function(e){
 // Last, so the ring nodes and every panel exist before a pasted deep link is
 // resolved against them.
 openAnchor(location.hash);
+// ---------- history: one ratio, over the commits that moved it -------------
+// Reads VZ_HISTORY, which the generator embedded in this file's own bytes, and
+// draws it. It fetches nothing, stores nothing and posts nothing: every figure
+// below was already in the page when the page was written, and narrowing the
+// window changes what is DRAWN and never what is recorded anywhere.
+//
+// If the generator emitted no history section, this is a no-op - the section is
+// the generator's to create, and this block only paints inside it.
+(function(){
+  var chart = document.getElementById("vz-chart");
+  if (!chart) return;
+  var H = (typeof VZ_HISTORY === "undefined") ? null : VZ_HISTORY;
+  // The two glyphs the rest of this page already means something by: `?` is
+  // "read, and could not be determined", the em dash is "has not run". They are
+  // not interchangeable and neither of them is a zero.
+  var GL_UNK = "?", GL_NEVER = "—";
+  var pts   = (H && H.points) ? H.points : [];
+  var unit  = (H && H.unit) ? H.unit : "";
+  var denom = (H && H.denominator) ? H.denominator : "";
+  var hero  = (H && H.hero) ? H.hero : null;
+  var tip = document.getElementById("vz-tip");
+  var brush = document.getElementById("vz-brush");
+  var ranges = document.getElementById("vz-ranges");
+  var wrap = chart.parentNode;
+  var REDUCE = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  function num(v){ return typeof v === "number" && isFinite(v); }
+  function fx(v,dp){ return v.toFixed(dp); }
+  function setIfEmpty(el,txt){ if (el && !el.textContent.trim()) el.textContent = txt; }
+
+  /* --- the hero, and its delta ------------------------------------------ */
+  setIfEmpty(document.querySelector(".vz-hero-label"), (hero && hero.label) ? hero.label : "");
+  setIfEmpty(document.querySelector(".vz-hero-since"),
+    (hero && hero.since) ? "since " + hero.since : "no earlier reading to compare against");
+  // The generator writes the hero's own text, so this does not overwrite it -
+  // a second rendering of one number is two numbers waiting to disagree. What
+  // it does is what a stylesheet cannot: a null value is CLASSED unknown, so
+  // the glyph is drawn quiet and never in the weight a measured figure gets,
+  // and the fallback text is supplied only if the generator left the box empty.
+  var hv = document.getElementById("vz-hero-value");
+  if (hv){
+    if (!(hero && num(hero.value))){
+      hv.className = "vz-hero-value unk";
+      hv.title = "no readable ratio — this is not a zero";
+      setIfEmpty(hv, GL_UNK);
+    } else setIfEmpty(hv, fx(hero.value,2));
+  }
+  var hd = document.getElementById("vz-hero-delta");
+  if (hd){
+    if (hero && num(hero.delta)){
+      var dv = hero.delta;
+      setIfEmpty(hd, (dv > 0 ? "+" : dv < 0 ? "−" : "±") + fx(Math.abs(dv),2));
+      hd.title = "change against the reading on "
+        + ((hero && hero.since) ? hero.since : "the earlier date");
+    } else {
+      hd.className = "vz-hero-delta unk";
+      hd.title = "no earlier reading to difference against — not a change of zero";
+      setIfEmpty(hd, GL_UNK);
+    }
+  }
+
+  /* --- the hole this section will not paper over ------------------------- */
+  var cov = document.querySelector(".vz-coverage-notrun");
+  if (cov && !cov.textContent.trim()){
+    cov.innerHTML = '<span class="gl">' + GL_NEVER + '</span><span><b>Covered, partial and '
+      + 'missing over time: never run.</b> Reconstructing those needs the check suite EXECUTED at '
+      + 'every commit in this range, and the run results are not carried in the history, so there '
+      + 'is nothing here to read. That is ' + GL_NEVER + ', which this page means by “has not '
+      + 'run” — not a zero, which would claim the coverage was measured and found '
+      + 'empty.</span>';
+  }
+
+  /* --- fewer than two readings is a gap, not a flat line ----------------- */
+  if (pts.length < 2){
+    chart.style.display = "none";
+    if (brush) brush.style.display = "none";
+    if (ranges) ranges.hidden = true;
+    if (tip) tip.hidden = true;
+    var gap = document.createElement("div");
+    gap.className = "vz-empty";
+    gap.innerHTML = '<b>Not run — there is no line to draw</b><p>'
+      + (H ? 'The history was read and it holds <span class="mono">' + pts.length + '</span> '
+             + 'reading' + (pts.length === 1 ? "" : "s") + ' of this ratio. A line needs two.'
+           : 'The repository history could not be read here, so no reading of this ratio is known.')
+      + ' A chart with no line reads as a ratio of zero, and zero is a measurement nobody '
+      + 'took.</p>';
+    wrap.appendChild(gap);
+    return;
+  }
+
+  /* --- geometry ---------------------------------------------------------- */
+  var N = pts.length, VW = 900, VH = 260;
+  var PL = 48, PR = 886, PT = 16, PB = 214;
+  var BW = 900, BT = 9, BB = 39, HWD = 9;
+  var BL = 48, BR = 886;
+  var T = [], i;
+  for (i = 0; i < N; i++){
+    var sp = String(pts[i].d).split("-");
+    T.push(Date.UTC(+sp[0], (+sp[1]) - 1, +sp[2]) / 86400000);
+  }
+  var lo = 0, hi = N - 1, curIdx = null;
+
+  function xOf(k,l,h){
+    var s = T[h] - T[l];
+    if (s) return PL + (T[k] - T[l]) / s * (PR - PL);
+    return PL + (h > l ? (k - l) / (h - l) : 0.5) * (PR - PL);
+  }
+  // The brush maps onto the CHART's plot box, not onto its own full width, so
+  // the selected window sits directly under the stretch of line it selects. A
+  // brush that is merely near the right place is a brush nobody trusts.
+  function bxOf(k){
+    var s = T[N-1] - T[0];
+    if (s) return BL + (T[k] - T[0]) / s * (BR - BL);
+    return BL + (N > 1 ? k / (N - 1) : 0.5) * (BR - BL);
+  }
+  function dom(l,h){
+    var mn = null, mx = null, r;
+    for (var k = l; k <= h; k++){
+      r = pts[k].ratio; if (!num(r)) continue;
+      if (mn === null || r < mn) mn = r;
+      if (mx === null || r > mx) mx = r;
+    }
+    if (mn === null) return null;
+    var a = Math.floor(mn * 10) / 10, b = Math.ceil(mx * 10) / 10;
+    if (b - a < 0.1){ a = Math.max(0, a - 0.05); b = a + 0.2; }
+    return [a,b];
+  }
+  function yOf(v,d){ return PB - (v - d[0]) / (d[1] - d[0]) * (PB - PT); }
+
+  /* --- the chart's own furniture, built once ----------------------------- */
+  chart.innerHTML = '<g class="vz-plot"></g>'
+    + '<line class="vz-cursor" x1="0" y1="' + PT + '" x2="0" y2="' + PB + '" style="display:none"/>'
+    + '<circle class="vz-mark" r="4" cx="0" cy="0" style="display:none"/>';
+  var plot = chart.querySelector(".vz-plot");
+  var cursor = chart.querySelector(".vz-cursor");
+  var mark = chart.querySelector(".vz-mark");
+  chart.setAttribute("tabindex","0");
+  chart.setAttribute("role","img");
+  var axes = document.createElement("div");
+  axes.className = "vz-axes";
+  wrap.appendChild(axes);
+
+  function label(cls,vx,vy,txt){
+    var e = document.createElement("span");
+    e.className = cls; e.textContent = txt;
+    e.setAttribute("data-vx", vx); e.setAttribute("data-vy", vy);
+    axes.appendChild(e);
+  }
+  // An SVG element has no offsetLeft/offsetTop - those belong to HTMLElement -
+  // so the chart's origin inside its wrapper is measured rather than read off a
+  // property that is quietly undefined. Getting this wrong stacks every axis
+  // label on the origin, which is how it was caught.
+  function frame(){
+    var r = chart.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+    return {ok: r.width > 0,
+            x: r.left - w.left - wrap.clientLeft + wrap.scrollLeft,
+            y: r.top - w.top - wrap.clientTop + wrap.scrollTop,
+            sx: r.width / VW, sy: r.height / VH};
+  }
+  function place(){
+    var f = frame();
+    if (!f.ok) return;
+    // Insurance, not decoration: the fade below hands the plot to a rAF, and a
+    // rAF that never runs would leave a fully drawn chart at zero opacity. The
+    // moment the box has a size, the plot is visible whatever happened to it.
+    plot.style.opacity = "1";
+    var ls = axes.children;
+    for (var k = 0; k < ls.length; k++){
+      ls[k].style.left = (f.x + (+ls[k].getAttribute("data-vx")) * f.sx) + "px";
+      ls[k].style.top  = (f.y + (+ls[k].getAttribute("data-vy")) * f.sy) + "px";
+    }
+  }
+
+  function paint(animate){
+    var d = dom(lo,hi), s = "", run = [], k, r, x, y;
+    axes.innerHTML = "";
+    function flush(){
+      if (run.length > 1){
+        var body = "";
+        for (var j = 0; j < run.length; j++)
+          body += (j ? "L" : "M") + run[j][0].toFixed(2) + " " + run[j][1].toFixed(2) + " ";
+        s += '<path class="vz-area" d="M' + run[0][0].toFixed(2) + " " + PB + " "
+           + "L" + body.slice(1) + "L" + run[run.length-1][0].toFixed(2) + " " + PB + ' Z"/>';
+        s += '<path class="vz-line" d="' + body.replace(/\s+$/,"") + '"/>';
+      }
+      run = [];
+    }
+    if (d){
+      var lv = [d[1], (d[0] + d[1]) / 2, d[0]];
+      for (k = 0; k < 3; k++){
+        y = yOf(lv[k], d);
+        s += '<line class="vz-grid" x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + PR
+           + '" y2="' + y.toFixed(1) + '"/>';
+        label("vz-ylab", PL - 7, y, fx(lv[k],2));
+      }
+      for (k = lo; k <= hi; k++){
+        r = pts[k].ratio; x = xOf(k,lo,hi);
+        if (num(r)) run.push([x, yOf(r,d)]); else flush();
+      }
+      flush();
+      for (k = lo; k <= hi; k++){
+        r = pts[k].ratio; x = xOf(k,lo,hi);
+        if (num(r)) s += '<circle class="vz-dot" r="3" cx="' + x.toFixed(2) + '" cy="'
+                       + yOf(r,d).toFixed(2) + '"/>';
+        else s += '<rect class="vz-gap" x="' + (x-1).toFixed(2) + '" y="' + (PB-4)
+                + '" width="2" height="4"/>';
+      }
+    } else {
+      label("vz-xlab c", (PL + PR) / 2, (PT + PB) / 2,
+            GL_UNK + "  no readable ratio in this window");
+    }
+    plot.innerHTML = s;
+    label("vz-xlab l", PL, PB + 10, pts[lo].d);
+    label("vz-xlab c", (PL + PR) / 2, PB + 10,
+          (hi - lo + 1) + " reading" + (hi - lo ? "s" : "") + " in view");
+    label("vz-xlab r", PR, PB + 10, pts[hi].d);
+    chart.setAttribute("aria-label",
+      "Ratio from " + pts[lo].d + " to " + pts[hi].d + ", " + (hi - lo + 1)
+      + " readings. Latest " + (num(pts[hi].ratio) ? fx(pts[hi].ratio,2) : "unknown") + ".");
+    place();
+    plot.style.opacity = (animate && !REDUCE) ? "0" : "1";
+    if (animate && !REDUCE)
+      window.requestAnimationFrame(function(){ plot.style.opacity = "1"; });
+  }
+
+  /* --- the tooltip: date, the two inputs, and the ratio they make -------- */
+  function hideTip(){
+    if (tip) tip.hidden = true;
+    cursor.style.display = "none";
+    mark.style.display = "none";
+    curIdx = null;
+  }
+  function showTip(k){
+    if (!tip) return;
+    var d = dom(lo,hi), p = pts[k], r = p.ratio, x = xOf(k,lo,hi);
+    var third = num(r)
+      ? "ratio  " + p.tested + " ÷ " + p.total + "  =  " + fx(r,2)
+        + "   ·   " + Math.round(r * 100) + "%"
+      : "ratio  " + GL_UNK + "   ·   nothing to divide here";
+    tip.innerHTML =
+        '<span class="vz-tipd">' + esc(p.d) + (p.sha ? "   ·   " + esc(p.sha) : "") + '</span>'
+      + '<span class="vz-tipi">' + esc(String(p.total)) + (unit ? " " + esc(unit) : "")
+      + "   ·   " + esc(String(p.tested)) + ' tested</span>'
+      + '<span class="vz-tipr' + (num(r) ? "" : " unk") + '">' + esc(third) + '</span>';
+    tip.hidden = false;
+    var f = frame();
+    if (!f.ok) return;
+    var px = f.x + x * f.sx;
+    var py = f.y + (d && num(r) ? yOf(r,d) : (PT + PB) / 2) * f.sy;
+    var tw = tip.offsetWidth, th = tip.offsetHeight, cw = wrap.clientWidth;
+    tip.style.left = Math.max(4, Math.min(cw - tw - 4, px - tw / 2)) + "px";
+    tip.style.top = (py - th - 12 < 4 ? py + 16 : py - th - 12) + "px";
+    cursor.setAttribute("x1", x.toFixed(2)); cursor.setAttribute("x2", x.toFixed(2));
+    cursor.style.display = "";
+    if (d && num(r)){
+      mark.setAttribute("cx", x.toFixed(2)); mark.setAttribute("cy", yOf(r,d).toFixed(2));
+      mark.style.display = "";
+    } else mark.style.display = "none";
+    curIdx = k;
+  }
+  function nearest(clientX){
+    var rc = chart.getBoundingClientRect();
+    var vx = (clientX - rc.left) / (rc.width || 1) * VW, best = lo, bd = Infinity;
+    for (var k = lo; k <= hi; k++){
+      var dd = Math.abs(xOf(k,lo,hi) - vx);
+      if (dd < bd){ bd = dd; best = k; }
+    }
+    return best;
+  }
+  chart.addEventListener("pointermove", function(e){ showTip(nearest(e.clientX)); });
+  chart.addEventListener("pointerleave", hideTip);
+  chart.addEventListener("blur", hideTip);
+  chart.addEventListener("keydown", function(e){
+    var k = (curIdx === null) ? hi : curIdx, st = e.shiftKey ? 5 : 1;
+    if (e.key === "ArrowLeft") k -= st;
+    else if (e.key === "ArrowRight") k += st;
+    else if (e.key === "Home") k = lo;
+    else if (e.key === "End") k = hi;
+    else if (e.key === "Escape"){ hideTip(); return; }
+    else return;
+    e.preventDefault();
+    showTip(Math.max(lo, Math.min(hi, k)));
+  });
+
+  /* --- the brush, built once so focus survives a drag -------------------- */
+  var bh = {}, bsel = null;
+  if (brush){
+    brush.innerHTML =
+        '<rect class="vz-btrack" x="' + BL + '" y="' + BT + '" width="' + (BR-BL) + '" height="'
+      + (BB-BT) + '" rx="6"/>'
+      + '<path class="vz-bspark" d=""/>'
+      + '<rect class="vz-bsel" x="0" y="' + BT + '" width="0" height="' + (BB-BT) + '"/>'
+      + handleSvg("lo") + handleSvg("hi");
+    var sparkD = "", dAll = dom(0, N-1), seg = [];
+    if (dAll){
+      for (i = 0; i < N; i++){
+        var rr = pts[i].ratio;
+        if (num(rr)) seg.push((seg.length ? "L" : "M") + bxOf(i).toFixed(2) + " "
+                      + (BB - 4 - (rr - dAll[0]) / (dAll[1] - dAll[0]) * (BB - BT - 8)).toFixed(2));
+        else { sparkD += seg.join(" ") + " "; seg = []; }
+      }
+      sparkD += seg.join(" ");
+    }
+    brush.querySelector(".vz-bspark").setAttribute("d", sparkD.replace(/\s+/g," ").trim());
+    bsel = brush.querySelector(".vz-bsel");
+    bh.lo = brush.querySelector('[data-h="lo"]');
+    bh.hi = brush.querySelector('[data-h="hi"]');
+    bindHandle("lo"); bindHandle("hi");
+  }
+  function handleSvg(side){
+    return '<rect class="vz-bh" data-h="' + side + '" tabindex="0" role="slider" '
+      + 'aria-label="' + (side === "lo" ? "start of the window" : "end of the window") + '" '
+      + 'aria-valuemin="0" aria-valuemax="' + (N-1) + '" aria-valuenow="0" '
+      + 'x="0" y="' + (BT-3) + '" width="' + HWD + '" height="' + (BB-BT+6) + '" rx="4"/>';
+  }
+  function syncBrush(){
+    if (!brush) return;
+    var x0 = bxOf(lo), x1 = bxOf(hi);
+    bsel.setAttribute("x", x0.toFixed(2));
+    bsel.setAttribute("width", Math.max(1, x1 - x0).toFixed(2));
+    var edge = [["lo",x0,lo],["hi",x1,hi]];
+    for (var k = 0; k < 2; k++){
+      var e = bh[edge[k][0]];
+      e.setAttribute("x", Math.min(BR - HWD, Math.max(BL, edge[k][1] - HWD/2)).toFixed(2));
+      e.setAttribute("aria-valuenow", edge[k][2]);
+      e.setAttribute("aria-valuetext", pts[edge[k][2]].d);
+    }
+  }
+  function setSide(side,v){
+    v = Math.max(0, Math.min(N - 1, v));
+    if (side === "lo") lo = Math.min(v, hi - 1); else hi = Math.max(v, lo + 1);
+  }
+  function bindHandle(side){
+    var e = bh[side];
+    e.addEventListener("focus", function(){ e.classList.add("kb"); });
+    e.addEventListener("blur",  function(){ e.classList.remove("kb"); });
+    e.addEventListener("keydown", function(ev){
+      var v = (side === "lo") ? lo : hi, st = ev.shiftKey ? 5 : 1, nv;
+      if (ev.key === "ArrowLeft" || ev.key === "ArrowDown") nv = v - st;
+      else if (ev.key === "ArrowRight" || ev.key === "ArrowUp") nv = v + st;
+      else if (ev.key === "Home") nv = 0;
+      else if (ev.key === "End") nv = N - 1;
+      else return;
+      ev.preventDefault();
+      setSide(side, nv); markRange(null); hideTip(); paint(false); syncBrush();
+    });
+  }
+  function bNearest(clientX){
+    var rc = brush.getBoundingClientRect();
+    var vx = (clientX - rc.left) / (rc.width || 1) * BW, best = 0, bd = Infinity;
+    if (vx < BL) vx = BL; else if (vx > BR) vx = BR;
+    for (var k = 0; k < N; k++){
+      var dd = Math.abs(bxOf(k) - vx);
+      if (dd < bd){ bd = dd; best = k; }
+    }
+    return best;
+  }
+  if (brush){
+    var drag = null;
+    brush.addEventListener("pointerdown", function(e){
+      var t = e.target.closest ? e.target.closest(".vz-bh, .vz-bsel") : null;
+      var at = bNearest(e.clientX);
+      if (t && t.classList.contains("vz-bh")) drag = {k:t.getAttribute("data-h")};
+      else if (t) drag = {k:"pan", at:at, lo:lo, hi:hi};
+      else { drag = {k: Math.abs(at - lo) <= Math.abs(at - hi) ? "lo" : "hi"}; }
+      if (drag.k === "lo" || drag.k === "hi") setSide(drag.k, at);
+      brush.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      markRange(null); hideTip(); paint(false); syncBrush();
+    });
+    brush.addEventListener("pointermove", function(e){
+      if (!drag) return;
+      var at = bNearest(e.clientX);
+      if (drag.k === "pan"){
+        var w = drag.hi - drag.lo;
+        var nl = Math.max(0, Math.min(N - 1 - w, drag.lo + (at - drag.at)));
+        lo = nl; hi = nl + w;
+      } else setSide(drag.k, at);
+      paint(false); syncBrush();
+    });
+    brush.addEventListener("pointerup", function(){ drag = null; });
+    brush.addEventListener("pointercancel", function(){ drag = null; });
+  }
+
+  /* --- preset ranges ----------------------------------------------------- */
+  function markRange(v){
+    if (!ranges) return;
+    var bs = ranges.querySelectorAll(".vz-range");
+    for (var k = 0; k < bs.length; k++)
+      bs[k].classList.toggle("on", v !== null && (+bs[k].getAttribute("data-days")) === v);
+  }
+  function applyDays(n){
+    hi = N - 1;
+    if (!n){ lo = 0; return; }
+    var cut = T[N-1] - n, k;
+    lo = N - 1;
+    for (k = N - 1; k >= 0; k--){ if (T[k] >= cut) lo = k; else break; }
+    if (lo >= hi) lo = Math.max(0, hi - 1);
+  }
+  if (ranges) ranges.addEventListener("click", function(e){
+    var b = e.target.closest(".vz-range");
+    if (!b) return;
+    var n = +b.getAttribute("data-days");
+    applyDays(n); markRange(n); hideTip(); paint(true); syncBrush();
+  });
+
+  // The panel this lives in is display:none until its tab is opened, so the
+  // first place() runs against a box with no size and every label lands at the
+  // origin. Re-place whenever the box gains or changes one - which covers the
+  // tab opening, the window resizing and the font arriving, and does not need
+  // any of the three to be guessed at separately.
+  if (window.ResizeObserver) new window.ResizeObserver(place).observe(chart);
+  window.addEventListener("resize", function(){ hideTip(); place(); });
+  markRange(0);
+  paint(true);
+  syncBrush();
+})();
 function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
   document.body.appendChild(ta);ta.select();try{document.execCommand("copy");cb();}catch(err){}ta.remove();}
 </script>

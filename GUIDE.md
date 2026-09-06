@@ -353,6 +353,31 @@ concern is open with no ruling behind it, when a pending ruling is cited by
 nothing, and when a pending ruling is still wearing the template. A ruling that
 still reads like the template is a file, not an ask.
 
+## The ratio, and when it moved
+
+The Visualizer opens with one number: the share of check tools carrying a self-test, with its
+delta and the date it last moved. A ratio, not a count - a count of self-tests rises when tools
+are added and tells you nothing.
+
+The chart under it is there because a POLICY CHANGE SHOULD BE VISIBLE AS A SHAPE. Walking this
+repository's history: eleven days flat at 2 to 4 self-tested tools while the tool count climbed to
+29, then one commit to 32 of 32. You can see the day it started mattering without reading a
+commit message.
+
+Hovering a point prints the QUOTIENT, not only its two inputs - a tooltip that shows 31 and 3 and
+leaves the division to the reader is how a ratio stops being read. Where the denominator is zero
+it prints `nothing to divide here` and the line breaks rather than interpolating.
+
+The denominator is named on the page, because there are two defensible ones and they disagree:
+every `.sh` and `.py` in the tree gives 58, while the check tools the suite actually invokes gives
+32. The series uses the second and was falsified against the real tool at four historical commits.
+
+**What is deliberately not drawn.** Covered / Partial / Missing over time would need the suite RUN
+at each commit. The only record of a run is `checks-result.json`, which 63 of 108 commits carry -
+the last on 2026-09-02, and none of the 23 commits since, which includes the step this section is
+about. A line drawn from that would stop before the thing the page is showing you, so the row
+renders the has-not-run glyph and says why instead.
+
 ## Every check tool tests itself, and the suite runs those tests
 
 R39 obliges a check tool to carry a self-test that reaches each exit code it can return. R40

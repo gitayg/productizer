@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "productizer",
   "displayName": "Productizer",
-  "version": "4.49.0",
+  "version": "4.50.0",
   "description": "Requirements tracking for Claude Code. One living spec per product: every intent is classified against everything already agreed, a contradiction stops the work instead of merging, and each release regenerates its own guide and announcement.",
   "author": {
     "name": "Itay Glick"
