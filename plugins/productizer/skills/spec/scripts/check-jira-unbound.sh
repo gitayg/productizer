@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # check-jira-unbound.sh [--root DIR] [--config PATH] [--backlog PATH]... [--version] [--help]
+#                       [--selftest]
 #
 # MEASURES THE PRECONDITION OF R27 AND R28, WHICH IS THE ONLY HONEST THING TO
 # SAY ABOUT THEM HERE.
@@ -55,6 +56,21 @@
 #      unknown is never the same as shut: a config nobody could read has not
 #      been shown to say `null`.
 #
+# --SELFTEST DRIVES ALL THREE, AND BOTH SIDES OF THE GUARD. This check is the
+# repository's model of a guard-shut n/a, and the guard being SHUT is the only
+# state this repository is ever in - so a self-test that only replayed the
+# real config would watch exit 0 forever and never once see the guard open.
+# Seven cases are built under `mktemp -d`: the shut case, three separate ways
+# the guard OPENS (Jira bound, the key absent rather than null, a key-shaped
+# token in the backlog), and three ways the answer is UNKNOWN. Each runs THIS
+# script and its exit code is compared with the one the case declares. Nothing
+# is written into the repository being checked.
+#
+# Under --selftest the three codes mean: every case produced the code it
+# declares (0), at least one did not (1), and the cases could not be built or
+# driven at all (2). `--self-test` is accepted as an alias because the repo
+# spells it both ways.
+#
 # WHAT IT PRINTS. One BARE repo-relative path per line for every file examined,
 # which is what the runner parses as coverage. Findings and notes are INDENTED.
 # Nothing absolute is ever printed - this output is tailed into a committed
@@ -67,6 +83,7 @@ VERSION="check-jira-unbound 1.0"
 ROOT=""
 CONFIG_REL=""
 BACKLOGS=()
+MODE="measure"
 
 die_unmeasured() { printf 'check-jira-unbound: %s\n' "$1" >&2; exit 2; }
 
@@ -80,12 +97,117 @@ while [ $# -gt 0 ]; do
     --config=*)   CONFIG_REL="${1#--config=}";   shift ;;
     --backlog)    [ "$#" -ge 2 ] || die_unmeasured "--backlog needs a path"; BACKLOGS+=("$2"); shift 2 ;;
     --backlog=*)  BACKLOGS+=("${1#--backlog=}"); shift ;;
+    --selftest|--self-test) MODE="selftest";     shift ;;
     --) shift; break ;;
     -*) die_unmeasured "unknown option: $1. Run with --help for the contract." ;;
     *)  die_unmeasured "takes no positional arguments; got: $1. Files are named with --config and --backlog." ;;
   esac
 done
 [ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1. Files are named with --config and --backlog."
+
+# ---------------------------------------------------------------------------
+# --selftest: build the cases, drive THIS script against each, read the exit
+# code off it. The guard-shut case and the guard-open ones are built the same
+# way and differ only in the two files that decide the precondition.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  WORK="$(mktemp -d)" \
+    || die_unmeasured "cannot create a temporary directory to build the cases in; nothing was driven"
+  # Removed on every exit path, signal included. Nothing is written into the
+  # repository this script lives in.
+  trap 'rm -rf "$WORK"' EXIT HUP INT TERM
+
+  CASES=0; UPHELD=0; REPORT=""
+  REACHED_0=0; REACHED_1=0; REACHED_2=0
+
+  # $1 case name · $2 the `jira` line of the config, verbatim · $3 a backlog
+  # body. The config is written as text rather than assembled, so a case that
+  # is meant to be unparseable can be exactly that.
+  build() {
+    B="$WORK/$1"
+    mkdir -p "$B" || die_unmeasured "could not lay out the case directory for $1"
+    printf '%s\n' "$2" > "$B/config.json"
+    printf '%s\n' "$3" > "$B/backlog.md"
+  }
+
+  # `|| GOT=$?` on the same line as the command. A `$(...)` in an argument list
+  # and a pipeline both RESET `$?`, and reading the status one line later is
+  # how a self-test comes to report a pass it never observed.
+  drive() {
+    NAME="$1"; WANT="$2"; WHY="$3"; shift 3
+    GOT=0
+    bash "$0" "$@" > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
+    CASES=$((CASES + 1))
+    if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+    case "$GOT" in
+      0) REACHED_0=1 ;;
+      1) REACHED_1=1 ;;
+      2) REACHED_2=1 ;;
+    esac
+    REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
+"
+  }
+
+  # 0 - THE GUARD SHUT. `jira` null and nothing key-shaped in the backlog: the
+  # only state this repository is ever in, and the one the n/a claims rest on.
+  build guard-shut '{"jira": null}' '- an ordinary backlog item with no key in it'
+  drive guard-shut 0 "jira null and no key-shaped token - R27 and R28 out of force" \
+    --root "$WORK/guard-shut" --config config.json --backlog backlog.md
+
+  # 1 - THE GUARD OPEN, first way: Jira bound. The n/a expires by itself here,
+  # which is the whole design, and this case is what proves it expires.
+  build bound '{"jira": {"project": "EXAMPLE"}}' '- an ordinary backlog item'
+  drive bound 1 "jira bound in the config - R27 and R28 are in force and unimplemented" \
+    --root "$WORK/bound" --config config.json --backlog backlog.md
+
+  # 1 - THE GUARD OPEN, second way: absent is not null. A question nobody
+  # answered read as a decision somebody recorded is the failure this splits.
+  build key-absent '{}' '- an ordinary backlog item'
+  drive key-absent 1 "the config carries no jira key at all - absent is not null" \
+    --root "$WORK/key-absent" --config config.json --backlog backlog.md
+
+  # 1 - THE GUARD OPEN, third way: the backlog names something key-shaped.
+  build backlog-key '{"jira": null}' '- migrate the importer, tracked as EXAMPLE-42'
+  drive backlog-key 1 "a backlog row names a token shaped like a Jira key" \
+    --root "$WORK/backlog-key" --config config.json --backlog backlog.md
+
+  # 2 - UNKNOWN, first way: a config nobody could parse has not been shown to
+  # say null, and this check will not read the one as the other.
+  build unparseable 'this is not json at all {' '- an ordinary backlog item'
+  drive unparseable 2 "a config that is not JSON - whether Jira is bound is unknown" \
+    --root "$WORK/unparseable" --config config.json --backlog backlog.md
+
+  # 2 - UNKNOWN, second way: no backlog at the path given.
+  build absent-backlog '{"jira": null}' '- an ordinary backlog item'
+  rm -f "$WORK/absent-backlog/backlog.md"
+  drive absent-backlog 2 "no backlog at the path given - whether a row names a key is unknown" \
+    --root "$WORK/absent-backlog" --config config.json --backlog backlog.md
+
+  # 2 - UNKNOWN, third way: bad usage, which reaches the same code through the
+  # argument parser rather than through a file that could not be read.
+  build bad-usage '{"jira": null}' '- an ordinary backlog item'
+  drive bad-usage 2 "an option this script does not take" \
+    --root "$WORK/bad-usage" --frobnicate
+
+  printf '    selftest cases driven: %d\n' "$CASES"
+  printf '%s' "$REPORT"
+  if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
+  printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
+    "each case exits with the code it declares, with the guard shut and with it open"
+  # `if`, not `[ ... ] && ...`: a false test as the last statement of a list is
+  # a non-zero status, and `set -e` would end the run on the code that was NOT
+  # reached - a self-test killed by its own summary line.
+  REACHED=""
+  if [ "$REACHED_0" = 1 ]; then REACHED="$REACHED 0"; fi
+  if [ "$REACHED_1" = 1 ]; then REACHED="$REACHED 1"; fi
+  if [ "$REACHED_2" = 1 ]; then REACHED="$REACHED 2"; fi
+  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
+    "${REACHED:- none}"
+  printf '    NOT ASSERTED: the cases compare the exit CODE and never the wording of a finding, so a case that went red for the wrong reason is invisible here and is read off its captured output by hand\n'
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  exit 0
+fi
 
 # The work tree, never the working directory. Running this from a subdirectory
 # must read the same files it reads from the root, or the answer depends on

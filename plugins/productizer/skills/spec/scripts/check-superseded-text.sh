@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-superseded-text.sh [--version] [--help] [--root DIR]
+# check-superseded-text.sh [--version] [--help] [--root DIR] [--selftest]
 #
 # Asserts R3: THE LIFECYCLE SHALL KEEP A REPLACED REQUIREMENT'S ORIGINAL TEXT
 # IN THE SPEC, MARKED SUPERSEDED.
@@ -127,15 +127,21 @@
 #   1  findings
 #   2  could not run, or could not measure - no work tree, no spec, no parser,
 #      a spec with no requirements, or a baseline out of reach. Never 0.
+#
+# Under --selftest (--self-test is accepted too) the same three mean: every
+# case produced the exit code it declares and said what it was supposed to say
+# (0), at least one did not (1), and the corpus could not be driven at all (2).
 set -euo pipefail
 
 VERSION="check-superseded-text 2.0"
 ROOT=""
+MODE="measure"
 
 usage() {
-  printf 'usage: check-superseded-text.sh [--version] [--help] [--root DIR]\n'
+  printf 'usage: check-superseded-text.sh [--version] [--help] [--root DIR] [--selftest]\n'
   printf '  --root DIR  the repo work tree to examine. Defaults to the git\n'
   printf '              top level, never to the working directory.\n'
+  printf '  --selftest  drive the built-in corpus instead of a repository.\n'
 }
 
 die_unmeasured() { printf 'check-superseded-text: %s\n' "$1" >&2; exit 2; }
@@ -148,10 +154,355 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die_unmeasured "--root needs a directory"
       ROOT="$2"; shift 2 ;;
     --root=*) ROOT="${1#--root=}"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     -*) printf 'check-superseded-text: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *) printf 'check-superseded-text: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest. R39: one case per exit code this tool can return, each built as
+# a real git history in a sandbox, so nothing here reads or writes the
+# repository under test.
+#
+# THE HISTORIES ARE BUILT, NOT COMMITTED AS FIXTURES. What this check reads is
+# what a commit USED TO SAY, and a case directory under `fixtures/` cannot
+# carry a git history of its own inside this repository. So every case is two
+# commits made at run time in the temporary directory this run already owns.
+#
+# EVERY CASE ASSERTS ITS OWN SENTENCE, NOT ONLY ITS EXIT CODE. Seven different
+# things exit 1 here - a rewritten sentence, a removed marker, a self-pointer,
+# a dangling pointer, a chain into a superseded id, a malformed marker and an
+# outright deletion - and seven more exit 2. A corpus reading exit codes alone
+# cannot tell them apart, so a change that turned a rewritten sentence into a
+# broken pointer would stay green through it.
+#
+# THE PRECEDENCE IS DRIVEN TOO. `unmeasured-beats-findings` holds a real
+# rewritten sentence AND a superseded requirement with no reachable baseline;
+# the header says the run must then exit 2 with the finding still printed, and
+# that case is what makes the sentence a measurement.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  [ -f "$SELF" ] ||
+    die_unmeasured "cannot re-invoke this script for the self-test, so no case was driven"
+  command -v git >/dev/null ||
+    die_unmeasured "git is not on PATH, so no history could be built and no case was driven"
+
+  # `pwd -P` because the temporary directory is reached through a symlink on
+  # macOS, and this check compares --root against `git rev-parse
+  # --show-toplevel`, which is always resolved. An unresolved sandbox path
+  # refuses every case for a reason about the sandbox.
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-superseded-text-selftest.XXXXXX")" ||
+    die_unmeasured "could not create a sandbox, so no case was driven"
+  SB="$(cd "$SB" && pwd -P)"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  new_repo() {
+    mkdir -p "$1/.claude/productizer"
+    git -c init.defaultBranch=main init -q "$1"
+    git -C "$1" config user.email "fixture@example.invalid"
+    git -C "$1" config user.name "check-superseded-text selftest"
+  }
+  commit_all() {
+    git -C "$1" add -A
+    git -C "$1" -c commit.gpgsign=false commit -q -m "$2"
+  }
+  put_spec() { cat > "$1/.claude/productizer/spec.md"; }
+
+  # --- the agreed history every case starts from ---------------------------
+  founding() {
+    put_spec "$1" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  }
+
+  case_repo() { new_repo "$SB/$1"; founding "$SB/$1"; commit_all "$SB/$1" "founding"; }
+
+  FAILED=0
+  DRIVEN=0
+
+  drive() {
+    # $1 case name, $2 expected exit, $3 expected sentence, $4.. argv override
+    local case_name="$1" want="$2" marker="$3"
+    shift 3
+    local rc=0
+    if [ "$#" -eq 0 ]; then set -- --root "$SB/$case_name"; fi
+    bash "$SELF" "$@" > "$SB/$case_name.out" 2> "$SB/$case_name.err" || rc=$?
+    DRIVEN=$((DRIVEN + 1))
+    local why=""
+    [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
+    # Both files handed to grep directly, never piped into it: under
+    # `set -o pipefail` a `cat a b | grep -q` reports 141 whenever grep matches
+    # early enough to SIGPIPE the cat, and `if !` reads that as no match.
+    if ! grep -q -- "$marker" "$SB/$case_name.out" "$SB/$case_name.err"; then
+      [ -n "$why" ] && why="$why; "
+      why="${why}its output does not say what it was supposed to say"
+    fi
+    if [ -z "$why" ]; then
+      printf '  held: case %-24s exit %d, and said so - %s\n' "$case_name" "$rc" "$marker"
+      return 0
+    fi
+    printf '  FINDING: case %-24s %s - expected: %s\n' "$case_name" "$why" "$marker"
+    FAILED=$((FAILED + 1))
+    return 0
+  }
+
+  # clean: R2 superseded and R4 withdrawn, both carrying the sentence they had
+  # at the commit before. The withdrawn half is here because R3 names
+  # supersession and format-spec puts both under the same retention rule.
+  case_repo clean
+  put_spec "$SB/clean" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+  Superseded by R3. Narrowed to the classifications that change the spec.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+  Withdrawn.
+SPEC
+  commit_all "$SB/clean" "supersede R2, withdraw R4"
+
+  # text-changed: superseded AND rewritten. The baseline is the commit before,
+  # where it was still active carrying its original sentence.
+  case_repo text-changed
+  put_spec "$SB/text-changed" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle should probably prefer that ids not be reused often.
+  Superseded by R3. Narrowed.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/text-changed" "supersede R2 and rewrite what it used to say"
+
+  # marker-removed: superseded in a reachable commit, active today.
+  case_repo marker-removed
+  put_spec "$SB/marker-removed" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+  Superseded by R3. Narrowed.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/marker-removed" "supersede R2"
+  founding "$SB/marker-removed"
+  commit_all "$SB/marker-removed" "quietly revert R2 to active"
+
+  # self-supersede, dangling, chain, malformed: the marker itself.
+  case_repo pointer-self
+  put_spec "$SB/pointer-self" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+  Superseded by R2. A pointer that never leaves the requirement it is on.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/pointer-self" "supersede R2 by itself"
+
+  case_repo pointer-dangling
+  put_spec "$SB/pointer-dangling" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+  Superseded by R99. An id this spec does not define.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/pointer-dangling" "supersede R2 by an id nothing defines"
+
+  case_repo pointer-chain
+  put_spec "$SB/pointer-chain" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+  Superseded by R3. Which is itself replaced.
+- **R3** — The lifecycle shall record every classification in the change log.
+  Superseded by R4. So the chain ends in nothing agreed.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/pointer-chain" "supersede R2 into a requirement that is itself superseded"
+
+  case_repo marker-malformed
+  put_spec "$SB/marker-malformed" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+  Superseded. No pointer at all, so the citation leads nowhere.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/marker-malformed" "supersede R2 with no forward pointer"
+
+  # deleted: recorded superseded in history and not defined today at all. The
+  # loop over today's requirements cannot see this one; the awk over both
+  # files is what does.
+  case_repo deleted
+  put_spec "$SB/deleted" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+  Superseded by R3. Narrowed.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/deleted" "supersede R2"
+  put_spec "$SB/deleted" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/deleted" "delete the superseded entry outright"
+
+  # uncommitted: superseded, and present only in the working tree.
+  case_repo uncommitted
+  put_spec "$SB/uncommitted" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+  Superseded by R3. Narrowed.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+- **R5** — The lifecycle shall declare what each check examined.
+  Withdrawn.
+SPEC
+
+  # unmeasured-beats-findings: a real rewritten sentence AND a requirement
+  # with no reachable baseline. 1 is a complete verdict and this run has none.
+  case_repo unmeasured-beats-findings
+  put_spec "$SB/unmeasured-beats-findings" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle should probably prefer that ids not be reused often.
+  Superseded by R3. Narrowed.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+  commit_all "$SB/unmeasured-beats-findings" "supersede R2 and rewrite it"
+  put_spec "$SB/unmeasured-beats-findings" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle should probably prefer that ids not be reused often.
+  Superseded by R3. Narrowed.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+- **R5** — The lifecycle shall declare what each check examined.
+  Withdrawn.
+SPEC
+
+  # shallow: the version before the supersede was never fetched.
+  git clone -q --depth 1 "file://$SB/clean" "$SB/shallow" ||
+    die_unmeasured "could not build a shallow clone, so the case that proves a shallow clone is refused was never driven"
+
+  # untracked: the spec is on disk and git has never seen it.
+  new_repo "$SB/untracked"
+  printf 'a repository that has committed something other than its spec\n' > "$SB/untracked/README"
+  commit_all "$SB/untracked" "founding, without the spec"
+  founding "$SB/untracked"
+
+  # no-requirements: a spec with no `## Requirements` section.
+  new_repo "$SB/no-requirements"
+  printf '# Living spec — sandbox\n\n## Design\n\nProse and no requirement definitions.\n' \
+    > "$SB/no-requirements/.claude/productizer/spec.md"
+  commit_all "$SB/no-requirements" "a spec with nothing in it to retain"
+
+  # no-spec: a work tree with no spec at the declared path.
+  new_repo "$SB/no-spec"
+  printf 'no spec here\n' > "$SB/no-spec/README"
+  commit_all "$SB/no-spec" "founding"
+  rmdir "$SB/no-spec/.claude/productizer" "$SB/no-spec/.claude"
+
+  # not-a-work-tree: the spec is readable and git knows nothing about it.
+  mkdir -p "$SB/not-a-work-tree/.claude/productizer"
+  founding "$SB/not-a-work-tree"
+
+  # root-not-a-directory
+  printf 'not a directory\n' > "$SB/a-file"
+
+  # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If a spec whose superseded and
+  # withdrawn entries still carry their agreed sentences does not exit 0, every
+  # red case below would be red for that reason instead of its own.
+  CLEAN_RC=0
+  bash "$SELF" --root "$SB/clean" > "$SB/clean.out" 2> "$SB/clean.err" || CLEAN_RC=$?
+  if [ "$CLEAN_RC" -ne 0 ] || ! grep -q 'PASS: every superseded or withdrawn requirement' "$SB/clean.out"; then
+    printf '  the clean case exited %d and did not report the retention holding.\n' "$CLEAN_RC"
+    die_unmeasured "the corpus premise did not hold; unmeasured, not a pass"
+  fi
+  printf '  held: case %-24s exit 0, and said so - %s\n' "clean" "PASS: every superseded or withdrawn requirement"
+
+  drive text-changed     1 'text CHANGED'
+  drive marker-removed   1 'The marker was removed'
+  drive pointer-self     1 'is superseded by itself'
+  drive pointer-dangling 1 'which is not defined in'
+  drive pointer-chain    1 'which is itself superseded'
+  drive marker-malformed 1 'carries a status marker that is neither'
+  drive deleted          1 'A replaced requirement is RETAINED'
+
+  drive uncommitted      2 'appears in no commit'
+  drive unmeasured-beats-findings 2 'text CHANGED'
+  drive shallow          2 'the clone is shallow'
+  drive untracked        2 'the spec is untracked'
+  drive no-requirements  2 'holds no requirement definitions'
+  drive no-spec          2 'cannot read .claude/productizer/spec.md'
+  drive not-a-work-tree  2 'is not inside a git work tree'
+  drive root-not-a-dir   2 'is not a directory' --root "$SB/a-file"
+
+  printf '  cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$((DRIVEN + 1))" "$FAILED"
+  if [ "$FAILED" -ne 0 ]; then
+    printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2, and every case asserts which finding it produced as well as which code.\n'
+  printf '  NOT ASSERTED: the imported-spec residue in the header - a requirement that enters the repository ALREADY superseded and already rewritten - is unreachable by construction. Its first commit is the only baseline there is, so no corpus can tell that case from a faithful import.\n'
+  exit 0
+fi
 
 # Defaulting to the working directory has caused four separate silent-wrong-
 # answer bugs here: the script reads a directory that is not the repo and

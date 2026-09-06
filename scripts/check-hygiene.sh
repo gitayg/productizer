@@ -43,6 +43,10 @@ LOCAL="$ROOT/.claude/productizer/hygiene-local.txt"
 case "${1:-}" in
   --version) exec bash "$SHIPPED" --version ;;
   -h|--help) exec bash "$SHIPPED" --help ;;
+  # The scanner behind R39 reads SOURCE rather than probing, so a flag that
+  # only worked via the catch-all `"$@"` forward below was invisible to it -
+  # the wrapper is the tool the declared check names, not the shipped copy.
+  --selftest|--self-test) exec bash "$SHIPPED" --selftest ;;
 esac
 
 if [ -e "$LOCAL" ]; then

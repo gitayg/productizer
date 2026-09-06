@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-installed-copies.sh [--root DIR] [--templates DIR] [--hooks DIR]
-#                           [--version] [--help]
+#                           [--version] [--help] [--selftest]
 #
 # AN EXECUTABLE INSTALLED FROM A TEMPLATE MUST STILL BE THAT TEMPLATE.
 #
@@ -46,6 +46,20 @@
 #   2  could not run - bad usage, a missing directory, an unreadable file, or
 #      no pair to compare
 #
+# --SELFTEST DRIVES EVERY ONE OF THOSE THREE. R39 - every check tool shall
+# carry a self-test that reaches each exit code it can return - and a
+# self-test that only ever watches the clean case is the thing this repository
+# keeps shipping: an honest gap converted into a false assurance. So the mode
+# builds six little installations under `mktemp -d`, each differing from the
+# clean one in exactly one way, runs THIS script against each, and compares
+# the exit code with the one the case declares. Nothing is written into the
+# repository being checked, on any exit path, signal included.
+#
+# Under --selftest the three codes mean: every case produced the code it
+# declares (0), at least one did not (1), and the cases could not be built or
+# driven at all (2). `--self-test` is accepted as an alias because the repo
+# spells it both ways.
+#
 # WHAT IT PRINTS. One BARE repo-relative path per file examined, which the
 # runner parses as coverage. Findings and notes are INDENTED.
 set -euo pipefail
@@ -53,7 +67,7 @@ set -euo pipefail
 VERSION="check-installed-copies 1.0"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT=""; TEMPLATES=""; HOOKS=""
+ROOT=""; TEMPLATES=""; HOOKS=""; MODE="measure"
 
 die_unmeasured() { printf 'check-installed-copies: %s\n' "$1" >&2; exit 2; }
 
@@ -67,12 +81,117 @@ while [ $# -gt 0 ]; do
     --templates=*) TEMPLATES="${1#--templates=}"; shift ;;
     --hooks)       [ "$#" -ge 2 ] || die_unmeasured "--hooks needs a path";     HOOKS="$2";     shift 2 ;;
     --hooks=*)     HOOKS="${1#--hooks=}";         shift ;;
+    --selftest|--self-test) MODE="selftest";      shift ;;
     --) shift; break ;;
     -*) die_unmeasured "unknown option: $1. Run with --help for the contract." ;;
     *)  die_unmeasured "takes no positional arguments; got: $1." ;;
   esac
 done
 [ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1."
+
+# ---------------------------------------------------------------------------
+# --selftest: build the cases, drive THIS script against each, read the exit
+# code off it. Every case differs from the clean one in exactly one way, so a
+# case that goes the wrong colour names the assertion that moved.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  WORK="$(mktemp -d)" \
+    || die_unmeasured "cannot create a temporary directory to build the cases in; nothing was driven"
+  # Removed on every exit path, signal included. Nothing is written into the
+  # repository this script lives in.
+  trap 'rm -rf "$WORK"' EXIT HUP INT TERM
+
+  CASES=0; UPHELD=0; REPORT=""
+  REACHED_0=0; REACHED_1=0; REACHED_2=0
+
+  # One little installation per case: a templates directory holding the gate
+  # and a hooks directory holding whatever this case says landed there.
+  build() {
+    B="$WORK/$1"
+    mkdir -p "$B/templates" "$B/hooks" \
+      || die_unmeasured "could not lay out the case directory for $1"
+    printf '#!/usr/bin/env bash\n# a gate\nexit 0\n' > "$B/templates/publish-gate.sh"
+  }
+
+  # `|| GOT=$?` on the same line as the command. A `$(...)` in an argument list
+  # and a pipeline both RESET `$?`, and reading the status one line later is
+  # how a self-test comes to report a pass it never observed.
+  drive() {
+    NAME="$1"; WANT="$2"; WHY="$3"; shift 3
+    GOT=0
+    bash "$0" "$@" > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
+    CASES=$((CASES + 1))
+    if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+    case "$GOT" in
+      0) REACHED_0=1 ;;
+      1) REACHED_1=1 ;;
+      2) REACHED_2=1 ;;
+    esac
+    REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
+"
+  }
+
+  # 0 - the clean case. Without it every failing case below proves only that
+  # something is red, not that this check is what makes it red.
+  build clean
+  cp "$WORK/clean/templates/publish-gate.sh" "$WORK/clean/hooks/publish-gate.sh"
+  chmod +x "$WORK/clean/hooks/publish-gate.sh"
+  drive clean 0 "an installed copy identical to its template, and executable" \
+    --root "$WORK/clean" --templates "$WORK/clean/templates" --hooks "$WORK/clean/hooks"
+
+  # 1 - assertion 1, the drift. The dangerous direction: the installed gate
+  # hardened while every repo installing the plugin keeps the weaker copy.
+  build drifted
+  cp "$WORK/drifted/templates/publish-gate.sh" "$WORK/drifted/hooks/publish-gate.sh"
+  printf 'exit 1\n' >> "$WORK/drifted/hooks/publish-gate.sh"
+  chmod +x "$WORK/drifted/hooks/publish-gate.sh"
+  drive drifted 1 "the installed copy gained a line its template does not have" \
+    --root "$WORK/drifted" --templates "$WORK/drifted/templates" --hooks "$WORK/drifted/hooks"
+
+  # 1 - assertion 2, separately, because a gate the shell will not run is a
+  # gate that is absent quietly rather than one that drifted.
+  build unrunnable
+  cp "$WORK/unrunnable/templates/publish-gate.sh" "$WORK/unrunnable/hooks/publish-gate.sh"
+  chmod -x "$WORK/unrunnable/hooks/publish-gate.sh"
+  drive unrunnable 1 "an identical copy that lost its executable bit" \
+    --root "$WORK/unrunnable" --templates "$WORK/unrunnable/templates" --hooks "$WORK/unrunnable/hooks"
+
+  # 2 - the premise guard. Nothing compared is nothing asserted.
+  build no-pair
+  drive no-pair 2 "a templates directory whose gate landed nowhere, so no pair was compared" \
+    --root "$WORK/no-pair" --templates "$WORK/no-pair/templates" --hooks "$WORK/no-pair/hooks"
+
+  # 2 - an absent hooks directory. UNKNOWN drift is not no drift.
+  build absent-hooks
+  drive absent-hooks 2 "no hooks directory at the path given, so drift is unknown rather than absent" \
+    --root "$WORK/absent-hooks" --templates "$WORK/absent-hooks/templates" \
+    --hooks "$WORK/absent-hooks/nowhere"
+
+  # 2 - bad usage, which is the same could-not-run and reaches it through the
+  # argument parser rather than through the premise guards.
+  build bad-usage
+  drive bad-usage 2 "an option this script does not take" \
+    --root "$WORK/bad-usage" --frobnicate
+
+  printf '    selftest cases driven: %d\n' "$CASES"
+  printf '%s' "$REPORT"
+  if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
+  printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
+    "each case exits with the code it declares"
+  # `if`, not `[ ... ] && ...`: a false test as the last statement of a list is
+  # a non-zero status, and `set -e` would end the run on the code that was NOT
+  # reached - a self-test killed by its own summary line.
+  REACHED=""
+  if [ "$REACHED_0" = 1 ]; then REACHED="$REACHED 0"; fi
+  if [ "$REACHED_1" = 1 ]; then REACHED="$REACHED 1"; fi
+  if [ "$REACHED_2" = 1 ]; then REACHED="$REACHED 2"; fi
+  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
+    "${REACHED:- none}"
+  printf '    NOT ASSERTED: the cases compare the exit CODE and never the wording of a finding, so a case that went red for the wrong reason is invisible here and is read off its captured output by hand\n'
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  exit 0
+fi
 
 if [ -z "$ROOT" ]; then
   ROOT="$(git rev-parse --show-toplevel)" \

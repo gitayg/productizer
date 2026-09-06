@@ -102,6 +102,8 @@ Usage:
   check-frontmatter.py -- <file>        same, for a path that begins with a dash
   check-frontmatter.py --help | -h      print this and exit 0
   check-frontmatter.py --version        print the version and exit 0
+  check-frontmatter.py --selftest       drive this file's own contract and exit 0/1
+                                        (--self-test is accepted as an alias)
 
 There are no other options. There are no tunables: the key set, the tool set and the
 enumerated values are fixed in the script, so two runs over the same tree agree.
@@ -137,6 +139,11 @@ Exit status:
   1  findings — at least one file has something wrong with it
   2  a bad invocation: an unknown option
   3  the check could not run: a file was absent or unreadable
+
+Under --selftest: 0 every case produced the exit code this contract declares for
+it, 1 at least one did not, 2 the corpus could not be built at all. All four
+codes above are driven, each by a fixture written into a temporary directory
+that is removed afterwards. Nothing is written into the repository.
 """)
 
 
@@ -171,6 +178,12 @@ def parse_args(argv):
         if a in ("-h", "--help"):
             usage()
             sys.exit(0)
+        # R39: the self-test is dispatched here, ahead of the unknown-option
+        # refusal below, and answers to either spelling. This repository writes
+        # the flag both ways, and a tool that answers only one spelling has a
+        # self-test the next caller cannot find.
+        if a == "--selftest" or a == "--self-test":
+            raise SystemExit(selftest())
         if a == "--":
             paths.extend(argv[i + 1:])
             break
@@ -367,6 +380,119 @@ def _rel(path):
     if ap.startswith(root + os.sep):
         return ap[len(root) + 1:]
     return path
+
+
+
+# --------------------------------------------------------------- --selftest
+#
+# R39 — every check tool carries a self-test that reaches each exit code it can
+# return. This file returns four and all four are driven below, each by a
+# template written into a temporary directory and this script re-invoked on it.
+# Nothing is written into the repository, and the corpus is removed on every
+# exit path.
+#
+# THE CASES ARE RUN AS A SUBPROCESS, not by calling main() in-process, so the
+# argument parser and the three-way exit are on the measured path too. A
+# self-test that calls check_file() directly would leave the exits — the part
+# of the contract everything downstream reads — untested.
+
+SELFTEST_CLEAN = """---
+name: fixture-agent
+description: a template that exists only to be the clean case of this self-test
+tools: Read, Grep
+---
+
+Body text. Nothing below the frontmatter is examined.
+"""
+
+SELFTEST_CASES = (
+    # (name, filename, contents, expected exit, what the case is)
+    ("clean-template", "clean.md", SELFTEST_CLEAN, 0,
+     "required keys present, tools declared, every name real"),
+    ("unknown-tool", "typo.md",
+     SELFTEST_CLEAN.replace("tools: Read, Grep", "tools: Read, Reed"), 1,
+     "a misspelled tool name is a capability silently deleted"),
+    ("always-removed-tool", "inert.md",
+     SELFTEST_CLEAN.replace("tools: Read, Grep", "tools: Read, ExitPlanMode"), 1,
+     "a real but always-removed tool reads as a capability never granted"),
+    ("missing-tools-key", "notools.md",
+     SELFTEST_CLEAN.replace("tools: Read, Grep\n", ""), 1,
+     "an agent that omits tools inherits every tool"),
+    ("missing-required-key", "noname.md",
+     SELFTEST_CLEAN.replace("name: fixture-agent\n", ""), 1,
+     "a required key is absent"),
+    ("unknown-key", "straykey.md",
+     SELFTEST_CLEAN.replace("tools: Read, Grep", "tools: Read, Grep\ncolour: red"), 1,
+     "a key the runtime drops looks exactly like one it honours"),
+    ("enum-out-of-range", "badenum.md",
+     SELFTEST_CLEAN.replace("tools: Read, Grep", "tools: Read, Grep\neffort: enormous"), 1,
+     "a value outside its documented range is as inert as an unknown key"),
+    ("cannot-parse", "noblock.md",
+     "no frontmatter here at all\n", 1,
+     "unreadable frontmatter is a finding, never reported as `no keys`"),
+)
+
+
+def selftest():
+    import shutil
+    import tempfile
+
+    try:
+        work = tempfile.mkdtemp(prefix="check-frontmatter-selftest.")
+    except OSError as exc:
+        sys.stderr.write("%s: cannot create a temporary directory to build the "
+                         "self-test corpus in (%s). Unmeasured, not a pass.\n"
+                         % (SELF, exc.__class__.__name__))
+        return 2
+
+    cases = 0
+    upheld = 0
+
+    def run(name, argv, expected, what):
+        """Drive one case and read the exit code off the child."""
+        nonlocal cases, upheld
+        proc = subprocess.run([sys.executable, os.path.abspath(__file__)] + argv,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        got = proc.returncode
+        cases += 1
+        if got == expected:
+            upheld += 1
+            verdict = "held"
+        else:
+            verdict = "NOT HELD"
+        sys.stdout.write("      %-26s expected %d  got %d  %s  %s\n"
+                         % (name, expected, got, verdict, what))
+
+    try:
+        sys.stdout.write("    selftest: check-frontmatter 1.0\n")
+        for name, filename, body, expected, what in SELFTEST_CASES:
+            path = os.path.join(work, filename)
+            with io.open(path, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            run(name, [path], expected, what)
+
+        run("unknown-option", ["--not-a-real-option"], 2,
+            "a bad invocation is refused, never answered")
+        run("absent-file", [os.path.join(work, "no-such-template.md")], 3,
+            "a file nobody opened is not a file that passed")
+        run("directory-not-a-file", [work], 3,
+            "a directory is reported as absent, never parsed as empty")
+        run("absent-outranks-findings",
+            [os.path.join(work, "typo.md"), os.path.join(work, "no-such-template.md")], 3,
+            "could-not-run outranks findings, so the run cannot be read as a verdict")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    verdict = "held" if cases == upheld else "NOT HELD"
+    sys.stdout.write("    R39  %-38s examined %3d  upheld %3d  %s: %s\n"
+                     % ("selftest-cases-produce-declared-exit", cases, upheld,
+                        verdict, "each case exits with the code this file's "
+                        "contract declares for it"))
+    sys.stdout.write("    exit codes reached: 0, 1, 2 and 3 - the whole contract.\n")
+    sys.stdout.write("    NOT ASSERTED: the WORDING of any finding. The corpus drives the "
+                     "exit code, so a case that went red for the wrong reason is "
+                     "invisible here and is read off the case output by hand.\n")
+    return 0 if cases == upheld else 1
 
 
 def main(argv):

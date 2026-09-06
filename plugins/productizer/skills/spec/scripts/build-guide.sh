@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# build-guide.sh [--root DIR] [--spec FILE] [--guide FILE] [--check] [--version] [--help]
+# build-guide.sh [--root DIR] [--spec FILE] [--guide FILE] [--check]
+#                [--selftest|--self-test] [--version] [--help]
 #
 # R9 - when a release is prepared, the lifecycle shall regenerate the user
 # guide from the active requirements. This is that regeneration, and it is
@@ -147,12 +148,21 @@
 #      guide carrying no markers to write between
 #   3  COULD NOT READ THE SPEC. Never reported as "0 active requirements": a
 #      spec nobody could open is not a product with nothing agreed about it.
+#
+# --SELFTEST DRIVES ALL FOUR. R39 - every check tool carries a self-test that
+# reaches each exit code it can return - and this file returns four, so all
+# four are built as cases in a temporary directory below. Under --selftest the
+# exit code means: every case produced the code this contract declares for it
+# (0), at least one did not (1), the corpus could not be built at all (2).
+# `--self-test` is accepted as an alias, because this repository spells the
+# flag both ways and a tool that answers only one spelling has a self-test the
+# next caller cannot find.
 set -euo pipefail
 
 VERSION="build-guide 1.2"
 
 usage() {
-  printf 'usage: build-guide.sh [--root DIR] [--spec FILE] [--guide FILE] [--check] [--version] [--help]\n'
+  printf 'usage: build-guide.sh [--root DIR] [--spec FILE] [--guide FILE] [--check] [--selftest] [--version] [--help]\n'
 }
 
 ROOT=""; SPEC=""; GUIDE=""; MODE="write"
@@ -167,11 +177,189 @@ while [ $# -gt 0 ]; do
     --spec)    need_value "$1" "${2:-}"; SPEC="$2";  shift 2 ;;
     --guide)   need_value "$1" "${2:-}"; GUIDE="$2"; shift 2 ;;
     --check)   MODE="check"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *)         printf 'build-guide: unknown argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+
+# --------------------------------------------------------------- --selftest
+#
+# A GENERATOR IS TESTED BY GENERATING. Every case below is a spec and a guide
+# written into a temporary directory, this script run against them, and the
+# exit code read off the child. Nothing is written into the repository this
+# file lives in - which matters more here than in a check, because write mode
+# REWRITES GUIDE.md, and a self-test that pointed at the real one would edit
+# the tree it was meant to be measuring.
+#
+# THE CLEAN CASE IS A ROUND TRIP, not a comparison against a stored expectation.
+# Write the section, then --check it: no golden file to drift, and the pair
+# proves the two modes agree with each other rather than each agreeing with a
+# copy somebody committed once.
+if [ "$MODE" = "selftest" ]; then
+  SELF_TMP="$(mktemp -d)" || {
+    printf 'build-guide: cannot create a temporary directory to build the self-test corpus in. Unmeasured, not a pass.\n' >&2
+    exit 2; }
+  trap 'rm -rf "$SELF_TMP"' EXIT HUP INT TERM
+
+  command -v python3 >/dev/null 2>&1 || {
+    printf 'build-guide: python3 is not installed, so no case could be driven. Unmeasured, not a pass.\n' >&2
+    exit 2; }
+
+  CASE_ROOT="$SELF_TMP/repo"
+  mkdir -p "$CASE_ROOT/.claude/productizer"
+
+  # Two requirements under two headings, so the renderer groups something
+  # rather than taking its every-group-empty path.
+  cat > "$CASE_ROOT/.claude/productizer/spec.md" <<'FIXTURE_SPEC'
+# Fixture spec
+
+Next requirement id: R3
+
+## Requirements
+
+### Ubiquitous requirements
+
+- **R1** - the lifecycle shall do the first thing.
+
+### Event-driven requirements
+
+- **R2** - when a thing arrives, the lifecycle shall do the second thing.
+
+## Change log
+
+Nothing. This fixture exists to be regenerated from, not to be read.
+FIXTURE_SPEC
+
+  # An empty section between the markers, and prose on both sides of it that
+  # names no requirement id - so R9.c and R9.d have nothing to fire on and the
+  # clean case is clean for the reason it says it is.
+  cat > "$CASE_ROOT/GUIDE.md" <<'FIXTURE_GUIDE'
+# Fixture guide
+
+Opening prose that names no requirement at all.
+
+<!-- productizer:requirements:begin -->
+<!-- productizer:requirements:end -->
+
+Closing prose that names no requirement either.
+FIXTURE_GUIDE
+
+  SELF_CASES=0
+  SELF_UPHELD=0
+
+  # The exit code is captured into a variable on the SAME LINE as the command.
+  # A command substitution in an argument list resets $?, so reading the status
+  # inside the call below would report the status of the call.
+  record() { # <case> <expected> <observed> <what the case is>
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$3" = "$2" ]; then
+      SELF_UPHELD=$((SELF_UPHELD + 1)); verdict="held"
+    else
+      verdict="NOT HELD"
+    fi
+    printf '      %-26s expected %s  got %s  %s  %s\n' "$1" "$2" "$3" "$verdict" "$4"
+  }
+
+  printf '    selftest: %s\n' "$VERSION"
+
+  got=0
+  bash "$0" --root "$CASE_ROOT" > "$SELF_TMP/write.out" 2> "$SELF_TMP/write.err" || got=$?
+  record write-into-markers 0 "$got" "the section is generated between the two markers and nothing else is touched"
+
+  got=0
+  bash "$0" --root "$CASE_ROOT" --check > "$SELF_TMP/check.out" 2> "$SELF_TMP/check.err" || got=$?
+  record check-current 0 "$got" "the section just written is what the spec produces today"
+
+  # The R9.c case is built from the guide AFTER the write, so its section is
+  # current and the only thing that can go red is the prose outside it.
+  cp "$CASE_ROOT/GUIDE.md" "$SELF_TMP/prose-guide.md"
+  printf '\nThe guide also mentions R99 in running prose outside the section.\n' \
+    >> "$SELF_TMP/prose-guide.md"
+  got=0
+  bash "$0" --root "$CASE_ROOT" --guide "$SELF_TMP/prose-guide.md" --check \
+    > "$SELF_TMP/prose.out" 2> "$SELF_TMP/prose.err" || got=$?
+  record undefined-id-in-prose 1 "$got" "R9.c: prose outside the section names an id the spec does not define"
+
+  # One requirement added to the spec and nothing done to the guide.
+  cp -R "$CASE_ROOT" "$SELF_TMP/stale"
+  python3 - "$SELF_TMP/stale/.claude/productizer/spec.md" <<'ADD_ONE_REQUIREMENT'
+import io
+import sys
+
+path = sys.argv[1]
+with io.open(path, encoding="utf-8") as fh:
+    text = fh.read()
+with io.open(path, "w", encoding="utf-8") as fh:
+    fh.write(text.replace(
+        "## Change log",
+        "- **R3** - the lifecycle shall do a third thing.\n\n## Change log", 1))
+ADD_ONE_REQUIREMENT
+  got=0
+  bash "$0" --root "$SELF_TMP/stale" --check \
+    > "$SELF_TMP/stale.out" 2> "$SELF_TMP/stale.err" || got=$?
+  record check-stale 1 "$got" "a requirement is in the spec and absent from the guide"
+
+  # The same drift in WRITE mode succeeds and exits 0: regenerating IS the fix
+  # for a stale section, and only a finding outside the markers survives it.
+  got=0
+  bash "$0" --root "$SELF_TMP/stale" > "$SELF_TMP/rewrite.out" 2> "$SELF_TMP/rewrite.err" || got=$?
+  record write-fixes-drift 0 "$got" "regenerating fixes the section a --check just called stale"
+
+  # A guide with the markers stripped out.
+  python3 - "$CASE_ROOT/GUIDE.md" "$SELF_TMP/no-markers.md" <<'STRIP_MARKERS'
+import io
+import sys
+
+src, dst = sys.argv[1:3]
+with io.open(src, encoding="utf-8") as fh:
+    text = fh.read()
+for marker in ("<!-- productizer:requirements:begin -->",
+               "<!-- productizer:requirements:end -->"):
+    text = text.replace(marker, "")
+with io.open(dst, "w", encoding="utf-8") as fh:
+    fh.write(text)
+STRIP_MARKERS
+  got=0
+  bash "$0" --root "$CASE_ROOT" --guide "$SELF_TMP/no-markers.md" \
+    > "$SELF_TMP/nomark.out" 2> "$SELF_TMP/nomark.err" || got=$?
+  record no-markers 2 "$got" "guessing where the section belongs would overwrite prose somebody wrote"
+
+  got=0
+  bash "$0" --root "$SELF_TMP/no-such-root" --check \
+    > "$SELF_TMP/noroot.out" 2> "$SELF_TMP/noroot.err" || got=$?
+  record root-does-not-exist 2 "$got" "a root that is not a directory is refused, never defaulted around"
+
+  got=0
+  bash "$0" --not-a-real-option > "$SELF_TMP/badopt.out" 2> "$SELF_TMP/badopt.err" || got=$?
+  record unknown-argument 2 "$got" "bad usage is refused, never answered"
+
+  got=0
+  bash "$0" --root > "$SELF_TMP/noval.out" 2> "$SELF_TMP/noval.err" || got=$?
+  record option-without-value 2 "$got" "an option missing its argument is refused"
+
+  got=0
+  bash "$0" --root "$CASE_ROOT" --spec "$SELF_TMP/no-such-spec.md" --check \
+    > "$SELF_TMP/nospec.out" 2> "$SELF_TMP/nospec.err" || got=$?
+  record spec-unreadable 3 "$got" "a spec nobody could open is not a product with nothing agreed about it"
+
+  printf 'a file with no requirements section\n' > "$SELF_TMP/empty-spec.md"
+  got=0
+  bash "$0" --root "$CASE_ROOT" --spec "$SELF_TMP/empty-spec.md" --check \
+    > "$SELF_TMP/emptyspec.out" 2> "$SELF_TMP/emptyspec.err" || got=$?
+  record spec-has-no-section 3 "$got" "no requirement was read, which is unmeasured and not a spec with none"
+
+  if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
+  printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
+    "each case exits with the code this file's contract declares for it"
+  printf '    exit codes reached: 0, 1, 2 and 3 - the whole contract.\n'
+  printf '    NOT ASSERTED: the CONTENT of the generated section. The corpus drives the exit code, so a renderer producing different but self-consistent prose in both modes would pass every case above; what the section says is asserted by R9.a against the committed guide, and read by a person.\n'
+  [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
+  exit 0
+fi
 
 if [ -z "$ROOT" ]; then
   # Not `.`. A release run from a subdirectory would otherwise regenerate a

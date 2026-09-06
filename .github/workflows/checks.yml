@@ -140,6 +140,49 @@ jobs:
 
       # Precision must stay at 1.00. A contradiction checker that halts on a
       # non-conflict gets switched off, and then nothing is checked.
+      - name: Self-tests — every check tool the suite invokes
+        # R40: "When the check suite runs, the lifecycle shall run the self-test
+        # of every check tool it invokes." R39 obliges the self-test to EXIST;
+        # this step is what makes it RUN. Each tool is named on its own line
+        # deliberately: `check-selftest-coverage.sh` reads the workflow SOURCE to
+        # decide reachability, so a loop over a glob would run every self-test and
+        # still leave R40 reporting that nothing invokes them.
+        #
+        # No line is guarded with `||` and this step sets no continue-on-error.
+        # The scanner detects both as SWALLOWED - a self-test whose failure cannot
+        # set the run's exit code has not been run in any sense that matters.
+        run: |
+          set -euo pipefail
+          python3 evals/solver-probe.py --selftest
+          python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
+          bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-cannot-run-coverage.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-changelog-row.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-classification-provenance.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-declared-scope.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-import-marking.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-installed-copies.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-jira-unbound.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-missing-tool.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-no-fabricated-zero.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-nothing-merged.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-pending-ruling-scope.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-ruling-requested.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-spec-home-stop.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-spec-home.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-spec-integrity.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-stderr.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-superseded-text.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-suspect-links.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-unmeasured-report.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-untrusted-execution.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-view-publish-refused.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-view-readonly.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-waiver-rendering.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
+          bash scripts/check-hygiene.sh --selftest
+
       - name: Acceptance rows — check-acceptance-rows self-test
         # R40 obliges the suite to RUN the self-tests R39 obliges tools to carry.
         # Measured 2026-09-06: three scripts parse a self-test flag -

@@ -353,6 +353,33 @@ concern is open with no ruling behind it, when a pending ruling is cited by
 nothing, and when a pending ruling is still wearing the template. A ruling that
 still reads like the template is a file, not an ask.
 
+## Every check tool tests itself, and the suite runs those tests
+
+R39 obliges a check tool to carry a self-test that reaches each exit code it can return. R40
+obliges the suite to run it. Both read **32 of 32** as of 2026-09-06; 28 of those self-tests were
+written in one pass, and every one was seen FAILING on a deliberate break before it was believed.
+
+The self-tests build fixtures under `mktemp -d` and never touch the repository. Two of them cannot
+reach their exit 1 from fixtures at all - for `check-missing-tool` and `check-no-fabricated-zero`,
+exit 1 means the RUNNER regressed, and no input makes a correct runner fabricate a zero - so they
+copy the scripts directory and patch the COPY, verifying the patch applied and refusing with exit 2
+if it did not. A moved line becomes unmeasured, never a silent second copy of the clean case.
+
+**The lesson from writing them, which is worth more than the count.** An exit-code-only self-test
+misses real regressions. Four separate falsifications kept exit 1 while the defect was live: a
+renumbering read as a deletion, per-line clearing reverted to per-file, an assertion switched off
+entirely. Only the cases that assert a SENTENCE caught those. Every tool prints a `NOT ASSERTED:`
+line saying which kind it is.
+
+The wiring in `.github/workflows/checks.yml` names all 32 on their own lines rather than looping
+over a glob, because reachability is read from the workflow SOURCE - a loop would run every
+self-test and leave R40 reporting that nothing invokes them. No line is guarded with a shell OR and
+no step sets `continue-on-error`; the check treats both as SWALLOWED, on the reasoning that a
+self-test whose failure cannot set the run's exit code has not been run in any sense that matters.
+
+One honest gap: `evals/solver-probe.py` has no exit 1 to reach - its run function returns 0 over
+any corpus - and its self-test prints `NOT REACHED:` rather than inventing a case for it.
+
 ## A check that counts what nobody is testing
 
 `check-selftest-coverage.sh` reads the tools the declared checks and the workflow actually

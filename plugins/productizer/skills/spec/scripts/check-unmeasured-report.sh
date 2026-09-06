@@ -118,6 +118,7 @@ SKILL="$(dirname "$HERE")"
 ROOT=""
 FIXTURE=""
 SCRIPTS=""
+MODE="measure"
 
 die_unmeasured() { printf 'check-unmeasured-report: %s\n' "$1" >&2; exit 2; }
 
@@ -125,6 +126,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$0"; exit 0 ;;
+    # `--self-test` is an alias, not a second flag: this repository spells the
+    # same obligation both ways and a tool that answers only one spelling reads
+    # as carrying no self-test to whichever scanner is looking for the other.
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --root)       [ "$#" -ge 2 ] || die_unmeasured "--root needs a path";    ROOT="$2";    shift 2 ;;
     --root=*)     ROOT="${1#--root=}";       shift ;;
     --fixture)    [ "$#" -ge 2 ] || die_unmeasured "--fixture needs a path"; FIXTURE="$2"; shift 2 ;;
@@ -196,6 +201,129 @@ hygiene/clean.txt
 for f in $FIXTURE_FILES; do
   [ -f "$FIXTURE/$f" ] || die_unmeasured "the fixture has no $f; the standing case is incomplete, which is unmeasured and not a pass"
 done
+
+# ---------------------------------------------------------------------------
+# --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
+#
+# Four cases, one per way the contract above can be reached, each driven
+# through THIS script so the argument handling and the seven premises are on
+# the path too. No case is asserted by reading source: the exit code is read
+# off a real run.
+#
+#   clean          a byte copy of the skill's own tools                  -> 0
+#   quiet-hygiene  the same copy with check-hygiene.sh replaced by one
+#                  that exits 0 without a word on a file it could not
+#                  open, which is exactly what R25.3 forbids             -> 1
+#   no-scripts     a --scripts directory that is not there               -> 2
+#   bad-usage      an option the parser does not take                    -> 2
+#
+# THE CLEAN CASE IS DRIVEN AGAINST THE COPY, NOT AGAINST THE COMMITTED TOOLS,
+# and that is deliberate. The two runs then differ in ONE FILE, so the exit
+# code moving from 0 to 1 is attributable to that file and to nothing else. A
+# clean case run against the committed tree and a finding case run against a
+# copy would also differ in every consequence of having been copied.
+#
+# THE CLEAN CASE GUARDS THE OTHER THREE. If the copy does not exit 0, the
+# quiet-hygiene case would be red for whatever is wrong with the copy - exit 2
+# for the whole self-test, never a pass on the cases that followed.
+#
+# THE TWO HEAVY CASES RUN CONCURRENTLY. Each is a full drive of five tools over
+# eleven sandboxes and takes most of ten seconds; run one after the other they
+# would come close to the probe budget check-selftest-coverage.sh allows a
+# self-test, and a self-test that times out is reported `?` - unreadable - and
+# refuses that check rather than answering it. They share nothing but the
+# read-only fixture, so running them at once changes no verdict.
+#
+# NOTHING IS WRITTEN INTO THE REPOSITORY. The copy and the broken tool live
+# under mktemp and the directory goes on every exit path, signal included.
+#
+# WHAT THIS SELF-TEST DOES NOT ASSERT, printed rather than passed silently: it
+# reads the exit CODE and never which of the twelve assertions moved, so a case
+# that went red for the wrong reason is invisible here.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-unmeasured-report-selftest.XXXXXX")" \
+    || die_unmeasured "cannot create a temporary directory to build the self-test's inputs in; nothing was driven"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  # The whole skill directory, not just the scripts: the tools resolve their
+  # own templates and references through `..`, and a directory of the five
+  # scripts alone would fail for that reason rather than for the mutation.
+  cp -R "$SKILL" "$SB/intact" \
+    || die_unmeasured "the skill directory could not be copied, so neither drive had tools to run. Unmeasured, not a pass"
+  cp -R "$SB/intact" "$SB/quiet" \
+    || die_unmeasured "the second copy could not be made, so the case that must go red was never built. Unmeasured, not a pass"
+
+  # R25.3 says a file the hygiene check cannot open is reported `Unmeasured,
+  # not clean` and exits 2. This one exits 0 and says nothing - the silent pass
+  # over an unread file, which is the defect P1 exists to refuse and the
+  # single difference between the two drives below.
+  cat > "$SB/quiet/scripts/check-hygiene.sh" <<'SELFTEST_HYGIENE'
+#!/usr/bin/env bash
+# Built by check-unmeasured-report.sh --selftest. Never installed, never
+# reachable from the repository: it lives under mktemp for one run.
+exit 0
+SELFTEST_HYGIENE
+  chmod +x "$SB/quiet/scripts/check-hygiene.sh"
+  if cmp -s "$SB/intact/scripts/check-hygiene.sh" "$SB/quiet/scripts/check-hygiene.sh"; then
+    die_unmeasured "the two copies hold the same hygiene check, so the quiet-hygiene case is identical to the clean one and would prove only that the clean case passes twice. Unmeasured, not a pass"
+  fi
+
+  # $1 case, then the argv. `_r=$?` on the SAME LINE as the command: a `$(...)`
+  # or a pipeline between the two resets it, which is how a self-test reports
+  # passes having measured none.
+  self_bg() {
+    _n="$1"
+    shift
+    ( _r=0
+      bash "$0" "$@" > "$SB/$_n.out" 2> "$SB/$_n.err" || _r=$?
+      printf '%s\n' "$_r" > "$SB/$_n.rc" ) &
+  }
+
+  SELF_CASES=0
+  SELF_FAILED=0
+  self_report() { # $1 case, $2 expected exit, $3 what the case is
+    _rc="$(cat "$SB/$1.rc")"
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$_rc" = "$2" ]; then
+      printf '  held:    case %-14s expected %s  observed %s  %s\n' "$1" "$2" "$_rc" "$3"
+    else
+      printf '  FINDING: case %-14s expected %s  observed %s  %s\n' "$1" "$2" "$_rc" "$3"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  self_bg clean --root "$ROOT" --fixture "$FIXTURE" --scripts "$SB/intact/scripts"
+  self_bg quiet-hygiene --root "$ROOT" --fixture "$FIXTURE" --scripts "$SB/quiet/scripts"
+  self_bg no-scripts --root "$ROOT" --fixture "$FIXTURE" --scripts "$SB/there-are-no-scripts-here"
+  self_bg bad-usage --root "$ROOT" --no-such-option
+  wait
+
+  CLEAN_RC="$(cat "$SB/clean.rc")"
+  if [ "$CLEAN_RC" != 0 ]; then
+    printf '  the clean case exited %s, not 0.\n' "$CLEAN_RC"
+    die_unmeasured "a byte copy of the committed tools did not produce a clean run, so the quiet-hygiene case below would be red for that reason instead of its own. Unmeasured, not a corpus that held"
+  fi
+
+  self_report clean 0 \
+    "a byte copy of the committed tools over the committed fixture: all twelve assertions held"
+  self_report quiet-hygiene 1 \
+    "the same copy, with a hygiene check that exits 0 without a word on a file it could not open - R25.3 is the assertion that must catch it"
+  self_report no-scripts 2 \
+    "no scripts directory at the path given, so there was nothing to drive - unmeasured, never a pass"
+  self_report bad-usage 2 \
+    "an option this parser does not take: bad usage is refused rather than ignored"
+
+  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$SELF_CASES" "$SELF_FAILED"
+  printf '  NOT ASSERTED: which of the twelve assertions moved. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
+  if [ "$SELF_FAILED" -ne 0 ]; then
+    printf 'check-unmeasured-report: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists and reaches 0, 1 and 2 by driving the real check, not by reading its source.\n'
+  exit 0
+fi
 
 rel() {
   case "$1" in

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-spec-home-stop.sh [--version] [--help] [--root DIR] [--fixture DIR]
-#                         [--tree DIR]
+#                         [--tree DIR] [--selftest]
 #
 # Asserts R19: IF THE SPEC HOME IS UNREACHABLE, THEN THE LIFECYCLE SHALL STOP
 # RATHER THAN CLASSIFY AGAINST A REMEMBERED COPY.
@@ -157,11 +157,17 @@
 #      did not hold, an assertion no case exercised, a shallow clone under a
 #      tree whose timeline had to be read, or a constructed history that did
 #      not come out as constructed. Never confused with 0.
+#
+# Under --selftest (--self-test is accepted too) the same three mean: every
+# case produced the exit code it declares and said what it was supposed to say
+# (0), at least one did not (1), and the corpus could not be driven at all (2).
 set -euo pipefail
 
 export LC_ALL=C
 
 VERSION="check-spec-home-stop 2.0"
+
+MODE="cases"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$(dirname "$HERE")"
@@ -192,6 +198,7 @@ while [ "$#" -gt 0 ]; do
     --fixture=*) FIXTURE="${1#--fixture=}"; shift ;;
     --tree)      [ "$#" -ge 2 ] || die_unmeasured "--tree needs a path";    TREE="$2";    shift 2 ;;
     --tree=*)    TREE="${1#--tree=}";       shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --) shift; break ;;
     -*) die_unmeasured "unknown option: $1. Run with --help for the contract." ;;
     *)  die_unmeasured "takes no positional arguments; got: $1" ;;
@@ -203,6 +210,234 @@ done
 # a pure presence probe - the refusal below carries the whole diagnosis.
 command -v python3 >/dev/null 2>&1 ||
   die_unmeasured "python3 is not on PATH, so no tree can be read. Refusing rather than reporting an unexamined fixture as clean."
+
+# ---------------------------------------------------------------------------
+# --selftest. R39: one case per exit code this tool can return, in BOTH of the
+# modes it has, because they are two different programs sharing a detector.
+#
+#   --tree      one tree, its own verdict, nothing declared to compare against
+#   the default the declared cases, the built histories, and A7
+#
+# A corpus that only drove --tree would leave the case loop, the premise
+# guards and the unexercised-assertion refusal untested, and those are where
+# this file's own defects have been.
+#
+# THE HISTORIES ARE BUILT AT RUN TIME, for the reason the header already
+# gives: a case directory under `fixtures/` cannot carry a git history of its
+# own inside this repository. `build_timeline_repo` above builds two of them
+# for A5 and A6; the sandbox below builds its own for the shallow refusal and
+# for the --tree timeline path, which A5 and A6 do not reach.
+#
+# EVERY CASE ASSERTS ITS OWN SENTENCE, NOT ONLY ITS EXIT CODE. Six things exit
+# 2 here and each is a different refusal - a tree that is not a directory, a
+# config that is not JSON, a store that is not a directory, a missing fixture,
+# an empty fixture, a case whose premise did not hold, and a shallow clone.
+# Reading exit codes alone could not tell a broken premise from a missing
+# fixture, and this file has already shipped one assertion that swept an empty
+# set; the second one does not get to happen quietly.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SELF="$HERE/${0##*/}"
+  [ -f "$SELF" ] ||
+    die_unmeasured "cannot re-invoke this script for the self-test, so no case was driven"
+  command -v git >/dev/null ||
+    die_unmeasured "git is not on PATH, so no history could be built and no case was driven"
+
+  # `pwd -P` because the temporary directory is reached through a symlink on
+  # macOS and git resolves every path it prints.
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-spec-home-stop-selftest.XXXXXX")" ||
+    die_unmeasured "could not create a sandbox, so no case was driven"
+  SB="$(cd "$SB" && pwd -P)"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  ST=".claude/productizer"
+
+  mk_tree() { mkdir -p "$SB/$1/$ST"; }
+
+  put_config() {
+    cat > "$SB/$1/$ST/config.json" <<'JSON'
+{"product": {"spec_home": "example/home-repo"}, "spec": {"path": ".claude/productizer/spec.md"}}
+JSON
+  }
+  put_spec() {
+    printf '# Living spec — sandbox\n\n## Requirements\n\n- **R1** — The lifecycle shall stop.\n' \
+      > "$SB/$1/$ST/spec.md"
+  }
+  put_record() {
+    # $1 tree, $2 name, $3 the Spec commit value
+    mkdir -p "$SB/$1/$ST/classifications"
+    cat > "$SB/$1/$ST/classifications/$2.md" <<REC
+Intent: $2
+Classification: extend
+Recorded: 2026-01-01
+Spec path: .claude/productizer/spec.md
+Spec commit: $3
+Spec hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+In scope count: 1
+
+## Requirement ids in scope
+
+R1
+REC
+  }
+
+  GOOD_SHA="0123456789abcdef0123456789abcdef01234567"
+
+  FAILED=0
+  DRIVEN=0
+
+  drive() {
+    # $1 case name, $2 expected exit, $3 expected sentence, $4.. argv
+    local case_name="$1" want="$2" marker="$3"
+    shift 3
+    local rc=0
+    bash "$SELF" "$@" > "$SB/$case_name.out" 2> "$SB/$case_name.err" || rc=$?
+    DRIVEN=$((DRIVEN + 1))
+    local why=""
+    [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
+    # Both files handed to grep directly, never piped into it: under
+    # `set -o pipefail` a `cat a b | grep -q` reports 141 whenever grep matches
+    # early enough to SIGPIPE the cat, and `if !` reads that as no match.
+    if ! grep -q -- "$marker" "$SB/$case_name.out" "$SB/$case_name.err"; then
+      [ -n "$why" ] && why="$why; "
+      why="${why}its output does not say what it was supposed to say"
+    fi
+    if [ -z "$why" ]; then
+      printf '  held: case %-24s exit %d, and said so - %s\n' "$case_name" "$rc" "$marker"
+      return 0
+    fi
+    printf '  FINDING: case %-24s %s - expected: %s\n' "$case_name" "$why" "$marker"
+    FAILED=$((FAILED + 1))
+    return 0
+  }
+
+  # --- trees for --tree ----------------------------------------------------
+  mk_tree stopped;        put_config stopped
+  mk_tree reachable;      put_config reachable; put_spec reachable
+  put_record reachable rec "$GOOD_SHA"
+  mk_tree classified;     put_config classified
+  put_record classified rec "$GOOD_SHA"
+  mk_tree placeholder;    put_config placeholder; put_spec placeholder
+  put_record placeholder rec "—"
+  mk_tree bad-config;     printf 'this is not JSON {\n' > "$SB/bad-config/$ST/config.json"
+  mk_tree store-not-dir;  put_config store-not-dir; put_spec store-not-dir
+  printf 'a file where the store should be\n' > "$SB/store-not-dir/$ST/classifications"
+  printf 'not a directory\n' > "$SB/a-file"
+
+  # A history where the record was written BEFORE the home broke. `--tree`
+  # reaches the timeline through its own path, which A5 and A6 do not drive.
+  mk_tree spared; put_config spared; put_spec spared
+  put_record spared rec "$GOOD_SHA"
+  git -c init.defaultBranch=main init -q "$SB/spared"
+  git -C "$SB/spared" config user.email "fixture@example.invalid"
+  git -C "$SB/spared" config user.name "check-spec-home-stop selftest"
+  git -C "$SB/spared" add -A
+  git -C "$SB/spared" -c commit.gpgsign=false commit -q -m "the home is reachable and one classification is recorded"
+  rm -f "$SB/spared/$ST/spec.md"
+  git -C "$SB/spared" add -A
+  git -C "$SB/spared" -c commit.gpgsign=false commit -q -m "the spec home breaks afterwards"
+
+  # The same history, cloned shallow. Neither commit is reachable, so a record
+  # cannot be dated at all - UNKNOWN, and never innocent.
+  git clone -q --depth 1 "file://$SB/spared" "$SB/shallow" ||
+    die_unmeasured "could not build a shallow clone, so the refusal that separates an undateable record from an innocent one was never driven"
+
+  # --- constructed fixtures for the default mode ---------------------------
+  mk_fixture_case() {
+    # $1 fixture dir, $2 case name, $3 case.txt body written by the caller
+    mkdir -p "$SB/$1/$2/$ST"
+  }
+  FIX_BAD="$SB/fixture-premise"
+  mkdir -p "$FIX_BAD/a1/$ST"
+  printf '# Living spec — sandbox\n\n## Requirements\n\n- **R1** — The lifecycle shall stop.\n' \
+    > "$FIX_BAD/a1/$ST/spec.md"
+  cat > "$FIX_BAD/a1/case.txt" <<'DECL'
+Case: declares an unreachable home over a spec that is right there
+Asserts: A1
+Home: unreachable
+Records: 0
+Expect: clean
+Findings: 0
+DECL
+
+  FIX_FAIL="$SB/fixture-verdict"
+  mkdir -p "$FIX_FAIL/a1/$ST/classifications"
+  cat > "$FIX_FAIL/a1/$ST/classifications/rec.md" <<REC
+Intent: rec
+Classification: extend
+Recorded: 2026-01-01
+Spec path: .claude/productizer/spec.md
+Spec commit: 0123456789abcdef0123456789abcdef01234567
+Spec hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+In scope count: 1
+REC
+  cat > "$FIX_FAIL/a1/case.txt" <<'DECL'
+Case: an unreachable home with a classification recorded, declared clean anyway
+Asserts: A1
+Home: unreachable
+Records: 1
+Expect: clean
+Findings: 0
+DECL
+
+  FIX_EMPTYSTORE="$SB/fixture-emptystore"
+  mkdir -p "$FIX_EMPTYSTORE/a2/$ST"
+  cat > "$FIX_EMPTYSTORE/a2/case.txt" <<'DECL'
+Case: declares a record its store does not hold
+Asserts: A2
+Home: unreachable
+Records: 1
+Expect: finding
+Findings: 1
+DECL
+
+  mkdir -p "$SB/fixture-empty"
+
+  # A root that does not run this lifecycle, so A7 is NOT APPLICABLE and the
+  # default-mode cases are the only thing the verdict rests on.
+  mkdir -p "$SB/no-lifecycle"
+
+  # THE CLEAN CASE GUARDS THE OTHERS' PREMISE, and it is the tool's own
+  # committed corpus: the four declared cases, the two built histories, and A7
+  # rendering no verdict over a root with no lifecycle in it. If that does not
+  # exit 0, every red case below would be red for that reason instead of its
+  # own.
+  CLEAN_RC=0
+  bash "$SELF" --root "$SB/no-lifecycle" > "$SB/clean.out" 2> "$SB/clean.err" || CLEAN_RC=$?
+  if [ "$CLEAN_RC" -ne 0 ] || ! grep -q 'PASS: 4 constructed cases and one built history' "$SB/clean.out"; then
+    printf '  the clean case exited %d and did not report the declared cases holding.\n' "$CLEAN_RC"
+    die_unmeasured "the corpus premise did not hold; unmeasured, not a pass"
+  fi
+  printf '  held: case %-24s exit 0, and said so - %s\n' "declared-cases" "PASS: 4 constructed cases and one built history"
+
+  drive tree-stopped        0 'R19 obeyed'                      --tree "$SB/stopped"
+  drive tree-reachable      0 'the spec home is reachable, so R19 was not in force' --tree "$SB/reachable"
+  drive tree-spared         0 'committed BEFORE the commit that made the spec home unreachable' --tree "$SB/spared"
+
+  drive tree-classified     1 'R19 is violated in this tree'    --tree "$SB/classified"
+  drive tree-placeholder    1 'carries a placeholder'           --tree "$SB/placeholder"
+  drive fixture-verdict     1 'did not reach the verdict R19 requires' --root "$SB/no-lifecycle" --fixture "$FIX_FAIL"
+
+  drive tree-not-a-dir      2 'names something that is not a directory' --tree "$SB/a-file"
+  drive tree-bad-config     2 'could not be read as JSON'       --tree "$SB/bad-config"
+  drive tree-store-not-dir  2 'is UNKNOWN, not zero'            --tree "$SB/store-not-dir"
+  drive tree-shallow        2 'SHALLOW clone'                   --tree "$SB/shallow"
+  drive fixture-missing     2 'no fixture directory at'         --root "$SB/no-lifecycle" --fixture "$SB/no-such-fixture"
+  drive fixture-empty       2 'holds no case directory'         --root "$SB/no-lifecycle" --fixture "$SB/fixture-empty"
+  drive fixture-premise     2 'The case was never tested'       --root "$SB/no-lifecycle" --fixture "$FIX_BAD"
+  drive fixture-emptystore  2 'swept an empty set'              --root "$SB/no-lifecycle" --fixture "$FIX_EMPTYSTORE"
+  drive bad-option          2 'unknown option'                  --no-such-option
+
+  printf '  cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$((DRIVEN + 1))" "$FAILED"
+  if [ "$FAILED" -ne 0 ]; then
+    printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2 in BOTH modes, and every case asserts which refusal or which verdict it produced as well as which code.\n'
+  printf '  NOT ASSERTED: the REFUSED path for an assertion no case exercises. Reaching it needs a fixture whose cases cover some of A1 to A6 and not others, and A5 and A6 are built unconditionally by this script rather than declared, so no fixture can leave them unexercised.\n'
+  exit 0
+fi
 
 # The work tree, never the working directory. --root does not decide WHAT is
 # examined - the fixture is found beside this script, so the case set is the

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# check-hygiene.sh [--version] [--help] [--patterns FILE] [--print-patterns] <file>...
+# check-hygiene.sh [--version] [--help] [--patterns FILE] [--print-patterns]
+#                  [--selftest|--self-test] <file>...
 #
 # Refuses content that must not reach a public repo: personal filesystem
 # paths, machine hostnames, private key material, and anything shaped like a
@@ -30,6 +31,12 @@
 #   0  every file examined, nothing found
 #   1  findings, reported by location
 #   2  could not run - bad usage, an unreadable file, an unreadable local list
+#
+# Under --selftest the same three mean: every case produced the exit code it
+# declares (0), at least one did not (1), and the corpus could not be built at
+# all (2). `--self-test` is accepted as an alias, because this repository
+# spells the flag both ways and a tool that answers only one spelling is a
+# tool whose self-test the next caller cannot find.
 #
 # WHAT IT PRINTS.
 #
@@ -101,12 +108,13 @@ PATTERNS='/Users/[A-Za-z][A-Za-z0-9._-]*|/home/[A-Za-z][A-Za-z0-9._-]*|C:\\Users
 PATTERN_CLASSES='personal filesystem path|personal filesystem path|personal filesystem path|personal filesystem path, slug form|machine hostname|machine hostname|private key material|GitHub token|GitHub personal access token|AWS access key id|Anthropic API key|OpenAI project API key|OpenAI API key|OpenAI API key|Slack token|Stripe live key|Google API key|npm token|JSON Web Token'
 
 usage() {
-  printf 'usage: check-hygiene.sh [--version] [--help] [--patterns FILE] [--print-patterns] <file>...\n'
+  printf 'usage: check-hygiene.sh [--version] [--help] [--patterns FILE] [--print-patterns] [--selftest] <file>...\n'
 }
 
 # ---------------------------------------------------------------- arguments
 
 PATTERNS_FILE=""
+SELFTEST=""
 PATTERNS_SOURCE=""
 PRINT_ONLY=""
 FILES=()
@@ -116,6 +124,7 @@ while [ "$#" -gt 0 ]; do
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     --print-patterns) PRINT_ONLY=1; shift ;;
+    --selftest|--self-test) SELFTEST=1; shift ;;
     --patterns)
       if [ "$#" -lt 2 ]; then
         printf 'check-hygiene: --patterns needs a FILE\n' >&2
@@ -132,6 +141,127 @@ while [ "$#" -gt 0 ]; do
     *) FILES+=("$1"); shift ;;
   esac
 done
+
+# ------------------------------------------------------------- --selftest
+#
+# R39 - EVERY CHECK TOOL SHALL CARRY A SELF-TEST THAT REACHES EACH EXIT CODE IT
+# CAN RETURN. All three of this file's are reachable and all three are driven
+# below. Each case is a fixture built in a temporary directory and this script
+# re-invoked on it; nothing is written into the tree being checked and the
+# corpus is removed on every exit path, signal included.
+#
+# THE TRIGGER STRINGS ARE ASSEMBLED AT RUN TIME AND NEVER WRITTEN OUT. This
+# file is scanned by its own rules - that is the positive control the header
+# names - so a literal personal path or a literal key shape written here would
+# be a real finding in this script, and the gate would report itself. Every
+# offending string below is therefore built from pieces that match nothing
+# where they are typed.
+#
+# THE CHILD RUNS ARE PINNED TO AN EMPTY LOCAL LIST. Without `--patterns` the
+# resolution order ends at `.claude/productizer/hygiene-local.txt`, which is
+# not committed - so the same case would be clean on one machine and a finding
+# on another, and a self-test whose verdict depends on an uncommitted file is
+# not evidence. The unreadable-list case below drives the other half of that
+# path deliberately.
+if [ -n "$SELFTEST" ]; then
+  SCRATCH="$(mktemp -d)" || {
+    printf 'check-hygiene: cannot create a temporary directory to build the self-test corpus in. Unmeasured, not a pass.\n' >&2
+    exit 2; }
+  trap 'rm -rf "$SCRATCH"' EXIT HUP INT TERM
+
+  : > "$SCRATCH/no-local-patterns.txt"
+
+  printf 'nothing here but ordinary prose and a relative path, docs/guide.md\n' \
+    > "$SCRATCH/clean.txt"
+
+  # A home-directory path. Written as two pieces so this line is not itself one.
+  printf 'config lives at %s%s\n' '/Us' 'ers/nobody/.config/app' > "$SCRATCH/personal-path.txt"
+
+  # An AWS access key id shape. Same construction, same reason.
+  printf 'aws_access_key_id = %s%s\n' 'AK' 'IA0123456789ABCDEF' > "$SCRATCH/credential.txt"
+
+  # A NUL byte makes it binary: named, and NOT counted as examined.
+  printf 'text\000more text\n' > "$SCRATCH/binary.bin"
+
+  mkdir -p "$SCRATCH/a-directory"
+
+  SELF_CASES=0
+  SELF_UPHELD=0
+
+  # `record` is called with the exit code ALREADY IN A VARIABLE. A command
+  # substitution in an argument list resets $?, so reading the status inside
+  # the call would report the status of the call.
+  record() { # <case> <expected> <observed> <what the case is>
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$3" = "$2" ]; then
+      SELF_UPHELD=$((SELF_UPHELD + 1))
+      verdict="held"
+    else
+      verdict="NOT HELD"
+    fi
+    printf '      %-26s expected %s  got %s  %s  %s\n' "$1" "$2" "$3" "$verdict" "$4"
+  }
+
+  printf '    selftest: %s\n' "$VERSION"
+
+  got=0
+  bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/clean.txt" \
+    > "$SCRATCH/clean.out" 2> "$SCRATCH/clean.err" || got=$?
+  record clean-file 0 "$got" "a file holding no forbidden shape is examined and reported clean"
+
+  got=0
+  bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/personal-path.txt" \
+    > "$SCRATCH/pp.out" 2> "$SCRATCH/pp.err" || got=$?
+  record personal-path 1 "$got" "a home-directory path is a finding"
+
+  got=0
+  bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/credential.txt" \
+    > "$SCRATCH/cred.out" 2> "$SCRATCH/cred.err" || got=$?
+  record credential-shape 1 "$got" "a key-shaped string is a finding"
+
+  # The match itself must never reach the report. This is the one assertion
+  # here that is about OUTPUT rather than an exit code, and it is the defect
+  # the header records as having shipped once: a leak reported by quoting it.
+  leak=0
+  grep -qF 'IA0123456789ABCDEF' "$SCRATCH/cred.out" "$SCRATCH/cred.err" || leak=$?
+  record match-not-printed 1 "$leak" "the offending text is absent from the finding (grep found nothing, which is exit 1)"
+
+  # Binary alongside a clean file: the binary is named, not counted, and the
+  # run is still clean because something WAS examined.
+  got=0
+  bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/binary.bin" "$SCRATCH/clean.txt" \
+    > "$SCRATCH/bin.out" 2> "$SCRATCH/bin.err" || got=$?
+  record binary-named-not-scanned 0 "$got" "a NUL-bearing file is named and skipped while the clean file still counts"
+
+  got=0
+  bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" \
+    > "$SCRATCH/nofiles.out" 2> "$SCRATCH/nofiles.err" || got=$?
+  record no-files-given 2 "$got" "nothing scanned is not a clean scan"
+
+  got=0
+  bash "$0" --not-a-real-option "$SCRATCH/clean.txt" \
+    > "$SCRATCH/badopt.out" 2> "$SCRATCH/badopt.err" || got=$?
+  record unknown-option 2 "$got" "bad usage is refused, never answered"
+
+  got=0
+  bash "$0" --patterns "$SCRATCH/no-such-list.txt" "$SCRATCH/clean.txt" \
+    > "$SCRATCH/nolist.out" 2> "$SCRATCH/nolist.err" || got=$?
+  record named-list-unreadable 2 "$got" "a configured local list that could not be read refuses rather than falling back to generic-only"
+
+  got=0
+  bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/a-directory" "$SCRATCH/absent.txt" \
+    > "$SCRATCH/none.out" 2> "$SCRATCH/none.err" || got=$?
+  record nothing-examinable 2 "$got" "every path given was a directory or missing, so the run has no evidence in it"
+
+  if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
+  printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
+    "each case exits with the code this file's contract declares for it"
+  printf '    exit codes reached: 0, 1 and 2 - the whole contract.\n'
+  printf '    NOT ASSERTED: the default local-list resolution ($PRODUCTIZER_HYGIENE_PATTERNS and .claude/productizer/hygiene-local.txt) is pinned out of every case above, because that file is not committed and a case whose verdict depends on it is not evidence. Only the --patterns arm of that path is driven.\n'
+  [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
+  exit 0
+fi
 
 # ------------------------------------------------------- the built-in list
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# check-declared-scope.sh [--root DIR] [--fixture DIR] [--version] [--help]
+# check-declared-scope.sh [--root DIR] [--fixture DIR] [--selftest|--self-test]
+#                         [--version] [--help]
 #
 # Asserts two requirements about DECLARED SCOPE, separately.
 #
@@ -77,6 +78,12 @@
 #   2  could not run - bad usage, no fixture, no runner, no python3, an
 #      unreadable result, or a premise that did not hold
 #
+# Under --selftest the same three mean: every case produced the exit code this
+# contract declares for it (0), at least one did not (1), and the corpus could
+# not be built at all (2). `--self-test` is accepted as an alias, because this
+# repository spells the flag both ways and a tool that answers only one
+# spelling has a self-test the next caller cannot find.
+#
 # WHAT IT PRINTS. One BARE PATH per line for every file examined, relative to
 # the repository, which is what the runner parses as coverage. Assertions are
 # INDENTED. The runner's own stderr is NOT reproduced: it names the temporary
@@ -92,6 +99,7 @@ SKILL="$(dirname "$HERE")"
 
 ROOT=""
 FIXTURE="$SKILL/fixtures/declared-scope"
+SELFTEST=""
 
 die_unmeasured() { printf 'check-declared-scope: %s\n' "$1" >&2; exit 2; }
 
@@ -103,12 +111,122 @@ while [ $# -gt 0 ]; do
     --root=*)     ROOT="${1#--root=}";       shift ;;
     --fixture)    [ "$#" -ge 2 ] || die_unmeasured "--fixture needs a path"; FIXTURE="$2"; shift 2 ;;
     --fixture=*)  FIXTURE="${1#--fixture=}"; shift ;;
+    --selftest|--self-test) SELFTEST=1; shift ;;
     --) shift; break ;;
     -*) die_unmeasured "unknown option: $1. Run with --help for the contract." ;;
     *)  die_unmeasured "takes no positional arguments; got: $1" ;;
   esac
 done
 [ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1"
+
+
+# --------------------------------------------------------------- --selftest
+#
+# R39 - EVERY CHECK TOOL SHALL CARRY A SELF-TEST THAT REACHES EACH EXIT CODE IT
+# CAN RETURN. All three of this file's are reachable and all three are driven.
+#
+# THE FINDING CASE IS THE COMMITTED FIXTURE WITH ONE NUMBER CHANGED. Copy
+# `fixtures/declared-scope/` into a temporary directory, lower
+# `hollow-shortfall`'s declared minimum from two to one, and the check that was
+# supposed to fall short now examines everything it declared. Nothing is
+# hollow, the run exits 0 rather than 3, and this check must go red - because
+# what it asserts is that the runner still refuses a hollow pass, and in that
+# corpus there is no longer one to refuse. That is a genuine failure of the
+# assertion, reached by driving the real runner over a real config, not by a
+# stub returning a number.
+#
+# THE PREMISE CASE DELETES `honest-pass`. Its row is then absent from the
+# result, the mirror image was never run, and the contract says that is exit 2
+# - unmeasured - and never a pass over the half that did run.
+#
+# Nothing is written into the repository: every case works on a copy, and the
+# copy is removed on every exit path, signal included.
+if [ -n "$SELFTEST" ]; then
+  SELF_TMP="$(mktemp -d)" || die_unmeasured "cannot create a temporary directory to build the self-test corpus in"
+  trap 'rm -rf "$SELF_TMP"' EXIT HUP INT TERM
+
+  [ -d "$FIXTURE" ] || die_unmeasured "no fixture directory to build the self-test corpus from; there is nothing to vary by one thing"
+
+  mkdir -p "$SELF_TMP/lowered" "$SELF_TMP/no-mirror"
+  for f in checks.yaml changed.txt no-coverage.yaml; do
+    [ -f "$FIXTURE/$f" ] || die_unmeasured "the fixture has no $f, so the self-test corpus cannot be built from it"
+    cp "$FIXTURE/$f" "$SELF_TMP/lowered/$f"
+    cp "$FIXTURE/$f" "$SELF_TMP/no-mirror/$f"
+  done
+
+  # ONE NUMBER, AND IT IS THE FIRST `min_covered` IN THE FILE - the one under
+  # `hollow-shortfall`. `honest-pass` keeps its own, so the two checks still
+  # differ in exactly one thing and this case still isolates the shortfall.
+  awk 'BEGIN { done = 0 }
+       /min_covered: 2/ && !done { sub(/min_covered: 2/, "min_covered: 1"); done = 1 }
+       { print }' "$FIXTURE/checks.yaml" > "$SELF_TMP/lowered/checks.yaml"
+
+  # `honest-pass` is the last check in the file, so stopping at its id removes
+  # it and nothing else.
+  awk '/^  - id: honest-pass/ { exit } { print }' \
+    "$FIXTURE/checks.yaml" > "$SELF_TMP/no-mirror/checks.yaml"
+
+  SELF_CASES=0
+  SELF_UPHELD=0
+
+  # The exit code is captured into a variable on the SAME LINE as the command.
+  # A command substitution in an argument list resets $?, so reading the status
+  # inside the call below would report the status of the call.
+  record() { # <case> <expected> <observed> <what the case is>
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$3" = "$2" ]; then
+      SELF_UPHELD=$((SELF_UPHELD + 1)); verdict="held"
+    else
+      verdict="NOT HELD"
+    fi
+    printf '      %-26s expected %s  got %s  %s  %s\n' "$1" "$2" "$3" "$verdict" "$4"
+  }
+
+  printf '    selftest: %s\n' "$VERSION"
+
+  got=0
+  bash "$0" > "$SELF_TMP/clean.out" 2> "$SELF_TMP/clean.err" || got=$?
+  record committed-fixture 0 "$got" "the standing case: the runner still refuses the hollow pass and lets the honest one through"
+
+  got=0
+  bash "$0" --fixture "$SELF_TMP/lowered" \
+    > "$SELF_TMP/lowered.out" 2> "$SELF_TMP/lowered.err" || got=$?
+  record shortfall-removed 1 "$got" "the shortfall check no longer falls short, so the assertions about a hollow refusal have nothing to hold over"
+
+  got=0
+  bash "$0" --fixture "$SELF_TMP/no-mirror" \
+    > "$SELF_TMP/nomirror.out" 2> "$SELF_TMP/nomirror.err" || got=$?
+  record premise-mirror-absent 2 "$got" "honest-pass was deleted, so the mirror image never ran and a green would be a claim about something that did not happen"
+
+  got=0
+  bash "$0" --fixture "$SELF_TMP/no-such-fixture" \
+    > "$SELF_TMP/nofix.out" 2> "$SELF_TMP/nofix.err" || got=$?
+  record missing-fixture 2 "$got" "the standing case is not there, which is unmeasured"
+
+  mkdir -p "$SELF_TMP/half"
+  cp "$FIXTURE/checks.yaml" "$SELF_TMP/half/checks.yaml"
+  got=0
+  bash "$0" --fixture "$SELF_TMP/half" \
+    > "$SELF_TMP/half.out" 2> "$SELF_TMP/half.err" || got=$?
+  record fixture-incomplete 2 "$got" "half the case is missing, which is unmeasured and not a pass"
+
+  got=0
+  bash "$0" --not-a-real-option > "$SELF_TMP/badopt.out" 2> "$SELF_TMP/badopt.err" || got=$?
+  record unknown-option 2 "$got" "bad usage is refused, never answered"
+
+  got=0
+  bash "$0" a-positional > "$SELF_TMP/pos.out" 2> "$SELF_TMP/pos.err" || got=$?
+  record positional-argument 2 "$got" "this check takes none, and a mistyped one must not be read as a path"
+
+  if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
+  printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
+    "each case exits with the code this file's contract declares for it"
+  printf '    exit codes reached: 0, 1 and 2 - the whole contract.\n'
+  printf '    NOT ASSERTED: WHICH of the ten assertions went red in the finding case. The corpus drives the exit code, and a case that went red for the wrong reason is invisible here.\n'
+  [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
+  exit 0
+fi
 
 # THE WORK TREE, NEVER THE WORKING DIRECTORY, and the work tree holding THIS
 # SCRIPT rather than the one holding the caller's shell - so the answer does

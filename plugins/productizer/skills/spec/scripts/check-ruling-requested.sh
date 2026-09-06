@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-ruling-requested.sh [--version] [--help] [--root DIR]
+# check-ruling-requested.sh [--version] [--help] [--root DIR] [--selftest]
 #
 # Asserts R34: IF AN INTENT CONTRADICTS AN ACTIVE REQUIREMENT, THEN THE
 # LIFECYCLE SHALL ASK WHICH WINS. R34 is the ASK half of the old R23, split out
@@ -161,6 +161,12 @@
 #   2  could not run - no work tree, no spec, a rulings or classifications
 #      directory or file that could not be read, or a fixture that could not be
 #      set up. Never confused with 0.
+#
+# Under --selftest (--self-test is accepted too) the same three mean: every
+# case produced the exit code it declares and said what it was supposed to say
+# (0), at least one did not (1), and the corpus could not be driven at all (2).
+# The self-assertion above and that corpus answer different questions and are
+# not interchangeable; the block that implements it says which is which.
 set -euo pipefail
 
 # Byte-identical behaviour across machines and locales: character ranges,
@@ -171,11 +177,13 @@ export LC_ALL=C
 
 VERSION="check-ruling-requested 1.1"
 ROOT=""
+MODE="measure"
 
 usage() {
-  printf 'usage: check-ruling-requested.sh [--version] [--help] [--root DIR]\n'
+  printf 'usage: check-ruling-requested.sh [--version] [--help] [--root DIR] [--selftest]\n'
   printf '  --root DIR  the repo work tree to examine. Defaults to the git\n'
   printf '              top level, never to the working directory.\n'
+  printf '  --selftest  drive the built-in corpus instead of a repository.\n'
 }
 
 die_unmeasured() { printf 'check-ruling-requested: %s\n' "$1" >&2; exit 2; }
@@ -188,10 +196,282 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die_unmeasured "--root needs a directory"
       ROOT="$2"; shift 2 ;;
     --root=*) ROOT="${1#--root=}"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     -*) printf 'check-ruling-requested: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *) printf 'check-ruling-requested: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest. R39: one case per exit code this tool can return, each built in
+# a sandbox so nothing here reads or writes a real repository.
+#
+# THIS IS NOT THE SELF-ASSERTION BELOW, AND THE TWO ARE NOT INTERCHANGEABLE.
+# The self-assertion runs on EVERY ordinary invocation and answers one
+# question: in a repository where all four sweeps are over empty sets, did
+# this check assert anything at all. It drives two cases. The corpus here
+# answers R39's question instead - does every exit code this tool can return
+# have a case that reaches it - and it drives the argument parser, the premise
+# guards and the refusal paths, none of which the self-assertion touches.
+#
+# EVERY CASE ASSERTS ITS OWN SENTENCE, NOT ONLY ITS EXIT CODE. Nine different
+# things exit 1 here and five exit 2, so a corpus reading exit codes alone
+# could not tell a stub ruling from a missing header field, and a change that
+# turned one into the other would stay green.
+#
+# THE NEGATIVE CONTROL IS MANDATORY. `contradict-answered` records the same
+# contradiction as `contradict-silent` and writes the ruling and the concern
+# row that answer it. Without it, a check that refused every contradict record
+# it saw would pass every red case here and make raising a ruling properly
+# indistinguishable from not raising one.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  [ -f "$SELF" ] ||
+    die_unmeasured "cannot re-invoke this script for the self-test, so no case was driven"
+
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-ruling-requested-selftest.XXXXXX")" ||
+    die_unmeasured "could not create a sandbox, so no case was driven"
+  SB="$(cd "$SB" && pwd -P)"
+  # chmod back before removing: one case makes a directory unlistable, and a
+  # sandbox that cannot be cleaned up is litter in somebody's temp directory.
+  trap 'chmod -R u+rwx "$SB" || :; rm -rf "$SB"' EXIT HUP INT TERM
+
+  mk_case() { mkdir -p "$SB/$1/.claude/productizer"; }
+  P_DIR() { printf '%s/.claude/productizer' "$SB/$1"; }
+
+  plain_spec() {
+    cat > "$(P_DIR "$1")/spec.md" <<'SPEC'
+# Sandbox spec
+
+## Requirements
+
+- **R1** — If an intent contradicts an active requirement, then the lifecycle shall ask which wins.
+SPEC
+  }
+
+  spec_with_concern() {
+    # $1 case, $2 the Status cell exactly as it should read
+    plain_spec "$1"
+    cat >> "$(P_DIR "$1")/spec.md" <<SPEC
+
+## Areas of concern
+
+| # | Concern | Requirements | Policy / owner | Raised by | Status |
+|---|---|---|---|---|---|
+| C1 | A sandbox concern | R1 | — | — | $2 |
+SPEC
+  }
+
+  # A pending ruling with nothing missing: every header field present and
+  # non-blank, all three scanned sections filled, no template placeholder.
+  good_ruling() {
+    # $1 case, $2 file name, $3 the Intent value
+    mkdir -p "$(P_DIR "$1")/rulings"
+    cat > "$(P_DIR "$1")/rulings/$2" <<RULING
+# D1 — whether the sandbox merges the uncontested part
+
+Status: pending
+Raised: 2026-09-01
+Concern: C1
+Intent: $3
+Ruled: —
+Ruled by: —
+Supersedes: —
+Superseded by: —
+
+## The conflict
+
+R1 forbids the whole delta and the incoming sentence merges part of it, so the
+two cannot both hold for a delta with one contested requirement in it.
+
+## The question
+
+Does a delta with one contested requirement merge in part, or not at all?
+
+## What each side costs
+
+| If R1 governs | If the incoming behaviour governs |
+|---|---|
+| Nine uncontested requirements wait behind one question nobody has answered | The contested requirement is ruled on against a spec that has already moved |
+
+## Ruling
+
+<Which side governs, stated as the behaviour that now holds.>
+RULING
+  }
+
+  class_record() {
+    # $1 case, $2 intent, $3 classification
+    mkdir -p "$(P_DIR "$1")/classifications"
+    cat > "$(P_DIR "$1")/classifications/sandbox-1.md" <<REC
+# Classification — $2
+
+Intent: $2
+Classification: $3
+Recorded: 2026-09-01
+Spec path: .claude/productizer/spec.md
+Spec commit: 0000000000000000000000000000000000000000
+Spec hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+In scope count: 1
+
+## Requirement ids in scope
+
+R1
+REC
+  }
+
+  FAILED=0
+  DRIVEN=0
+  SKIPPED=""
+
+  drive() {
+    # $1 case name, $2 expected exit, $3 expected sentence, $4.. argv override
+    local case_name="$1" want="$2" marker="$3"
+    shift 3
+    local rc=0
+    if [ "$#" -eq 0 ]; then set -- --root "$SB/$case_name"; fi
+    bash "$SELF" "$@" > "$SB/$case_name.out" 2> "$SB/$case_name.err" || rc=$?
+    DRIVEN=$((DRIVEN + 1))
+    local why=""
+    [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
+    # Both files handed to grep directly, never piped into it: under
+    # `set -o pipefail` a `cat a b | grep -q` reports 141 whenever grep matches
+    # early enough to SIGPIPE the cat, and `if !` reads that as no match.
+    if ! grep -q -- "$marker" "$SB/$case_name.out" "$SB/$case_name.err"; then
+      [ -n "$why" ] && why="$why; "
+      why="${why}its output does not say what it was supposed to say"
+    fi
+    if [ -z "$why" ]; then
+      printf '  held: case %-24s exit %d, and said so - %s\n' "$case_name" "$rc" "$marker"
+      return 0
+    fi
+    printf '  FINDING: case %-24s %s - expected: %s\n' "$case_name" "$why" "$marker"
+    FAILED=$((FAILED + 1))
+    return 0
+  }
+
+  # --- clean: nothing open, nothing pending, nothing classified ------------
+  mk_case clean;              plain_spec clean
+
+  # --- the negative control: the same contradiction, written down ----------
+  mk_case contradict-answered
+  spec_with_concern contradict-answered 'open: D1'
+  good_ruling contradict-answered D1-sandbox.md sandbox-9
+  class_record contradict-answered sandbox-9 contradict
+
+  # --- exit 1 --------------------------------------------------------------
+  mk_case open-no-ruling;     spec_with_concern open-no-ruling 'open: D1'
+  mk_case open-no-cite;       spec_with_concern open-no-cite 'open'
+  mk_case pending-uncited;    plain_spec pending-uncited
+  good_ruling pending-uncited D1-sandbox.md sandbox-9
+
+  mk_case ruling-stub;        spec_with_concern ruling-stub 'open: D1'
+  good_ruling ruling-stub D1-sandbox.md sandbox-9
+  # Delete the question and leave everything else intact.
+  awk '/^## The question$/ { skip = 1; next } /^## What each side costs$/ { skip = 0 } skip != 1' \
+    "$(P_DIR ruling-stub)/rulings/D1-sandbox.md" > "$SB/ruling-stub.tmp"
+  mv "$SB/ruling-stub.tmp" "$(P_DIR ruling-stub)/rulings/D1-sandbox.md"
+
+  mk_case ruling-placeholder; spec_with_concern ruling-placeholder 'open: D1'
+  good_ruling ruling-placeholder D1-sandbox.md sandbox-9
+  sed 's/^Does a delta with one contested requirement merge in part, or not at all?$/<State the question here.>/' \
+    "$(P_DIR ruling-placeholder)/rulings/D1-sandbox.md" > "$SB/rp.tmp"
+  mv "$SB/rp.tmp" "$(P_DIR ruling-placeholder)/rulings/D1-sandbox.md"
+
+  mk_case ruling-bad-status;  spec_with_concern ruling-bad-status 'open: D1'
+  good_ruling ruling-bad-status D1-sandbox.md sandbox-9
+  sed 's/^Status: pending$/Status: probably pending/' \
+    "$(P_DIR ruling-bad-status)/rulings/D1-sandbox.md" > "$SB/rb.tmp"
+  mv "$SB/rb.tmp" "$(P_DIR ruling-bad-status)/rulings/D1-sandbox.md"
+
+  mk_case ruling-blank-field; spec_with_concern ruling-blank-field 'open: D1'
+  good_ruling ruling-blank-field D1-sandbox.md sandbox-9
+  sed 's/^Ruled: —$/Ruled:/' \
+    "$(P_DIR ruling-blank-field)/rulings/D1-sandbox.md" > "$SB/rf.tmp"
+  mv "$SB/rf.tmp" "$(P_DIR ruling-blank-field)/rulings/D1-sandbox.md"
+
+  mk_case ruling-empty;       plain_spec ruling-empty
+  mkdir -p "$(P_DIR ruling-empty)/rulings"
+  : > "$(P_DIR ruling-empty)/rulings/D1-sandbox.md"
+
+  mk_case ruling-bad-name;    plain_spec ruling-bad-name
+  mkdir -p "$(P_DIR ruling-bad-name)/rulings"
+  printf 'Status: ruled\n' > "$(P_DIR ruling-bad-name)/rulings/Dx-not-a-number.md"
+
+  mk_case contradict-silent;  plain_spec contradict-silent
+  class_record contradict-silent sandbox-9 contradict
+
+  mk_case contradict-unnamed; plain_spec contradict-unnamed
+  mkdir -p "$(P_DIR contradict-unnamed)/classifications"
+  printf '# Classification\n\nClassification: contradict\nRecorded: 2026-09-01\n' \
+    > "$(P_DIR contradict-unnamed)/classifications/sandbox-1.md"
+
+  # --- exit 2 --------------------------------------------------------------
+  mk_case no-spec
+  mk_case rulings-not-a-dir;  plain_spec rulings-not-a-dir
+  printf 'a file where the directory should be\n' > "$(P_DIR rulings-not-a-dir)/rulings"
+  mk_case class-not-a-dir;    plain_spec class-not-a-dir
+  printf 'a file where the directory should be\n' > "$(P_DIR class-not-a-dir)/classifications"
+  mk_case rulings-unreadable; plain_spec rulings-unreadable
+  mkdir -p "$(P_DIR rulings-unreadable)/rulings"
+  printf 'Status: ruled\n' > "$(P_DIR rulings-unreadable)/rulings/D1-sandbox.md"
+  chmod 000 "$(P_DIR rulings-unreadable)/rulings"
+  printf 'not a directory\n' > "$SB/a-file"
+
+  # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If a tree with nothing open,
+  # nothing pending and nothing classified does not exit 0 and say so, every
+  # red case below would be red for that reason instead of its own.
+  CLEAN_RC=0
+  bash "$SELF" --root "$SB/clean" > "$SB/clean.out" 2> "$SB/clean.err" || CLEAN_RC=$?
+  if [ "$CLEAN_RC" -ne 0 ] || ! grep -q 'PASS: every open concern cites a ruling that exists' "$SB/clean.out"; then
+    printf '  the clean case exited %d and did not report the ask holding.\n' "$CLEAN_RC"
+    die_unmeasured "the corpus premise did not hold; unmeasured, not a pass"
+  fi
+  printf '  held: case %-24s exit 0, and said so - %s\n' "clean" "PASS: every open concern cites a ruling that exists"
+
+  drive contradict-answered  0 'contradict classifications checked for a ruling: 1, upheld 1'
+
+  drive open-no-ruling       1 'no .claude/productizer/rulings directory at all. The lifecycle stopped and nobody was asked'
+  drive open-no-cite         1 'is open but cites no ruling id'
+  drive pending-uncited      1 'no C row in the spec'
+  drive ruling-stub          1 "has no '## The question' section"
+  drive ruling-placeholder   1 'still carries a template placeholder'
+  drive ruling-bad-status    1 'carries something other than exactly one of'
+  drive ruling-blank-field   1 "header field 'Ruled' is blank"
+  drive ruling-empty         1 'the ruling file is empty'
+  drive ruling-bad-name      1 'filename is not D<n>'
+  drive contradict-silent    1 'The lifecycle stopped in conversation and wrote nothing'
+  drive contradict-unnamed   1 'names no intent, so no ruling can be joined to it'
+
+  drive no-spec              2 'cannot read .claude/productizer/spec.md'
+  drive rulings-not-a-dir    2 'rulings exists but is not a directory'
+  drive class-not-a-dir      2 'exists and is not a directory'
+  drive root-not-a-dir       2 'is not a directory' --root "$SB/a-file"
+
+  # An unlistable directory is not unlistable to a user who can read anything,
+  # and the header already records that. The case is DECLARED SKIPPED rather
+  # than driven and silently held: a case that cannot fire is not a case.
+  if [ "$(id -u)" = "0" ]; then
+    SKIPPED="rulings-unreadable"
+    printf '  SKIPPED: case %-22s this is running as uid 0, which can list a mode-000 directory. The refusal cannot fire, so it is not claimed as driven.\n' "rulings-unreadable"
+  else
+    drive rulings-unreadable 2 'cannot be listed'
+  fi
+
+  printf '  cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$((DRIVEN + 1))" "$FAILED"
+  if [ "$FAILED" -ne 0 ]; then
+    printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2, and every case asserts which finding it produced as well as which code.\n'
+  if [ -n "$SKIPPED" ]; then
+    printf '  NOT ASSERTED: case %s did not run here.\n' "$SKIPPED"
+  fi
+  printf '  NOT ASSERTED: an intent that was never classified at all. It leaves no record and nothing in a repository lists the intents that arrived, so no corpus can build the case - the header says the same, and the fix is the writer'"'"'s.\n'
+  exit 0
+fi
 
 # Defaulting to the working directory has caused four separate silent-wrong-
 # answer bugs here: the script reads a directory that is not the repo and

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-classification-provenance.sh [--version] [--help] [--root DIR]
 #                                    [--spec-path PATH] [--store DIR]
-#                                    [--backlog PATH]
+#                                    [--backlog PATH] [--selftest|--self-test]
 #
 # Validates the provenance records `record-classification.sh` writes. Two
 # acceptance rows share this one mechanism, and this is the half that refuses.
@@ -241,6 +241,19 @@
 # ASSERTION 8 SETS NO EXIT CODE. Its failures are printed as ADVISORY lines by
 # location and are added to no `upheld` total. An advisory that quietly moved
 # the exit code would be a blocking assertion wearing a softer word.
+#
+# --SELFTEST BUILDS A REPOSITORY AND CLASSIFIES IN IT. R39 - every check tool
+# carries a self-test that reaches each exit code it can return - and all three
+# of this file's are reached below, over throwaway git repositories built in a
+# temporary directory. The clean case is written by `record-classification.sh`,
+# the writer this check exists to validate, so the pair is proven to agree
+# rather than each agreeing with a fixture somebody typed. Every failing case
+# is that same repository with exactly one thing changed. Under --selftest the
+# three codes mean: every case produced the code this contract declares for it
+# (0), at least one did not (1), the corpus could not be built at all (2).
+# `--self-test` is accepted as an alias, because this repository spells the
+# flag both ways and a tool that answers only one spelling has a self-test the
+# next caller cannot find.
 set -euo pipefail
 
 export LC_ALL=C
@@ -254,6 +267,7 @@ ROOT=""
 SPEC_REL=".claude/productizer/spec.md"
 STORE_REL=".claude/productizer/classifications"
 BACKLOG_REL=".claude/productizer/backlog.md"
+SELFTEST=""
 
 # The corroborating pattern, WIDENED IN 3.0 AND MEASURED BEFORE IT WAS.
 #
@@ -281,6 +295,8 @@ usage() {
   printf '                    top level, never to the working directory.\n'
   printf '  --spec-path PATH  spec location relative to the root\n'
   printf '  --store DIR       record store relative to the root\n'
+  printf '  --selftest        build throwaway repositories in a temporary directory\n'
+  printf '                    and drive every exit code this check can return.\n'
   printf '  --backlog PATH    the file corroborating that classification happened,\n'
   printf '                    relative to the root. An empty store is a FINDING when\n'
   printf '                    this file records a classification and UNMEASURED when\n'
@@ -301,6 +317,7 @@ while [ "$#" -gt 0 ]; do
     --store=*) STORE_REL="${1#--store=}"; shift ;;
     --backlog) [ "$#" -ge 2 ] || die_unmeasured "--backlog needs a path"; BACKLOG_REL="$2"; shift 2 ;;
     --backlog=*) BACKLOG_REL="${1#--backlog=}"; shift ;;
+    --selftest|--self-test) SELFTEST=1; shift ;;
     -*) printf 'check-classification-provenance: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *) printf 'check-classification-provenance: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -310,6 +327,179 @@ command -v python3 >/dev/null ||
   die_unmeasured "python3 is not on PATH, so no record can be parsed or rehashed. Refusing rather than reporting unparsed records as clean."
 [ -f "$LIB" ] && [ -r "$LIB" ] ||
   die_unmeasured "cannot read classification-record.py beside this script. The active-id rules live there, and a second copy of them here is how two parsers come to disagree."
+
+
+# --------------------------------------------------------------- --selftest
+#
+# Placed after the python3 and library guards above, so a machine that cannot
+# run this check at all says so once rather than through nine identical cases.
+#
+# THE CLEAN CASE IS WRITTEN BY THE WRITER. `record-classification.sh` is run
+# inside the throwaway repository and produces the record this check then
+# validates - so the case proves the two halves of the mechanism agree, which
+# a hand-typed fixture cannot. Every other case is that repository copied and
+# changed in exactly one way.
+#
+# Nothing is written into the repository this file lives in. The corpus is
+# removed on every exit path, signal included.
+if [ -n "$SELFTEST" ]; then
+  command -v git >/dev/null ||
+    die_unmeasured "git is not on PATH, and every case in this self-test is a git repository"
+  WRITER="$HERE/record-classification.sh"
+  [ -f "$WRITER" ] && [ -r "$WRITER" ] ||
+    die_unmeasured "record-classification.sh is not beside this script, so the clean case cannot be written by the writer this check validates. Unmeasured, not a pass."
+
+  SELF_TMP="$(mktemp -d)" ||
+    die_unmeasured "cannot create a temporary directory to build the self-test corpus in"
+  trap 'rm -rf "$SELF_TMP"' EXIT HUP INT TERM
+
+  BASE="$SELF_TMP/clean"
+  mkdir -p "$BASE/.claude/productizer"
+
+  # Two active requirements and NO `## Change log` section: assertion 8 reads
+  # the change log for cited intents, and a fixture that gave it one would tie
+  # every case to a second, unrelated assertion.
+  cat > "$BASE/.claude/productizer/spec.md" <<'FIXTURE_SPEC'
+# Fixture spec
+
+Next requirement id: R3
+
+## Requirements
+
+- **R1** - the lifecycle shall do the first thing.
+- **R2** - when a thing arrives, the lifecycle shall do the second thing.
+FIXTURE_SPEC
+
+  # One line naming exactly one intent, in the past tense, with the
+  # classification word backticked - the shape the corroborating pattern reads.
+  cat > "$BASE/.claude/productizer/backlog.md" <<'FIXTURE_BACKLOG'
+# Fixture backlog
+
+- [#1](https://example.invalid/issues/1) classified as `extend`.
+FIXTURE_BACKLOG
+
+  git -c init.defaultBranch=main init -q "$BASE"
+  git -C "$BASE" config user.email "fixture@example.invalid"
+  git -C "$BASE" config user.name "provenance fixture"
+  git -C "$BASE" add -A
+  git -C "$BASE" commit -q -m "fixture spec and backlog"
+
+  # The writer resolves its own root from the working directory, so it is run
+  # from inside the repository rather than pointed at it.
+  ( cd "$BASE" && bash "$WRITER" --intent 1 --classification extend ) \
+    > "$SELF_TMP/writer.out" 2> "$SELF_TMP/writer.err" ||
+    die_unmeasured "record-classification.sh refused to write the clean case, so there is no valid record to vary from. Unmeasured, not a pass."
+
+  SELF_CASES=0
+  SELF_UPHELD=0
+
+  # The exit code is captured into a variable on the SAME LINE as the command.
+  # A command substitution in an argument list resets $?, so reading the status
+  # inside the call below would report the status of the call.
+  record_case() { # <case> <expected> <observed> <what the case is>
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$3" = "$2" ]; then
+      SELF_UPHELD=$((SELF_UPHELD + 1)); verdict="held"
+    else
+      verdict="NOT HELD"
+    fi
+    printf '      %-26s expected %s  got %s  %s  %s\n' "$1" "$2" "$3" "$verdict" "$4"
+  }
+
+  # variant <name> - a copy of the clean repository to break in one way.
+  variant() {
+    cp -R "$BASE" "$SELF_TMP/$1"
+    printf '%s\n' "$SELF_TMP/$1"
+  }
+
+  printf '    selftest: %s\n' "$VERSION"
+
+  got=0
+  bash "$0" --root "$BASE" > "$SELF_TMP/clean.out" 2> "$SELF_TMP/clean.err" || got=$?
+  record_case clean-record 0 "$got" "a record written by the writer, against the spec at the commit it names"
+
+  V="$(variant badhash)"
+  python3 - "$V/.claude/productizer/classifications/1.md" <<'BREAK_THE_HASH'
+import io
+import re
+import sys
+
+path = sys.argv[1]
+with io.open(path, encoding="utf-8") as fh:
+    text = fh.read()
+with io.open(path, "w", encoding="utf-8") as fh:
+    fh.write(re.sub(r"Spec hash: sha256:[0-9a-f]{64}",
+                    "Spec hash: sha256:" + "0" * 64, text, count=1))
+BREAK_THE_HASH
+  got=0
+  bash "$0" --root "$V" > "$SELF_TMP/badhash.out" 2> "$SELF_TMP/badhash.err" || got=$?
+  record_case hash-does-not-match 1 "$got" "the record stamps one spec and hashed another - what a remembered copy looks like written down"
+
+  V="$(variant twice)"
+  cp "$V/.claude/productizer/classifications/1.md" \
+     "$V/.claude/productizer/classifications/1-again.md"
+  got=0
+  bash "$0" --root "$V" > "$SELF_TMP/twice.out" 2> "$SELF_TMP/twice.err" || got=$?
+  record_case same-intent-twice 1 "$got" "a second file declaring the same intent walks straight past the filename guarantee"
+
+  V="$(variant norecord)"
+  rm -rf "$V/.claude/productizer/classifications"
+  got=0
+  bash "$0" --root "$V" > "$SELF_TMP/norecord.out" 2> "$SELF_TMP/norecord.err" || got=$?
+  record_case corroborated-no-record 1 "$got" "the backlog records a classification and the store holds no provenance for it"
+
+  V="$(variant nothing)"
+  rm -rf "$V/.claude/productizer/classifications"
+  printf 'nothing in this file corroborates a classification\n' \
+    > "$V/.claude/productizer/backlog.md"
+  got=0
+  bash "$0" --root "$V" > "$SELF_TMP/nothing.out" 2> "$SELF_TMP/nothing.err" || got=$?
+  record_case empty-store-no-evidence 2 "$got" "no record was examined and nothing says one should exist - unmeasured, never a clean exit over an empty set"
+
+  V="$(variant badcommit)"
+  python3 - "$V/.claude/productizer/classifications/1.md" <<'BREAK_THE_COMMIT'
+import io
+import re
+import sys
+
+path = sys.argv[1]
+with io.open(path, encoding="utf-8") as fh:
+    text = fh.read()
+with io.open(path, "w", encoding="utf-8") as fh:
+    fh.write(re.sub(r"Spec commit: [0-9a-f]{40}",
+                    "Spec commit: " + "a" * 40, text, count=1))
+BREAK_THE_COMMIT
+  got=0
+  bash "$0" --root "$V" > "$SELF_TMP/badcommit.out" 2> "$SELF_TMP/badcommit.err" || got=$?
+  record_case commit-unresolvable 2 "$got" "whether the record was made against the whole spec is UNKNOWN - not yes, and not no"
+
+  # A shallow clone holds none of the commits the records cite, so every one of
+  # them would look unresolvable for a reason about the clone. Refused once,
+  # up front, rather than discovered per record.
+  git clone --quiet --depth 1 "file://$BASE" "$SELF_TMP/shallow"
+  got=0
+  bash "$0" --root "$SELF_TMP/shallow" \
+    > "$SELF_TMP/shallow.out" 2> "$SELF_TMP/shallow.err" || got=$?
+  record_case shallow-clone 2 "$got" "a clone that cannot reach the cited commits is refused, not passed"
+
+  got=0
+  bash "$0" --root "$BASE" --spec-path "no-such-spec.md" \
+    > "$SELF_TMP/nospec.out" 2> "$SELF_TMP/nospec.err" || got=$?
+  record_case spec-unreadable 2 "$got" "with no spec there is no active set to compare a record against"
+
+  got=0
+  bash "$0" --not-a-real-option > "$SELF_TMP/badopt.out" 2> "$SELF_TMP/badopt.err" || got=$?
+  record_case unknown-option 2 "$got" "bad usage is refused, never answered"
+
+  if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
+  printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
+    "each case exits with the code this file's contract declares for it"
+  printf '    exit codes reached: 0, 1 and 2 - the whole contract.\n'
+  printf '    NOT ASSERTED: assertion 8, which reads the change log for cited intents. The fixture spec deliberately carries no change log, so no case above exercises it; and the corpus drives the exit code, never the wording of a finding.\n'
+  [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
+  exit 0
+fi
 
 if [ -z "$ROOT" ]; then
   if ! ROOT="$(git rev-parse --show-toplevel)"; then

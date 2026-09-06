@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # check-spec-home.sh [--version] [--config PATH] [--repo SLUG=PATH]... [--remote]
+#                    [--selftest]
 #
 # Asserts R1: THE LIFECYCLE SHALL HOLD EXACTLY ONE LIVING SPEC PER PRODUCT.
 #
@@ -50,11 +51,16 @@
 #   1  R1 is violated - too many, none, or not where the config says
 #   2  COULD NOT MEASURE - a repo out of reach, or a config that cannot be
 #      read or does not declare what this check needs
+#
+# Under --selftest (--self-test is accepted too) the same three mean: every
+# case produced the exit code it declares and said what it was supposed to say
+# (0), at least one did not (1), and the corpus could not be driven at all (2).
 set -euo pipefail
 
 VERSION="check-spec-home 1.0"
 CONFIG=".claude/productizer/config.json"
 REMOTE=""
+MODE="measure"
 MAP_SLUG=()
 MAP_PATH=()
 
@@ -66,6 +72,7 @@ while [ "$#" -gt 0 ]; do
     -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$0"; exit 0 ;;
     --config) [ "$#" -ge 2 ] || die_unmeasured "--config needs a path"; CONFIG="$2"; shift 2 ;;
     --remote) REMOTE=1; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --repo)
       [ "$#" -ge 2 ] || die_unmeasured "--repo needs SLUG=PATH"
       case "$2" in
@@ -77,6 +84,169 @@ while [ "$#" -gt 0 ]; do
     *) die_unmeasured "unknown argument: $1" ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest. R39: one case per exit code this tool can return, each built in
+# a sandbox so nothing here reads or writes a real repository.
+#
+# EVERY CASE ASSERTS ITS OWN SENTENCE, NOT ONLY ITS EXIT CODE. Four different
+# things exit 1 here - two specs, no spec, a spec outside the declared home,
+# and a home that is not one of the product's repos - and five different
+# things exit 2. A corpus reading exit codes alone cannot tell them apart, so
+# a change that turned "no spec anywhere" into "the home is a lie" would stay
+# green through it.
+#
+# THE ORDERING RULE IS DRIVEN TOO. Two specs already found is a definite
+# answer and fails (1) even when a third repo was unreachable; unreachability
+# only refuses when it could still change the verdict. That precedence is a
+# sentence in the header above, and `two-beats-unreachable` is the case that
+# makes it a measurement.
+#
+# Every repo is reached by an explicit --repo mapping, never by the working
+# directory or a sibling checkout, so a case is unreachable because the corpus
+# left it unmapped and not because of where this happened to be invoked from.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  [ -f "$SELF" ] ||
+    die_unmeasured "cannot re-invoke this script for the self-test, so no case was driven"
+
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-spec-home-selftest.XXXXXX")" ||
+    die_unmeasured "could not create a sandbox, so no case was driven"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  SPEC_IN_REPO=".claude/productizer/spec.md"
+
+  mk_case() {
+    # $1 case name, $2.. the repo basenames that HOLD a spec
+    local d="$SB/$1"
+    shift
+    mkdir -p "$d/repos/home-repo/.claude/productizer" \
+             "$d/repos/other-repo/.claude/productizer"
+    local holder
+    for holder in "$@"; do
+      printf '# Living spec — sandbox\n\n## Requirements\n\n- **R1** — The lifecycle shall hold exactly one living spec per product.\n' \
+        > "$d/repos/$holder/$SPEC_IN_REPO"
+    done
+    cat > "$d/config.json" <<'CFG'
+{
+  "product": {
+    "repos": ["acme/home-repo", "acme/other-repo"],
+    "spec_home": "acme/home-repo"
+  },
+  "spec": {
+    "path": ".claude/productizer/spec.md"
+  }
+}
+CFG
+  }
+
+  FAILED=0
+  DRIVEN=0
+
+  drive() {
+    # $1 case name, $2 expected exit, $3 expected sentence, $4.. argv
+    local case_name="$1" want="$2" marker="$3"
+    shift 3
+    local rc=0
+    ( cd "$SB/$case_name" && bash "$SELF" "$@" ) \
+      > "$SB/$case_name.out" 2> "$SB/$case_name.err" || rc=$?
+    DRIVEN=$((DRIVEN + 1))
+    local why=""
+    [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
+    # Both files handed to grep directly, never piped into it: under
+    # `set -o pipefail` a `cat a b | grep -q` reports 141 whenever grep matches
+    # early enough to SIGPIPE the cat, and `if !` reads that as no match.
+    if ! grep -q -- "$marker" "$SB/$case_name.out" "$SB/$case_name.err"; then
+      [ -n "$why" ] && why="$why; "
+      why="${why}its output does not say what it was supposed to say"
+    fi
+    if [ -z "$why" ]; then
+      printf '  held: case %-22s exit %d, and said so - %s\n' "$case_name" "$rc" "$marker"
+      return 0
+    fi
+    printf '  FINDING: case %-22s %s - expected: %s\n' "$case_name" "$why" "$marker"
+    FAILED=$((FAILED + 1))
+    return 0
+  }
+
+  BOTH_MAPPED=(--repo acme/home-repo=repos/home-repo --repo acme/other-repo=repos/other-repo)
+
+  mk_case clean home-repo
+  mk_case two-specs home-repo other-repo
+  mk_case no-spec
+  mk_case wrong-home other-repo
+  mk_case home-not-listed home-repo
+  mk_case unreachable home-repo
+  mk_case two-beats-unreachable home-repo other-repo
+  mk_case bad-json home-repo
+  mk_case no-repos home-repo
+  mk_case no-home home-repo
+  mk_case absent-config home-repo
+  mk_case bad-mapping home-repo
+
+  # `spec_home` names a repo the product does not list. The filesystem is
+  # fine; the declaration is not, and that is its own finding.
+  cat > "$SB/home-not-listed/config.json" <<'CFG'
+{
+  "product": {
+    "repos": ["acme/home-repo", "acme/other-repo"],
+    "spec_home": "acme/somewhere-else"
+  },
+  "spec": { "path": ".claude/productizer/spec.md" }
+}
+CFG
+  printf 'this file is not JSON at all: { "product": \n' > "$SB/bad-json/config.json"
+  cat > "$SB/no-repos/config.json" <<'CFG'
+{ "product": { "repos": [], "spec_home": "acme/home-repo" },
+  "spec": { "path": ".claude/productizer/spec.md" } }
+CFG
+  cat > "$SB/no-home/config.json" <<'CFG'
+{ "product": { "repos": ["acme/home-repo"] },
+  "spec": { "path": ".claude/productizer/spec.md" } }
+CFG
+  rm -f "$SB/absent-config/config.json"
+
+  # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If one spec in the declared
+  # home does not exit 0 and say so, every red case below would be red for
+  # that reason instead of its own and nothing would have been measured.
+  CLEAN_RC=0
+  ( cd "$SB/clean" && bash "$SELF" --config config.json "${BOTH_MAPPED[@]}" ) \
+    > "$SB/clean.out" 2> "$SB/clean.err" || CLEAN_RC=$?
+  if [ "$CLEAN_RC" -ne 0 ] || ! grep -q 'PASS: exactly one living spec' "$SB/clean.out"; then
+    printf '  the clean case exited %d and did not report one living spec in the declared home.\n' "$CLEAN_RC"
+    die_unmeasured "the corpus premise did not hold; unmeasured, not a pass"
+  fi
+  printf '  held: case %-22s exit 0, and said so - %s\n' "clean" "PASS: exactly one living spec"
+
+  drive two-specs        1 'R1 broken'                          --config config.json "${BOTH_MAPPED[@]}"
+  drive no-spec          1 'this is a measured zero'            --config config.json "${BOTH_MAPPED[@]}"
+  drive wrong-home       1 'the config declares the home as'    --config config.json "${BOTH_MAPPED[@]}"
+  drive home-not-listed  1 'is not one of the repos in product.repos' --config config.json "${BOTH_MAPPED[@]}"
+
+  # Two specs is a definite answer, so it fails even with a repo out of reach.
+  drive two-beats-unreachable 1 'R1 broken'                     --config config.json \
+        --repo acme/home-repo=repos/home-repo --repo acme/other-repo=repos/other-repo \
+        --repo acme/third-repo=repos/nowhere
+
+  drive unreachable      2 'could not be reached'               --config config.json \
+        --repo acme/home-repo=repos/home-repo
+  drive absent-config    2 'cannot read config.json'            --config config.json
+  drive bad-json         2 'could not be parsed'                --config config.json
+  drive no-repos         2 'declares no non-empty'              --config config.json
+  drive no-home          2 'names no home repo'                 --config config.json
+  drive bad-mapping      2 'is not SLUG=PATH'                   --config config.json --repo no-equals-here
+
+  printf '  cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$((DRIVEN + 1))" "$FAILED"
+  if [ "$FAILED" -ne 0 ]; then
+    printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2, and every case asserts which verdict it produced as well as which code.\n'
+  printf '  NOT ASSERTED: --remote is never driven. It reaches the GitHub contents API, and a corpus that asks the network renders one verdict on a train and another in the office.\n'
+  exit 0
+fi
 
 [ -f "$CONFIG" ] && [ -r "$CONFIG" ] ||
   die_unmeasured "cannot read $CONFIG. A config nobody could open says nothing about how many specs exist; it is not a product with zero repos."

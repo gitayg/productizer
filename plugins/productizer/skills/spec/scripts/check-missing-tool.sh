@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # check-missing-tool.sh [--root DIR] [--fixture DIR] [--version] [--help]
+#                       [--selftest]
 #
 # Asserts R13: WHILE A CHECK TOOL NAMED BY THE CONFIGURATION IS ABSENT, THE
 # LIFECYCLE SHALL REPORT THAT CHECK AS MISSING RATHER THAN SKIPPED.
@@ -86,6 +87,26 @@
 #   2  could not run - bad usage, no fixture, no runner, no python3, or a
 #      premise that did not hold
 #
+# --SELFTEST DRIVES ALL THREE, AND IT REACHES 1 THE ONLY HONEST WAY: BY
+# REGRESSING THE RUNNER. Exit 1 here means "run-checks.sh no longer reports an
+# absent tool the way R13 requires", and no fixture can produce that while the
+# runner is correct - a self-test built only out of fixtures would watch exit
+# 0 forever and call it coverage. So the mode copies the scripts directory
+# into `mktemp -d`, deletes the one line in the COPY that writes the
+# `missing_tool` status override - which is precisely the refactor to a silent
+# skip this check exists to catch - and runs the copied check against the same
+# committed fixture. The regression is verified to have applied before the
+# case is driven; a patch that matched nothing would otherwise turn into a
+# second copy of the clean case.
+#
+# NOTHING IN THIS REPOSITORY IS EDITED. The regression lives in a temporary
+# copy that is removed on every exit path, signal included.
+#
+# Under --selftest the three codes mean: every case produced the code it
+# declares (0), at least one did not (1), and the cases could not be built or
+# driven at all (2). `--self-test` is accepted as an alias because the repo
+# spells it both ways.
+#
 # WHAT IT PRINTS. One BARE PATH per line for every file examined, relative to
 # the repository, which is what the runner parses as coverage. Assertions are
 # INDENTED and tagged with the case they belong to. The runner's own stderr is
@@ -104,6 +125,7 @@ SKILL="$(dirname "$HERE")"
 
 ROOT=""
 FIXTURE="$SKILL/fixtures/missing-tool"
+MODE="measure"
 
 die_unmeasured() { printf 'check-missing-tool: %s\n' "$1" >&2; exit 2; }
 
@@ -115,12 +137,121 @@ while [ $# -gt 0 ]; do
     --root=*)     ROOT="${1#--root=}";       shift ;;
     --fixture)    [ "$#" -ge 2 ] || die_unmeasured "--fixture needs a path"; FIXTURE="$2"; shift 2 ;;
     --fixture=*)  FIXTURE="${1#--fixture=}"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --) shift; break ;;
     -*) die_unmeasured "unknown option: $1. Run with --help for the contract." ;;
     *)  die_unmeasured "takes no positional arguments; got: $1" ;;
   esac
 done
 [ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1"
+
+# ---------------------------------------------------------------------------
+# --selftest: drive this check against the committed fixture with the runner
+# correct, and again with the runner deliberately regressed in a temporary
+# copy. Nothing in this repository is edited.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  [ -d "$FIXTURE" ] \
+    || die_unmeasured "no fixture directory, so the clean case has nothing to drive. Unmeasured, not a pass"
+  SELFWORK="$(mktemp -d)" \
+    || die_unmeasured "cannot create a temporary directory to build the cases in; nothing was driven"
+  # Removed on every exit path, signal included.
+  trap 'rm -rf "$SELFWORK"' EXIT HUP INT TERM
+
+  CASES=0; UPHELD=0; REPORT=""
+  REACHED_0=0; REACHED_1=0; REACHED_2=0
+
+  # `|| GOT=$?` on the same line as the command. A `$(...)` in an argument list
+  # and a pipeline both RESET `$?`, and reading the status one line later is
+  # how a self-test comes to report a pass it never observed.
+  drive() {
+    NAME="$1"; WANT="$2"; WHY="$3"; shift 3
+    GOT=0
+    bash "$@" > "$SELFWORK/$NAME.out" 2> "$SELFWORK/$NAME.err" || GOT=$?
+    CASES=$((CASES + 1))
+    if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+    case "$GOT" in
+      0) REACHED_0=1 ;;
+      1) REACHED_1=1 ;;
+      2) REACHED_2=1 ;;
+    esac
+    REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
+"
+  }
+
+  # THE REGRESSED COPY. `$HERE` is copied whole because run-checks.sh is found
+  # beside the check and reaches for its neighbours; a copy of one file would
+  # be a different program.
+  cp -R "$HERE" "$SELFWORK/scripts" \
+    || die_unmeasured "could not copy the scripts directory, so the regressed case could not be built"
+  REGRESSED="$SELFWORK/scripts/run-checks.sh"
+  [ -f "$REGRESSED" ] \
+    || die_unmeasured "the copy has no run-checks.sh, so there is nothing to regress"
+  cp "$REGRESSED" "$SELFWORK/run-checks.before" \
+    || die_unmeasured "could not keep a copy of the runner to compare the regression against"
+  # The regression: the status override that makes an absent tool REPORT as
+  # missing is dropped, leaving the skip R13 forbids.
+  sed -e 's|printf .missing_tool.n. > "$D/status_override"|:|' \
+    "$SELFWORK/run-checks.before" > "$REGRESSED" \
+    || die_unmeasured "the deliberate regression could not be written"
+  # A PATCH THAT MATCHED NOTHING IS THE CLEAN CASE WEARING A SECOND NAME. If
+  # the line has moved, this run has not falsified anything and says so.
+  if cmp -s "$SELFWORK/run-checks.before" "$REGRESSED"; then
+    die_unmeasured "the deliberate regression changed nothing in the copied runner - the line that writes the \`missing_tool\` status override is no longer where this self-test looks for it. The regressed case would have been a second copy of the clean one, which is unmeasured, not a pass"
+  fi
+
+  # A FIXTURE WHOSE PREMISE FAILS: the declared tool is `sh`, which is
+  # installed, so an absent tool was never tested.
+  cp -R "$FIXTURE" "$SELFWORK/present-tool" \
+    || die_unmeasured "could not copy the fixture for the premise case"
+  sed -e 's|requires: \[definitely-not-a-real-tool\]|requires: [sh]|' \
+    "$FIXTURE/checks.yaml" > "$SELFWORK/present-tool/checks.yaml" \
+    || die_unmeasured "could not write the premise case's config"
+  if cmp -s "$FIXTURE/checks.yaml" "$SELFWORK/present-tool/checks.yaml"; then
+    die_unmeasured "the premise case's config is unchanged - the fixture no longer declares \`definitely-not-a-real-tool\` in the shape this self-test edits, so the case would not have tested a present tool"
+  fi
+
+  # 0 - the runner as this repository ships it. Without this case every red
+  # case below proves only that something is red.
+  drive reports-missing 0 "the shipped runner, against the committed fixture" \
+    "$0" --fixture "$FIXTURE"
+
+  # 1 - the regression this check exists to catch: an absent tool skipped
+  # instead of reported.
+  drive runner-skips 1 "a copied runner with the missing_tool status override removed" \
+    "$SELFWORK/scripts/${0##*/}" --fixture "$FIXTURE"
+
+  # 2 - the premise. A tool that turns out to be installed proves nothing
+  # about an absent one.
+  drive premise-not-met 2 "a fixture declaring a tool that IS installed" \
+    "$0" --fixture "$SELFWORK/present-tool"
+
+  # 2 - no fixture at all. The standing case missing is unmeasured, not a pass.
+  drive absent-fixture 2 "no fixture directory at the path given" \
+    "$0" --fixture "$SELFWORK/nowhere"
+
+  # 2 - bad usage, reaching the same code through the argument parser.
+  drive bad-usage 2 "an option this script does not take" "$0" --frobnicate
+
+  printf '    selftest cases driven: %d\n' "$CASES"
+  printf '%s' "$REPORT"
+  if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
+  printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
+    "each case exits with the code it declares"
+  # `if`, not `[ ... ] && ...`: a false test as the last statement of a list is
+  # a non-zero status, and `set -e` would end the run on the code that was NOT
+  # reached - a self-test killed by its own summary line.
+  REACHED=""
+  if [ "$REACHED_0" = 1 ]; then REACHED="$REACHED 0"; fi
+  if [ "$REACHED_1" = 1 ]; then REACHED="$REACHED 1"; fi
+  if [ "$REACHED_2" = 1 ]; then REACHED="$REACHED 2"; fi
+  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
+    "${REACHED:- none}"
+  printf '    NOT ASSERTED: one regression is driven, not one per assertion, so this says the six assertions can go red together and not that each of them can go red alone\n'
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  exit 0
+fi
 
 # The work tree, never the working directory. --root does not decide what is
 # tested - the fixture and the runner are found beside this script, so the test

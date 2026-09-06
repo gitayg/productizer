@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # check-no-fabricated-zero.sh [--root DIR] [--fixture DIR] [--version] [--help]
+#                             [--selftest]
 #
 # Asserts R26: IF A VALUE COULD NOT BE MEASURED, THEN THE LIFECYCLE SHALL NOT
 # RECORD IT AS ZERO. Enforces P1 - a value that was not measured is never
@@ -69,6 +70,26 @@
 #   2  could not run - bad usage, no fixture, no runner, no python3, an
 #      unreadable result, or a premise that did not hold
 #
+# --SELFTEST DRIVES ALL THREE, AND IT REACHES 1 THE ONLY HONEST WAY: BY
+# FABRICATING THE ZERO. Exit 1 here means "the runner recorded an unmeasurable
+# value as 0", and while the runner is correct no fixture can produce that -
+# a self-test built only out of fixtures would watch exit 0 forever and call
+# it coverage. So the mode copies the scripts directory into `mktemp -d` and
+# changes ONE token in the COPY: the `units_total` field the runner
+# initialises to None for an underived denominator becomes 0. That is the
+# defect this check exists to catch, written out in full, and it is the field
+# every downstream "n of m covered" line divides by. The change is verified to
+# have applied before the case is driven; a patch that matched nothing would
+# otherwise turn into a second copy of the clean case.
+#
+# NOTHING IN THIS REPOSITORY IS EDITED. The fabrication lives in a temporary
+# copy that is removed on every exit path, signal included.
+#
+# Under --selftest the three codes mean: every case produced the code it
+# declares (0), at least one did not (1), and the cases could not be built or
+# driven at all (2). `--self-test` is accepted as an alias because the repo
+# spells it both ways.
+#
 # WHAT IT PRINTS. One BARE PATH per line for every file examined, relative to
 # the repository, which is what the runner parses as coverage. Classifications
 # and assertions are INDENTED. The runner's own stderr is NOT reproduced: it
@@ -84,6 +105,7 @@ SKILL="$(dirname "$HERE")"
 
 ROOT=""
 FIXTURE="$SKILL/fixtures/fabricated-zero"
+MODE="measure"
 
 die_unmeasured() { printf 'check-no-fabricated-zero: %s\n' "$1" >&2; exit 2; }
 
@@ -95,12 +117,120 @@ while [ $# -gt 0 ]; do
     --root=*)     ROOT="${1#--root=}";       shift ;;
     --fixture)    [ "$#" -ge 2 ] || die_unmeasured "--fixture needs a path"; FIXTURE="$2"; shift 2 ;;
     --fixture=*)  FIXTURE="${1#--fixture=}"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --) shift; break ;;
     -*) die_unmeasured "unknown option: $1. Run with --help for the contract." ;;
     *)  die_unmeasured "takes no positional arguments; got: $1" ;;
   esac
 done
 [ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1"
+
+# ---------------------------------------------------------------------------
+# --selftest: drive this check against the committed fixture with the runner
+# correct, and again with the fabricated zero written into a temporary copy of
+# it. Nothing in this repository is edited.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  [ -d "$FIXTURE" ] \
+    || die_unmeasured "no fixture directory, so the clean case has nothing to drive. Unmeasured, not a pass"
+  SELFWORK="$(mktemp -d)" \
+    || die_unmeasured "cannot create a temporary directory to build the cases in; nothing was driven"
+  # Removed on every exit path, signal included.
+  trap 'rm -rf "$SELFWORK"' EXIT HUP INT TERM
+
+  CASES=0; UPHELD=0; REPORT=""
+  REACHED_0=0; REACHED_1=0; REACHED_2=0
+
+  # `|| GOT=$?` on the same line as the command. A `$(...)` in an argument list
+  # and a pipeline both RESET `$?`, and reading the status one line later is
+  # how a self-test comes to report a pass it never observed.
+  drive() {
+    NAME="$1"; WANT="$2"; WHY="$3"; shift 3
+    GOT=0
+    bash "$@" > "$SELFWORK/$NAME.out" 2> "$SELFWORK/$NAME.err" || GOT=$?
+    CASES=$((CASES + 1))
+    if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+    case "$GOT" in
+      0) REACHED_0=1 ;;
+      1) REACHED_1=1 ;;
+      2) REACHED_2=1 ;;
+    esac
+    REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
+"
+  }
+
+  # THE FABRICATING COPY. `$HERE` is copied whole because run-checks.sh is
+  # found beside the check and reaches for its neighbours; a copy of one file
+  # would be a different program.
+  cp -R "$HERE" "$SELFWORK/scripts" \
+    || die_unmeasured "could not copy the scripts directory, so the fabricated case could not be built"
+  FABRICATING="$SELFWORK/scripts/run-checks.sh"
+  [ -f "$FABRICATING" ] \
+    || die_unmeasured "the copy has no run-checks.sh, so there is nothing to fabricate a zero in"
+  cp "$FABRICATING" "$SELFWORK/run-checks.before" \
+    || die_unmeasured "could not keep a copy of the runner to compare the fabrication against"
+  # The defect, written out: an underived denominator recorded as a count of
+  # zero requirements instead of as null.
+  sed -e 's|"units_total": None, "counts": None|"units_total": 0, "counts": None|' \
+    "$SELFWORK/run-checks.before" > "$FABRICATING" \
+    || die_unmeasured "the deliberate fabrication could not be written"
+  # A PATCH THAT MATCHED NOTHING IS THE CLEAN CASE WEARING A SECOND NAME. If
+  # the field has moved, this run has not falsified anything and says so.
+  if cmp -s "$SELFWORK/run-checks.before" "$FABRICATING"; then
+    die_unmeasured "the deliberate fabrication changed nothing in the copied runner - the unmeasured \`units_total\` initialiser is no longer where this self-test looks for it. The fabricated case would have been a second copy of the clean one, which is unmeasured, not a pass"
+  fi
+
+  # A FIXTURE WHOSE PREMISE FAILS: the declared tool is `sh`, which is
+  # installed, so the check ran and its coverage was measurable after all.
+  cp -R "$FIXTURE" "$SELFWORK/present-tool" \
+    || die_unmeasured "could not copy the fixture for the premise case"
+  sed -e 's|requires: \[definitely-not-a-real-tool\]|requires: [sh]|' \
+    "$FIXTURE/checks.yaml" > "$SELFWORK/present-tool/checks.yaml" \
+    || die_unmeasured "could not write the premise case's config"
+  if cmp -s "$FIXTURE/checks.yaml" "$SELFWORK/present-tool/checks.yaml"; then
+    die_unmeasured "the premise case's config is unchanged - the fixture no longer declares \`definitely-not-a-real-tool\` in the shape this self-test edits, so the case would not have tested a tool that is present"
+  fi
+
+  # 0 - the runner as this repository ships it. Without this case every red
+  # case below proves only that something is red.
+  drive records-null 0 "the shipped runner, against the committed fixture" \
+    "$0" --fixture "$FIXTURE"
+
+  # 1 - the defect itself: the denominator nobody could derive, recorded as 0.
+  drive fabricates-zero 1 "a copied runner whose unmeasured units_total is 0 rather than null" \
+    "$SELFWORK/scripts/${0##*/}" --fixture "$FIXTURE"
+
+  # 2 - the premise. A tool that turns out to be installed means the check ran
+  # and nothing about it was unmeasurable.
+  drive premise-not-met 2 "a fixture declaring a tool that IS installed" \
+    "$0" --fixture "$SELFWORK/present-tool"
+
+  # 2 - no fixture at all. The standing case missing is unmeasured, not a pass.
+  drive absent-fixture 2 "no fixture directory at the path given" \
+    "$0" --fixture "$SELFWORK/nowhere"
+
+  # 2 - bad usage, reaching the same code through the argument parser.
+  drive bad-usage 2 "an option this script does not take" "$0" --frobnicate
+
+  printf '    selftest cases driven: %d\n' "$CASES"
+  printf '%s' "$REPORT"
+  if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
+  printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
+    "each case exits with the code it declares"
+  # `if`, not `[ ... ] && ...`: a false test as the last statement of a list is
+  # a non-zero status, and `set -e` would end the run on the code that was NOT
+  # reached - a self-test killed by its own summary line.
+  REACHED=""
+  if [ "$REACHED_0" = 1 ]; then REACHED="$REACHED 0"; fi
+  if [ "$REACHED_1" = 1 ]; then REACHED="$REACHED 1"; fi
+  if [ "$REACHED_2" = 1 ]; then REACHED="$REACHED 2"; fi
+  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
+    "${REACHED:- none}"
+  printf '    NOT ASSERTED: ONE of the seven assertions is falsified - assertion 1, units_total. The other six are not driven red here, so this says the check catches a fabricated denominator and not that it catches a fabricated counts object, units list, satisfied flag or coverage block\n'
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  exit 0
+fi
 
 # The work tree, never the working directory. --root does not decide what is
 # tested - the fixture and the runner are found beside this script, so the test

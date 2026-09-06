@@ -109,6 +109,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$(dirname "$HERE")"
 
 ROOT=""
+MODE="measure"
 FIXTURE="$SKILL/fixtures/waiver-rendering"
 NEEDLE="WAIVER-FIXTURE-NEEDLE"
 
@@ -118,6 +119,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$0"; exit 0 ;;
+    # `--self-test` is an alias, not a second flag: this repository spells the
+    # same obligation both ways and a tool that answers only one spelling reads
+    # as carrying no self-test to whichever scanner is looking for the other.
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --root)      [ "$#" -ge 2 ] || die_unmeasured "--root needs a path";    ROOT="$2";    shift 2 ;;
     --root=*)    ROOT="${1#--root=}";        shift ;;
     --fixture)   [ "$#" -ge 2 ] || die_unmeasured "--fixture needs a path"; FIXTURE="$2"; shift 2 ;;
@@ -142,6 +147,139 @@ else
   # No work tree: an installed plugin is not a repository. Paths are then
   # printed relative to the skill directory, which is still not absolute.
   ROOT="$SKILL"
+fi
+
+# ---------------------------------------------------------------------------
+# --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
+#
+# Four cases, one per way the contract above can be reached, each driven
+# through THIS script so the argument handling and the premises are on the path
+# too. No case is asserted by reading source: the exit code is read off a real
+# run of the real runner.
+#
+#   clean            a byte copy of the committed fixture              -> 0
+#   waiver-honoured  the same copy with the `unknown` waiver's `Check`
+#                    pointed at the check that really is declared, so
+#                    the runner honours a waiver the `unknown` case
+#                    says it must report as naming nothing             -> 1
+#   no-fixture       a fixture directory that is not there             -> 2
+#   bad-usage        an option the parser does not take                -> 2
+#
+# THE CLEAN CASE IS DRIVEN AGAINST THE COPY, NOT AGAINST THE COMMITTED FIXTURE,
+# and that is deliberate. The two runs then differ in ONE FIELD OF ONE WAIVER,
+# so the exit code moving from 0 to 1 is attributable to that field and to
+# nothing else.
+#
+# THE CLEAN CASE GUARDS THE OTHER THREE. If the copy does not exit 0, the
+# waiver-honoured case would be red for whatever is wrong with the copy - exit
+# 2 for the whole self-test, never a pass on the cases that followed.
+#
+# THE TWO HEAVY CASES RUN CONCURRENTLY, AND THAT IS NOT AN OPTIMISATION. Each
+# one starts the real runner ten times, once per waiver case, and the runner
+# polls a running check once a second - so a drive costs about twenty seconds
+# of wall clock whatever the machine. Run one after the other the pair would
+# exceed the budget check-selftest-coverage.sh allows a single self-test, and a
+# self-test that times out is reported `?` - unreadable - which REFUSES that
+# check rather than answering it. The two drives share nothing but a read-only
+# copy of the fixture and their own temporary directories, so running them at
+# once changes no verdict.
+#
+# NOTHING IS WRITTEN INTO THE REPOSITORY. Both fixtures are copies under
+# mktemp, the runner writes its result inside them, and the directory goes on
+# every exit path, signal included. `view-read-only` hashes this tree while the
+# suite runs and a file appearing in it inside that window is reported as the
+# view builder moving a repository file.
+#
+# WHAT THIS SELF-TEST DOES NOT ASSERT, printed rather than passed silently: it
+# reads the exit CODE and never which of the eighty assertions moved, so a case
+# that went red for the wrong reason is invisible here.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-waiver-rendering-selftest.XXXXXX")" \
+    || die_unmeasured "cannot create a temporary directory to build the self-test's fixtures in; nothing was driven"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  [ -d "$FIXTURE" ] \
+    || die_unmeasured "no fixture directory to copy, so neither drive had a corpus. Unmeasured, not a pass"
+  cp -R "$FIXTURE" "$SB/intact" \
+    || die_unmeasured "the fixture could not be copied, so neither drive had a corpus. Unmeasured, not a pass"
+  cp -R "$FIXTURE" "$SB/honoured" \
+    || die_unmeasured "the second copy could not be made, so the case that must go red was never built. Unmeasured, not a pass"
+
+  # ONE FIELD OF ONE WAIVER. The `unknown` case exists to assert that a waiver
+  # whose `Check:` matches no declared id grants nothing and is reported
+  # `unknown_check`. Pointing that field at `finding` - the id the fixture's
+  # config really does declare - turns it into a waiver the runner honours, so
+  # the case's expected state, its expected blocking count and its expected
+  # exit code all move at once. That is the difference between the two drives
+  # and it is the only one.
+  #
+  # awk writes a new file rather than editing in place: `sed -i` takes an
+  # argument on BSD and none on GNU, and this repository has shipped that
+  # difference as a CI-only failure before.
+  for _w in "$SB/honoured"/waivers/unknown/*.md; do
+    awk '/^Check:/ { print "Check: finding"; next } { print }' "$_w" > "$_w.rewritten" \
+      || die_unmeasured "the waiver copy could not be rewritten, so the case that must go red was never built. Unmeasured, not a pass"
+    mv "$_w.rewritten" "$_w"
+  done
+  if diff -r "$SB/intact" "$SB/honoured" > /dev/null; then
+    die_unmeasured "the two fixture copies are identical, so the waiver-honoured case is the clean case run twice and would prove nothing. Unmeasured, not a pass"
+  fi
+
+  # $1 case, then the argv. `_r=$?` on the SAME LINE as the command: a `$(...)`
+  # or a pipeline between the two resets it, which is how a self-test reports
+  # passes having measured none.
+  self_bg() {
+    _n="$1"
+    shift
+    ( _r=0
+      bash "$0" "$@" > "$SB/$_n.out" 2> "$SB/$_n.err" || _r=$?
+      printf '%s\n' "$_r" > "$SB/$_n.rc" ) &
+  }
+
+  SELF_CASES=0
+  SELF_FAILED=0
+  self_report() { # $1 case, $2 expected exit, $3 what the case is
+    _rc="$(cat "$SB/$1.rc")"
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$_rc" = "$2" ]; then
+      printf '  held:    case %-16s expected %s  observed %s  %s\n' "$1" "$2" "$_rc" "$3"
+    else
+      printf '  FINDING: case %-16s expected %s  observed %s  %s\n' "$1" "$2" "$_rc" "$3"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  self_bg clean --root "$ROOT" --fixture "$SB/intact"
+  self_bg waiver-honoured --root "$ROOT" --fixture "$SB/honoured"
+  self_bg no-fixture --root "$ROOT" --fixture "$SB/there-is-no-fixture-here"
+  self_bg bad-usage --root "$ROOT" --no-such-option
+  wait
+
+  CLEAN_RC="$(cat "$SB/clean.rc")"
+  if [ "$CLEAN_RC" != 0 ]; then
+    printf '  the clean case exited %s, not 0.\n' "$CLEAN_RC"
+    die_unmeasured "a byte copy of the committed fixture did not produce a clean run, so the waiver-honoured case below would be red for that reason instead of its own. Unmeasured, not a corpus that held"
+  fi
+
+  self_report clean 0 \
+    "a byte copy of the committed fixture: eighty assertions over ten waiver cases, all upheld"
+  self_report waiver-honoured 1 \
+    "the same copy with the unknown waiver aimed at the check that IS declared, so the runner honours it and the unknown case's state, blocking count and exit code all move"
+  self_report no-fixture 2 \
+    "no fixture directory at the path given, so the standing case is missing - unmeasured, never a pass"
+  self_report bad-usage 2 \
+    "an option this parser does not take: bad usage is refused rather than ignored"
+
+  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$SELF_CASES" "$SELF_FAILED"
+  printf '  NOT ASSERTED: which of the eighty assertions moved. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
+  if [ "$SELF_FAILED" -ne 0 ]; then
+    printf 'check-waiver-rendering: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists and reaches 0, 1 and 2 by driving the real check against a real runner, not by reading its source.\n'
+  exit 0
 fi
 
 # label : config : the check id in it : the waiver directory it declares

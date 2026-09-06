@@ -155,6 +155,7 @@ VERSION="check-view-publish-refused 1.1"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ROOT=""; HOOK=""; FIXTURE=""; SETTINGS=""; GATELOG=""
+MODE="measure"
 
 # How old the newest decision record may be and still count as evidence that
 # the tool invokes this hook. Thirty days: long enough that a fortnight without
@@ -169,6 +170,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$0"; exit 0 ;;
+    # `--self-test` is an alias, not a second flag: this repository spells the
+    # same obligation both ways and a tool that answers only one spelling reads
+    # as carrying no self-test to whichever scanner is looking for the other.
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --root)      [ "$#" -ge 2 ] || die_unmeasured "--root needs a path";    ROOT="$2";    shift 2 ;;
     --root=*)    ROOT="${1#--root=}";       shift ;;
     --hook)      [ "$#" -ge 2 ] || die_unmeasured "--hook needs a path";    HOOK="$2";    shift 2 ;;
@@ -214,6 +219,107 @@ case "$MAX_AGE_DAYS" in
   ''|*[!0-9]*) die_unmeasured "--max-age-days must be a whole number of days; got '$MAX_AGE_DAYS'. A window this check cannot read is not one it may guess at" ;;
 esac
 [ "$MAX_AGE_DAYS" -gt 0 ] || die_unmeasured "--max-age-days must be greater than zero; a window of zero days admits no record ever and would report a working gate as unmeasured forever"
+
+# ---------------------------------------------------------------------------
+# --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
+#
+# Four cases, one per way the contract above can be reached, each driven
+# through THIS script so the argument handling and the premise guards are on
+# the path too. Nothing is stubbed and no case is asserted by reading source:
+# the exit code is read off a real run.
+#
+#   clean            the committed hook and the committed fixture      -> 0
+#   gate-allows-all  the same fixture and a gate that refuses nothing  -> 1
+#   no-fixture       a fixture directory that is not there             -> 2
+#   bad-usage        an option the parser does not take                -> 2
+#
+# THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If driving the committed hook does
+# not exit 0, every case below would be red for that reason rather than its
+# own, and nothing would have been measured - so that is exit 2 for the whole
+# self-test, never a pass on the three that followed.
+#
+# NOTHING IS WRITTEN INTO THE REPOSITORY. The broken gate is a copy under
+# mktemp and the directory goes on every exit path, signal included.
+# `view-read-only` hashes this tree while the suite runs, and a file appearing
+# here inside that window is reported as the view builder moving a repository
+# file - a check that mutated the tree would make a sibling check fail for a
+# reason nobody could find.
+#
+# WHAT THIS SELF-TEST DOES NOT ASSERT, printed rather than passed silently: it
+# reads the exit CODE and never the wording of a finding, so a case that went
+# red for the wrong reason is invisible here.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-view-publish-refused-selftest.XXXXXX")" \
+    || die_unmeasured "cannot create a temporary directory to build the self-test's inputs in; nothing was driven"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  # The production defect A1, A2 and A3 exist to catch: a gate that emits a
+  # well-formed decision and allows every publish, including the ones R31
+  # obliges it to refuse. It is the ONLY thing separating this case from the
+  # clean one, so the exit code moving from 0 to 1 is attributable to it.
+  cat > "$SB/allow-everything.sh" <<'SELFTEST_HOOK'
+#!/usr/bin/env bash
+# Built by check-view-publish-refused.sh --selftest. Never registered, never
+# reachable from the repository: it lives under mktemp for one run.
+cat >/dev/null
+printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"a gate that refuses nothing"}}\n'
+SELFTEST_HOOK
+  chmod +x "$SB/allow-everything.sh"
+
+  SELF_CASES=0
+  SELF_FAILED=0
+
+  # $1 case, $2 expected exit, $3 what the case is, then the argv to drive.
+  #
+  # `|| _rc=$?` on the SAME LINE as the command. Three of the four cases exit
+  # non-zero on purpose, `set -e` would kill the loop at the first one, and a
+  # `$(...)` or a pipeline between the command and the read of `$?` resets it -
+  # which is how a self-test reports four passes having measured none.
+  self_drive() {
+    _name="$1"; _want="$2"; _why="$3"
+    shift 3
+    _rc=0
+    bash "$0" "$@" > "$SB/$_name.out" 2> "$SB/$_name.err" || _rc=$?
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$_rc" = "$_want" ]; then
+      printf '  held:    case %-16s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+    else
+      printf '  FINDING: case %-16s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  SELF_RC=0
+  bash "$0" --root "$ROOT" > "$SB/clean.out" 2> "$SB/clean.err" || SELF_RC=$?
+  if [ "$SELF_RC" -ne 0 ]; then
+    printf '  the clean case exited %d, not 0.\n' "$SELF_RC"
+    die_unmeasured "the committed hook and fixture did not produce a clean run, so every failing case below would be red for that reason instead of its own. Unmeasured, not a corpus that held"
+  fi
+  SELF_CASES=1
+  printf '  held:    case %-16s expected %s  observed %s  %s\n' "clean" "0" "0" \
+    "the committed hook and the committed fixture: every refusal made and every allowed publish let through"
+
+  self_drive gate-allows-all 1 \
+    "a gate that emits allow for every publish: the refusals R31 requires are not made, and the hook driven is not the one settings.json registers" \
+    --root "$ROOT" --hook "$SB/allow-everything.sh"
+  self_drive no-fixture 2 \
+    "no fixture directory at the path given, so no publish was driven at all - unmeasured, never a pass" \
+    --root "$ROOT" --fixture "$SB/there-is-no-fixture-here"
+  self_drive bad-usage 2 \
+    "an option this parser does not take: bad usage is refused rather than ignored" \
+    --root "$ROOT" --no-such-option
+
+  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$SELF_CASES" "$SELF_FAILED"
+  printf '  NOT ASSERTED: the wording of any finding. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
+  if [ "$SELF_FAILED" -ne 0 ]; then
+    printf 'check-view-publish-refused: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists and reaches 0, 1 and 2 by driving the real check, not by reading its source.\n'
+  exit 0
+fi
 
 # The record the hook writes when the TOOL calls it. Deliberately the default
 # path and not something derived from an environment variable: the whole value

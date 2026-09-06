@@ -165,8 +165,17 @@ VERSION_TIMEOUT=60
 # — a crash reported as bad usage sends someone to edit a config that was fine.
 PARSED=""
 
+# `measure` runs the checks stage. `selftest` drives THIS script as a subject
+# and asserts the exit codes it produced; see the --selftest block below.
+MODE="measure"
+
 on_exit() {
   status=$?
+  # --selftest does not run the stage at all, so the rewriting below does not
+  # apply to it: its 1 means "a case did not produce the code it declares", and
+  # relabelling that as "crashed before reaching a verdict" would report the
+  # self-test's own finding as a fault in the runner.
+  [ "$MODE" = measure ] || return
   case "$status" in
     0 | 3) ;;
     2) [ -z "$PARSED" ] || { printf 'run-checks: crashed with status 2 after the config was accepted. Unverified, not a pass.\n' >&2; exit 1; } ;;
@@ -227,9 +236,255 @@ while [ "$#" -gt 0 ]; do
     # goes stale the first time someone adds a paragraph to it, and then the
     # help text stops mid-sentence and nobody notices.
     -h | --help) awk 'NR>1 && !/^#/{exit} NR>1' "$0"; exit 0 ;;
+    # `--self-test` is an alias, not a second flag: this repository spells the
+    # same obligation both ways and a tool that answers only one spelling reads
+    # as carrying no self-test to whichever scanner is looking for the other.
+    --selftest | --self-test) MODE="selftest"; shift ;;
     *) die_usage "unknown argument: $1" ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
+#
+# Six cases, one per way the contract at the top of this file can be reached,
+# each driven through THIS script - so the argument handling, the config
+# parser, the executor and the on_exit rewriting are all on the path. No case
+# is asserted by reading source: the exit code is read off a real run.
+#
+#   clean         a config whose one check passes                      -> 0
+#   refused       the same shape, whose one blocking check fails       -> 3
+#   all-disabled  a config in which every check is `enabled: false`    -> 2
+#   no-config     --config naming a file that is not there             -> 2
+#   both-sources  --changed and --base given together                  -> 2
+#   crashed       a result path under a directory this process is not
+#                 allowed to create, which fails AFTER the config was
+#                 accepted - the case on_exit rewrites to 1            -> 1
+#
+# IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
+# writes over `policy.output`, so a self-test that did it would be slower than
+# the thing it tests and would rewrite a committed file every time anyone
+# probed it. The corpus is four files and three configs, built under mktemp,
+# and the only tool any of them names is grep.
+#
+# THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If a config whose one check passes
+# does not exit 0, every case below would be red for that reason rather than
+# its own - exit 2 for the whole self-test, never a pass on the five that
+# followed.
+#
+# THE `crashed` CASE HAS A PREMISE OF ITS OWN, and it is the one that fails
+# quietly: root creates a directory inside a mode-500 parent without complaint,
+# and the case would then exit 0 and be reported as not holding rather than as
+# never having been exercised. So the sandbox is probed by TRYING THE WRITE,
+# not by reading the mode bits, and a probe that succeeds is exit 2.
+#
+# NOTHING IS WRITTEN INTO THE REPOSITORY. Every config, every scanned file and
+# every result lands under mktemp, and the directory goes on every exit path,
+# signal included.
+#
+# WHAT THIS SELF-TEST DOES NOT ASSERT, printed rather than passed silently: it
+# reads the exit CODE and never the content of the result file, so a run that
+# reached the right code by the wrong route is invisible here.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  self_unmeasured() { printf 'run-checks: --selftest: %s\n' "$1" >&2; exit 2; }
+
+  command -v python3 >/dev/null 2>&1 || self_unmeasured "python3 is not on PATH, so no case could be driven at all"  # stderr-ok: a presence probe whose EXIT STATUS is the whole answer, and the absence is reported in words by the self_unmeasured on this same line
+  command -v grep >/dev/null 2>&1 || self_unmeasured "grep is not on PATH, and every fixture check is a grep - every case would report missing_tool and none would be the case it was written to be"  # stderr-ok: same probe, same reason, and the absence is reported in words on this same line
+
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/run-checks-selftest.XXXXXX")" \
+    || self_unmeasured "cannot create a temporary directory to build the corpus in; nothing was driven"
+  # The mode-500 directory is put back to writable first: `rm -rf` over a tree
+  # holding one is fine here and is not on every platform, and a trap that
+  # depends on that leaves a directory behind where it is not.
+  trap 'chmod -R u+rwX "$SB" 2>/dev/null || :; rm -rf "$SB"' EXIT HUP INT TERM  # stderr-ok: a best-effort mode reset on the way out, whose failure is already handled by the `|| :` beside it; its stderr would name a temporary path in a committed log
+
+  mkdir -p "$SB/fixture"
+  printf 'this file does not hold the needle\n'  > "$SB/fixture/finding.txt"
+  printf 'RUN-CHECKS-SELFTEST-NEEDLE\n'          > "$SB/fixture/clean.txt"
+  printf 'fixture/clean.txt\n'                   > "$SB/changed-clean.txt"
+  printf 'fixture/finding.txt\n'                 > "$SB/changed-finding.txt"
+
+  # PREMISE. The scanned files must really differ in the needle, or `clean` and
+  # `refused` are the same case twice and one of them is reported as a
+  # regression the first time somebody edits the fixture above.
+  if grep -q RUN-CHECKS-SELFTEST-NEEDLE "$SB/fixture/finding.txt"; then
+    self_unmeasured "the fixture's finding file holds the needle, so its check would pass and there would be no refusal to observe. Unmeasured, not a pass"
+  fi
+  if grep -q RUN-CHECKS-SELFTEST-NEEDLE "$SB/fixture/clean.txt"; then :; else
+    self_unmeasured "the fixture's clean file does not hold the needle, so its check would fail and the clean case would stop being clean. Unmeasured, not a pass"
+  fi
+
+  # One check, one file, one tool, `spec_coverage` off so no spec has to exist
+  # beside it and `allow_repo_local_tools` left at its default so nothing
+  # repo-local is selected by a config this script wrote.
+  cat > "$SB/checks-pass.yaml" <<'SELFTEST_CFG_PASS'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  mode: per_file
+  severity: block
+checks:
+  - id: clean
+    why: the file it scans holds the needle, so this check passes and the run reaches a verdict
+    when:
+      paths: ["fixture/clean.txt"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: per_file
+    command: [grep, -q, RUN-CHECKS-SELFTEST-NEEDLE, "{file}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+SELFTEST_CFG_PASS
+
+  cat > "$SB/checks-fail.yaml" <<'SELFTEST_CFG_FAIL'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  mode: per_file
+  severity: block
+checks:
+  - id: finding
+    why: the file it scans does not hold the needle, so this blocking check reports a real measured finding and the run must refuse
+    when:
+      paths: ["fixture/finding.txt"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: per_file
+    command: [grep, -q, RUN-CHECKS-SELFTEST-NEEDLE, "{file}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+SELFTEST_CFG_FAIL
+
+  cat > "$SB/checks-off.yaml" <<'SELFTEST_CFG_OFF'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  mode: per_file
+  severity: block
+checks:
+  - id: clean
+    enabled: false
+    why: every check in this configuration is switched off, which is a load error and not a clean pass
+    when:
+      paths: ["fixture/clean.txt"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: per_file
+    command: [grep, -q, RUN-CHECKS-SELFTEST-NEEDLE, "{file}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+SELFTEST_CFG_OFF
+
+  mkdir -p "$SB/locked"
+  chmod 500 "$SB/locked"
+  # PREMISE, PROBED BY TRYING IT. Root makes a directory inside a mode-500
+  # parent and never says a word, and the crashed case would then exit 0.
+  if mkdir "$SB/locked/probe" 2>/dev/null; then  # stderr-ok: the probe ASKS whether the sandbox is really unwritable and the permission error IS the expected answer; the failure to be unwritable is reported in words on the next line
+    rmdir "$SB/locked/probe"
+    chmod -R u+rwX "$SB"
+    self_unmeasured "a directory this self-test made unwritable can still be written to - running as root will do that - so the crash after the config was accepted was never reached. Unmeasured, not a pass"
+  fi
+
+  SELF_CASES=0
+  SELF_FAILED=0
+
+  # $1 case, $2 expected exit, $3 what the case is, then the argv to drive.
+  #
+  # `|| _rc=$?` on the SAME LINE as the command. Five of the six cases exit
+  # non-zero on purpose, `set -e` would end the run at the first one, and a
+  # `$(...)` or a pipeline between the command and the read of `$?` resets it -
+  # which is how a self-test reports six passes having measured none.
+  self_drive() {
+    _name="$1"; _want="$2"; _why="$3"
+    shift 3
+    _rc=0
+    bash "$0" "$@" > "$SB/$_name.out" 2> "$SB/$_name.err" || _rc=$?
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$_rc" = "$_want" ]; then
+      printf '  held:    case %-13s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+    else
+      printf '  FINDING: case %-13s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  SELF_RC=0
+  bash "$0" --config "$SB/checks-pass.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --out "$SB/clean.json" \
+    > "$SB/clean.out" 2> "$SB/clean.err" || SELF_RC=$?
+  if [ "$SELF_RC" -ne 0 ]; then
+    printf '  the clean case exited %d, not 0.\n' "$SELF_RC"
+    self_unmeasured "a configuration whose one check passes did not produce a clean run, so every case below would be red for that reason instead of its own. Unmeasured, not a corpus that held"
+  fi
+  SELF_CASES=1
+  printf '  held:    case %-13s expected %s  observed %s  %s\n' "clean" "0" "0" \
+    "one blocking check, it passes, and it covered the file it was given"
+
+  self_drive refused 3 \
+    "one blocking check and it fails: a deliberate no, which is 3 and never 1" \
+    --config "$SB/checks-fail.yaml" --root "$SB" \
+    --changed "$SB/changed-finding.txt" --out "$SB/refused.json"
+  self_drive all-disabled 2 \
+    "every declared check is switched off: a load error, because the run would otherwise exit 0 having verified nothing" \
+    --config "$SB/checks-off.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --out "$SB/off.json"
+  self_drive no-config 2 \
+    "--config names a file that is not there: the stage is declared in a file and there is no built-in list to fall back on" \
+    --config "$SB/there-is-no-config-here.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt"
+  self_drive both-sources 2 \
+    "--changed and --base together: two sources for one change set disagree silently, so neither is honoured" \
+    --config "$SB/checks-pass.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --base HEAD
+  self_drive crashed 1 \
+    "the result cannot be written, which fails after the config was accepted: unverified, and reported as 1 rather than as the 2 that would send a reader to edit a config that was fine" \
+    --config "$SB/checks-pass.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --out "$SB/locked/sub/result.json"
+
+  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2, 3. Cases that did not hold: %d\n' \
+    "$SELF_CASES" "$SELF_FAILED"
+  printf '  NOT ASSERTED: the content of any result file. Each case reads the exit CODE, so a run that reached the right code by the wrong route is invisible here and is read off the case output by hand.\n'
+  if [ "$SELF_FAILED" -ne 0 ]; then
+    printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists and reaches 0, 1, 2 and 3 by driving the real runner over a corpus built for it, not by reading its source and not by running the declared suite.\n'
+  exit 0
+fi
 
 # WHERE THE DEFAULT CONFIG IS LOOKED FOR.
 #

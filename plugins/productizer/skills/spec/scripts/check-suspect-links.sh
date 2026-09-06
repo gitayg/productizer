@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # check-suspect-links.sh [--version] [--help] [--root DIR] [--base REF]
+#                        [--selftest]
 #
 # Flags SUSPECT LINKS: a requirement whose SENTENCE changed in place - its id
 # and its status both unchanged - and every artifact still citing that id that
@@ -130,12 +131,17 @@
 #   0  compared, and no suspect dependant
 #   1  findings - a sentence moved under a live citation nobody touched
 #   2  could not run, or could not measure. Never 0.
+#
+# Under --selftest (--self-test is accepted too) the same three mean: every
+# case produced the exit code it declares and said what it was supposed to say
+# (0), at least one did not (1), and the corpus could not be driven at all (2).
 set -euo pipefail
 
 VERSION="check-suspect-links 1.0"
 ROOT=""
 BASE="HEAD"
 BASE_SOURCE="the default: the change in the work tree, against the last commit"
+MODE="measure"
 
 usage() {
   printf 'usage: check-suspect-links.sh [--version] [--help] [--root DIR] [--base REF]\n'
@@ -143,6 +149,7 @@ usage() {
   printf '              top level, never to the working directory.\n'
   printf '  --base REF  the ref the change is measured against. Defaults to\n'
   printf '              HEAD, which compares the work tree to the last commit.\n'
+  printf '  --selftest  drive the built-in corpus instead of a repository.\n'
 }
 
 die_unmeasured() { printf 'check-suspect-links: %s\n' "$1" >&2; exit 2; }
@@ -159,10 +166,261 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die_unmeasured "--base needs a ref"
       BASE="$2"; BASE_SOURCE="given with --base"; shift 2 ;;
     --base=*) BASE="${1#--base=}"; BASE_SOURCE="given with --base"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     -*) printf 'check-suspect-links: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *) printf 'check-suspect-links: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest. R39: one case per exit code this tool can return, each built as
+# a real git history in a sandbox, so nothing here reads or writes the
+# repository under test.
+#
+# THE HISTORIES ARE BUILT, NOT COMMITTED AS FIXTURES. This check compares the
+# work tree against a base commit, and a case directory under `fixtures/`
+# cannot carry a git history of its own inside this repository.
+#
+# THE THREE THINGS THAT LOOK ALIKE EACH GET A CASE, and that is the point of
+# the corpus rather than a flourish. `suspect` must be a finding; `supersede`
+# must NOT be, because a status change leaves a forward pointer a reader can
+# follow; and `cleared` must not be either, because a citation whose own line
+# moved in the same change is a citation somebody had open. Collapsing any two
+# of those three is the failure mode this check was written around, and an
+# exit-code-only corpus would not see it - so every case asserts a sentence.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  [ -f "$SELF" ] ||
+    die_unmeasured "cannot re-invoke this script for the self-test, so no case was driven"
+  command -v git >/dev/null ||
+    die_unmeasured "git is not on PATH, so no history could be built and no case was driven"
+
+  # `pwd -P` because the temporary directory is reached through a symlink on
+  # macOS and this check compares --root against a resolved `git rev-parse
+  # --show-toplevel`. An unresolved sandbox refuses every case for a reason
+  # about the sandbox rather than about the case.
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-suspect-links-selftest.XXXXXX")" ||
+    die_unmeasured "could not create a sandbox, so no case was driven"
+  SB="$(cd "$SB" && pwd -P)"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  new_repo() {
+    mkdir -p "$1/.claude/productizer"
+    git -c init.defaultBranch=main init -q "$1"
+    git -C "$1" config user.email "fixture@example.invalid"
+    git -C "$1" config user.name "check-suspect-links selftest"
+  }
+  commit_all() {
+    git -C "$1" add -A
+    git -C "$1" -c commit.gpgsign=false commit -q -m "$2"
+  }
+
+  # The agreed spec, and one dependant outside it so a citation exists that
+  # the spec's own edit cannot clear by accident.
+  agreed_spec() {
+    cat > "$1/.claude/productizer/spec.md" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+
+## Acceptance criteria
+
+| requirement | asserted by |
+| --- | --- |
+| R1 | spec-home |
+| R2 | spec-integrity |
+SPEC
+  }
+  agreed_dependant() {
+    printf 'notes\n\nThe home check is what asserts R1 today.\n' > "$1/notes.md"
+  }
+
+  base_repo() {
+    new_repo "$SB/$1"
+    agreed_spec "$SB/$1"
+    agreed_dependant "$SB/$1"
+    commit_all "$SB/$1" "the agreed spec and one dependant citing R1"
+  }
+
+  # The same spec with R1's SENTENCE rewritten in place - same id, same
+  # status, different words.
+  rewritten_spec() {
+    cat > "$1/.claude/productizer/spec.md" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle should usually prefer at most one living spec.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+
+## Acceptance criteria
+
+| requirement | asserted by |
+| --- | --- |
+| R1 | spec-home |
+| R2 | spec-integrity |
+SPEC
+  }
+
+  FAILED=0
+  DRIVEN=0
+
+  drive() {
+    # $1 case name, $2 expected exit, $3 expected sentence, $4.. argv override
+    local case_name="$1" want="$2" marker="$3"
+    shift 3
+    local rc=0
+    if [ "$#" -eq 0 ]; then set -- --root "$SB/$case_name"; fi
+    bash "$SELF" "$@" > "$SB/$case_name.out" 2> "$SB/$case_name.err" || rc=$?
+    DRIVEN=$((DRIVEN + 1))
+    local why=""
+    [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
+    # Both files handed to grep directly, never piped into it: under
+    # `set -o pipefail` a `cat a b | grep -q` reports 141 whenever grep matches
+    # early enough to SIGPIPE the cat, and `if !` reads that as no match.
+    if ! grep -q -- "$marker" "$SB/$case_name.out" "$SB/$case_name.err"; then
+      [ -n "$why" ] && why="$why; "
+      why="${why}its output does not say what it was supposed to say"
+    fi
+    if [ -z "$why" ]; then
+      printf '  held: case %-22s exit %d, and said so - %s\n' "$case_name" "$rc" "$marker"
+      return 0
+    fi
+    printf '  FINDING: case %-22s %s - expected: %s\n' "$case_name" "$why" "$marker"
+    FAILED=$((FAILED + 1))
+    return 0
+  }
+
+  # clean: nothing moved since the base at all.
+  base_repo clean
+
+  # suspect: R1's sentence rewritten, every citation left where it was.
+  base_repo suspect
+  rewritten_spec "$SB/suspect"
+
+  # cleared: the same rewrite, with every line citing R1 rewritten alongside
+  # it. Per LINE, never per file - the acceptance row lives in the spec, and a
+  # per-file rule would clear it the moment the requirement above it moved.
+  base_repo cleared
+  cat > "$SB/cleared/.claude/productizer/spec.md" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle should usually prefer at most one living spec.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+
+## Acceptance criteria
+
+| requirement | asserted by |
+| --- | --- |
+| R1 | spec-home, re-read against the new wording |
+| R2 | spec-integrity |
+SPEC
+  printf 'notes\n\nThe home check is what asserts R1 today, re-read against the new wording.\n' \
+    > "$SB/cleared/notes.md"
+
+  # supersede: the id resolves and the STATUS moved. A supersede leaves a
+  # forward pointer a reader can follow, so it is not suspect here.
+  base_repo supersede
+  cat > "$SB/supersede/.claude/productizer/spec.md" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+  Superseded by R3. Narrowed.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall hold exactly one living spec in the declared home.
+
+## Acceptance criteria
+
+| requirement | asserted by |
+| --- | --- |
+| R1 | spec-home |
+| R2 | spec-integrity |
+SPEC
+
+  # base-unresolvable: a ref that names no commit.
+  base_repo base-unresolvable
+
+  # shallow: the base was never fetched, which is a different sentence from a
+  # wrong ref and must not be reported as one.
+  git clone -q --depth 1 "file://$SB/clean" "$SB/shallow" ||
+    die_unmeasured "could not build a shallow clone, so the case that separates a shallow clone from a wrong ref was never driven"
+
+  # spec-new-at-base: the spec did not exist at the base at all.
+  new_repo "$SB/spec-new-at-base"
+  agreed_dependant "$SB/spec-new-at-base"
+  commit_all "$SB/spec-new-at-base" "a repository with a dependant and no spec yet"
+  agreed_spec "$SB/spec-new-at-base"
+
+  # no-requirements-now
+  new_repo "$SB/no-requirements-now"
+  agreed_spec "$SB/no-requirements-now"
+  commit_all "$SB/no-requirements-now" "the agreed spec"
+  printf '# Living spec — sandbox\n\n## Design\n\nProse, and no requirement definitions.\n' \
+    > "$SB/no-requirements-now/.claude/productizer/spec.md"
+
+  # no-requirements-at-base: today's spec parses, the base's does not, so
+  # there is no earlier sentence for anything to have moved from.
+  new_repo "$SB/no-requirements-at-base"
+  printf '# Living spec — sandbox\n\n## Design\n\nProse, and no requirement definitions.\n' \
+    > "$SB/no-requirements-at-base/.claude/productizer/spec.md"
+  commit_all "$SB/no-requirements-at-base" "a spec with nothing in it yet"
+  agreed_spec "$SB/no-requirements-at-base"
+
+  # no-spec: a work tree with no spec at the declared path.
+  new_repo "$SB/no-spec"
+  printf 'no spec here\n' > "$SB/no-spec/README"
+  commit_all "$SB/no-spec" "founding"
+  rmdir "$SB/no-spec/.claude/productizer" "$SB/no-spec/.claude"
+
+  # not-a-work-tree: the spec is readable and git knows nothing about it.
+  mkdir -p "$SB/not-a-work-tree/.claude/productizer"
+  agreed_spec "$SB/not-a-work-tree"
+
+  printf 'not a directory\n' > "$SB/a-file"
+
+  # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If a tree that moved nothing
+  # does not exit 0 and say so, every red case below would be red for that
+  # reason instead of its own and nothing would have been measured.
+  CLEAN_RC=0
+  bash "$SELF" --root "$SB/clean" > "$SB/clean.out" 2> "$SB/clean.err" || CLEAN_RC=$?
+  if [ "$CLEAN_RC" -ne 0 ] || ! grep -q 'sentence changed in place: 0' "$SB/clean.out"; then
+    printf '  the clean case exited %d and did not report nothing changed in place.\n' "$CLEAN_RC"
+    die_unmeasured "the corpus premise did not hold; unmeasured, not a pass"
+  fi
+  printf '  held: case %-22s exit 0, and said so - %s\n' "clean" "sentence changed in place: 0"
+
+  drive cleared              0 'dependants: 2 cited, 2 re-read (their line moved too), 0 left suspect'
+  drive supersede            0 'status changed: 1'
+
+  drive suspect              1 'dependants: 2 cited, 0 re-read (their line moved too), 2 left suspect'
+
+  drive base-unresolvable    2 'does not resolve to a commit' --root "$SB/base-unresolvable" --base no-such-ref
+  drive shallow              2 'the clone is SHALLOW'         --root "$SB/shallow" --base HEAD~1
+  drive spec-new-at-base     2 'does not exist at'
+  drive no-requirements-now  2 'holds no requirement definitions'
+  drive no-requirements-at-base 2 'There is no earlier sentence to compare against'
+  drive no-spec              2 'cannot read .claude/productizer/spec.md'
+  drive not-a-work-tree      2 'is not inside a git work tree'
+  drive root-not-a-dir       2 'is not a directory'           --root "$SB/a-file"
+
+  printf '  cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$((DRIVEN + 1))" "$FAILED"
+  if [ "$FAILED" -ne 0 ]; then
+    printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2, and every case asserts which verdict it produced as well as which code.\n'
+  printf '  NOT ASSERTED, two of them. The ONE-BASE-REF blindness in the header is not a case and cannot be: an edit merged before the base IS the agreed text to this check, by construction, and a corpus cannot demonstrate a hole by exercising it. And the empty-dependant-scope refusal is unreachable from any corpus this tool can be pointed at - the spec itself is a tracked file outside the fixtures and evals trees, so the scope is never empty in a tree that got that far.\n'
+  exit 0
+fi
 
 # Defaulting to the working directory is how a sibling check here once read a
 # directory that was not the repository and reported a confident clean result.

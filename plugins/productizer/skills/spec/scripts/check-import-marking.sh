@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # check-import-marking.sh [--version] [--help] [--root PATH] [--spec PATH]
-#                         [--backlog PATH] [--max-commits N]
+#                         [--backlog PATH] [--max-commits N] [--selftest]
+#                         [--fixtures DIR]
 #
 # Asserts R10: WHEN A REPOSITORY WITH HISTORY IS IMPORTED, THE LIFECYCLE SHALL
 # MARK EVERY DRAFTED REQUIREMENT INFERRED AND UNCONFIRMED.
@@ -157,6 +158,35 @@
 #   2  COULD NOT MEASURE - bad usage, a spec that could not be parsed, a git
 #      history that could not be walked, no import on the record at all, or an
 #      import on the record that no requirement could be attributed to
+#
+# ONE LINE OF THAT CONTRACT IS STALE, AND IT IS RECORDED HERE RATHER THAN
+# QUIETLY CORRECTED. `no import on the record at all` is listed above under 2
+# and the committed suite measures it as 0 - the `never-imported` and
+# `silent-import` cases both declare exit 0, and both hold. The suite's own
+# comment gives the reason and it is the better argument: R10 is event-driven,
+# four sources were read and none records an import, and that is a measurement
+# of the premise rather than a refusal to look. The exits below are what runs;
+# the sentence above is what an earlier draft intended. Believe the cases.
+#
+# --SELFTEST RUNS THE COMMITTED FALSIFICATION SUITE, `fixtures/import-marking/
+# selftest.sh`, against THIS file. That suite already existed and already
+# builds a throwaway git repository per case from the spec versions in
+# `fixtures/import-marking/spec/`; what it did not have was a way in. R39 asks
+# every check tool to CARRY a self-test, and a suite that only a person who
+# knows the path can run is not one the tool carries. The flag is that way in
+# and it adds no second copy of the cases.
+#
+# The suite drives all three of this check's exit codes: 0 on four cases
+# (never imported, every requirement marked, all of them promoted, an import
+# that left no trace at all), 1 on three (nothing marked, a marker forgotten,
+# the stage named only in a commit message) and 2 on one (the stage named in
+# the backlog and nowhere else, so an import is on the record and its cohort
+# cannot be resolved).
+#
+# Under --selftest the three codes mean: every case produced the verdict it
+# declares (0), at least one did not (1), and the suite could not be run at
+# all (2). `--self-test` is accepted as an alias because the repo spells it
+# both ways.
 set -euo pipefail
 
 VERSION="check-import-marking 1.1"
@@ -164,6 +194,8 @@ ROOT=""
 SPEC=".claude/productizer/spec.md"
 BACKLOG=".claude/productizer/backlog.md"
 MAX_COMMITS="500"
+MODE="measure"
+FIXTURES=""
 
 die_unmeasured() { printf 'check-import-marking: %s\n' "$1" >&2; exit 2; }
 
@@ -184,9 +216,80 @@ while [ "$#" -gt 0 ]; do
       esac
       MAX_COMMITS="$2"; shift 2
       ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
+    --fixtures)
+      [ "$#" -ge 2 ] || die_unmeasured "--fixtures needs a path"
+      FIXTURES="$2"; shift 2
+      ;;
     *) die_unmeasured "unknown argument: $1" ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest: hand the committed suite this file and read its verdict. The
+# cases live in the fixture, not here, so there is exactly one copy of them.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  # Derived from where THIS script lives rather than from the working
+  # directory: an installed plugin is not a repository, and the fixture is
+  # beside the script wherever it was installed.
+  SELF_DIR="$(cd -P "$(dirname "$0")" && pwd -P)" \
+    || die_unmeasured "cannot resolve the directory this script lives in, so the committed suite could not be located"
+  SELF_SKILL="$(dirname "$SELF_DIR")"
+  [ -n "$FIXTURES" ] || FIXTURES="$SELF_SKILL/fixtures/import-marking"
+  SUITE="$FIXTURES/selftest.sh"
+  [ -f "$SUITE" ] && [ -r "$SUITE" ] \
+    || die_unmeasured "no committed suite at ${FIXTURES##*/}/selftest.sh; the cases this self-test reads its expectations from are not there, which is unmeasured rather than eight cases that all held"
+
+  WORK="$(mktemp -d)" \
+    || die_unmeasured "cannot create a temporary directory to capture the suite's output in"
+  # Removed on every exit path, signal included.
+  trap 'rm -rf "$WORK"' EXIT HUP INT TERM
+
+  # `|| SRC=$?` on the same line as the command. A `$(...)` in an argument list
+  # and a pipeline both RESET `$?`, and reading the status one line later is
+  # how a self-test comes to report a pass it never observed.
+  SRC=0
+  bash "$SUITE" --check "$0" > "$WORK/suite.out" 2> "$WORK/suite.err" || SRC=$?
+
+  CASES="$(awk '/^(ok|FAIL)[ \t]/ { n++ } END { print n + 0 }' "$WORK/suite.out")"
+  UPHELD="$(awk '/^ok[ \t]/ { n++ } END { print n + 0 }' "$WORK/suite.out")"
+
+  printf '    selftest cases driven: %s\n' "$CASES"
+  # The suite's own per-case lines, indented into this check's output. Its
+  # stderr goes with them: a reason nobody prints is a reason nobody has.
+  sed 's/^/      /' < "$WORK/suite.out"
+  if [ -s "$WORK/suite.err" ]; then
+    sed 's/^/      /' < "$WORK/suite.err" >&2
+  fi
+
+  if [ "$SRC" = 2 ]; then
+    die_unmeasured "the committed suite could not run (exit 2). Its reason was printed above. Nothing was asserted about R10"
+  fi
+  if [ "$CASES" = 0 ]; then
+    die_unmeasured "the committed suite drove no case at all, so this self-test asserted nothing. Unmeasured, not a pass"
+  fi
+
+  # The exit codes THIS CHECK produced, taken from the suite's own lines: `ok
+  # <name> exit N` when a case held, `got exit N` when it did not. Read from
+  # the observed side on purpose - a code the check never actually returned is
+  # not a code the self-test reached, whatever the case declared.
+  REACHED="$(awk '
+    /^ok[ \t]/        { for (i = 1; i <= NF; i++) if ($i == "exit") seen[$(i + 1)] = 1 }
+    /got exit [0-9]/  { for (i = 1; i <= NF; i++) if ($i == "exit") seen[$(i + 1)] = 1 }
+    END { out = ""; for (c = 0; c <= 2; c++) if (c in seen) out = out " " c
+          print (out == "" ? " none" : out) }' "$WORK/suite.out")"
+
+  if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
+  printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
+    "each committed case produces the verdict it declares"
+  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
+    "$REACHED"
+  printf '    NOT ASSERTED: the suite compares the exit code and ONE load-bearing line, never the whole finding, so a case red for a second reason on top of the right one is invisible here\n'
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  exit 0
+fi
 
 # The working directory is NEVER the default. A check rooted at wherever it
 # happened to be invoked from reads a different spec and a different history

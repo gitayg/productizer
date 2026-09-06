@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # check-changelog-row.sh [--version] [--help] [--root DIR] [--max-versions N]
+#                        [--selftest|--self-test]
 #
 # Asserts R32: WHEN A CLASSIFICATION CHANGES THE SPEC, THE LIFECYCLE SHALL
 # RECORD IT IN THE SPEC'S CHANGE LOG.
@@ -246,6 +247,20 @@
 #   1  findings - a spec-changing classification with no row recording it
 #   2  could not run, or could not measure. Never 0.
 #
+# --SELFTEST RUNS THE COMMITTED FALSIFICATION SUITE, and does not reimplement
+# it. R39 asks every check tool to carry a self-test that reaches each exit
+# code it can return; this one has had that suite since 2.0, in
+# `fixtures/changelog-row/selftest.sh`, and it drives all three codes over
+# throwaway git histories built from the six spec versions beside it. A second
+# corpus written into this file would be a second notion of what these
+# assertions mean, and the two would disagree the day one of them was edited.
+# The flag therefore delegates, prints each case the suite drove, and takes the
+# suite's own verdict as its own: 0 every case produced the verdict it should,
+# 1 a case did not, 2 the suite could not be run at all. `--self-test` is
+# accepted as an alias, because this repository spells the flag both ways and a
+# tool that answers only one spelling has a self-test the next caller cannot
+# find.
+#
 # R32.5 SETS NONE OF THEM. An unresolved in-place rewrite is printed and
 # counted and leaves the exit code exactly where the other four assertions put
 # it, because this check cannot tell which of two events it saw and an exit
@@ -259,6 +274,7 @@ set -euo pipefail
 
 VERSION="check-changelog-row 2.0"
 ROOT=""
+SELFTEST=""
 MAX_VERSIONS=400
 
 usage() {
@@ -267,6 +283,8 @@ usage() {
   printf '                   top level, never to the working directory.\n'
   printf '  --max-versions N refuse rather than truncate a spec history longer\n'
   printf '                   than N commits. Default 400.\n'
+  printf '  --selftest       run the committed falsification suite beside this\n'
+  printf '                   script and report each case it drove.\n'
 }
 
 die_unmeasured() { printf 'check-changelog-row: %s\n' "$1" >&2; exit 2; }
@@ -283,6 +301,7 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die_unmeasured "--max-versions needs a number"
       MAX_VERSIONS="$2"; shift 2 ;;
     --max-versions=*) MAX_VERSIONS="${1#--max-versions=}"; shift ;;
+    --selftest|--self-test) SELFTEST=1; shift ;;
     -*) printf 'check-changelog-row: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *) printf 'check-changelog-row: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -292,6 +311,65 @@ case "$MAX_VERSIONS" in
   ''|*[!0-9]*) die_unmeasured "--max-versions must be a whole number, got '$MAX_VERSIONS'" ;;
 esac
 [ "$MAX_VERSIONS" -ge 1 ] || die_unmeasured "--max-versions must be at least 1"
+
+
+# --------------------------------------------------------------- --selftest
+#
+# Delegated to the committed suite for the reason in the header: a second
+# corpus here would be a second notion of what R32.1 to R32.5 mean. This block
+# locates the suite, runs it against THIS file, prints every case it drove with
+# the exit code that case observed, and reports which of this check's three
+# exit codes the corpus actually reached - the half of R39 that a self-test
+# which merely exists does not answer.
+if [ -n "$SELFTEST" ]; then
+  SUITEDIR="$(cd "$(dirname "$0")" && pwd -P)"
+  SUITE="$SUITEDIR/../fixtures/changelog-row/selftest.sh"
+  [ -f "$SUITE" ] && [ -r "$SUITE" ] ||
+    die_unmeasured "the committed falsification suite is not at fixtures/changelog-row/selftest.sh beside this script. There is nothing to falsify with, which is unmeasured and not a self-test that passed."
+
+  SELF_TMP="$(mktemp -d)" ||
+    die_unmeasured "cannot create a temporary directory to capture the suite's output in"
+  trap 'rm -rf "$SELF_TMP"' EXIT HUP INT TERM
+
+  printf '    selftest: %s, driven by the committed suite in fixtures/changelog-row/\n' "$VERSION"
+
+  SUITE_RC=0
+  bash "$SUITE" --check "$0" > "$SELF_TMP/suite.out" 2> "$SELF_TMP/suite.err" || SUITE_RC=$?
+
+  # One line per case, as the suite printed it. Each already names the case,
+  # the exit code observed, and - where a case did not hold - the code it
+  # wanted instead.
+  sed 's/^/      /' < "$SELF_TMP/suite.out"
+  if [ -s "$SELF_TMP/suite.err" ]; then
+    sed 's/^/      /' < "$SELF_TMP/suite.err"
+  fi
+
+  # The exit codes the corpus actually reached, read off the case lines rather
+  # than asserted in prose. R39 asks for each code the tool can return, and a
+  # suite that only ever drove one of the three would be a suite that exists
+  # without covering the contract.
+  # `sed -E`, not a BRE with `\|`: BSD sed does not support alternation in a
+  # basic regular expression, and the pattern silently matches nothing there -
+  # which prints `examined 0` and reads exactly like a corpus that drove
+  # nothing. Measured on this machine, not anticipated.
+  CODES="$(sed -n -E 's/^(PASS|FAIL) +[^ ]+ +exit ([0-9]+).*/\2/p' \
+    < "$SELF_TMP/suite.out" | sort -u | tr '\n' ' ')"
+  DRIVEN="$(sed -n -E 's/^(PASS|FAIL) +[^ ]+ +exit [0-9]+.*/x/p' \
+    < "$SELF_TMP/suite.out" | wc -l | tr -d ' ')"
+
+  case "$SUITE_RC" in
+    0) SELF_VERDICT="held" ;;
+    1) SELF_VERDICT="NOT HELD" ;;
+    *) die_unmeasured "the committed suite could not be run (it exited $SUITE_RC). Its own contract reserves that for no git, no check to test and no temporary directory - which is unmeasured, and not a corpus that held." ;;
+  esac
+
+  printf '    R39  %-38s examined %3s  %s: %s\n' \
+    "selftest-cases-produce-declared-verdict" "$DRIVEN" "$SELF_VERDICT" \
+    "each committed case produces the exit code and the load-bearing line that history should produce"
+  printf '    exit codes of this check reached by the corpus: %s\n' "${CODES:-none - the corpus drove nothing}"
+  printf '    NOT ASSERTED: anything outside the six committed spec versions. The corpus is six histories differing by one thing each; a defect that needs a seventh shape is invisible to it, and R32.5 sets no exit code by design.\n'
+  exit "$SUITE_RC"
+fi
 
 # Defaulting to the working directory has caused four separate silent-wrong-
 # answer bugs in this repository: the script reads a directory that is not the

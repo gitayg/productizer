@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-pending-ruling-scope.sh [--version] [--help] [--root DIR]
+# check-pending-ruling-scope.sh [--version] [--help] [--root DIR] [--selftest]
 #
 # Asserts R12: WHILE A CONTRADICTION IS UNRULED, THE LIFECYCLE SHALL MERGE NO
 # SPEC CHANGE THAT DEPENDS ON IT.
@@ -211,6 +211,28 @@
 #   1  findings - a spec change that depends on an unruled contradiction, or a
 #      self-assertion that did not hold
 #   2  could not run, or could not measure. Never 0.
+#
+# --SELFTEST IS NOT THE SELF-ASSERTION ABOVE, AND THE DIFFERENCE MATTERS. The
+# self-assertion runs inside every ordinary run and asks whether the
+# RECOGNITION RULE still works; it can only ever end in this check's own exit
+# 0, because a self-assertion that did not hold turns into a finding and the
+# ordinary run reports it as one. R39 asks something else: that the tool reach
+# EACH exit code it can return. So --selftest replays the same committed
+# fixture into a temporary git repository and drives THIS script against it
+# five times - a spec where the incoming behaviour was merged under a
+# different EARS keyword (1), a spec where an unrelated requirement was
+# allocated in the same window (0), the spec as the ruling was raised (0), a
+# root that is not a git work tree (2), and bad usage (2) - comparing each
+# exit code with the one the case declares.
+#
+# The nested runs carry `PRODUCTIZER_RULING_SCOPE_SELFTEST` set to the fixture
+# root, the same marker the self-assertion uses, so the nested run measures
+# the fixture instead of recursing into a self-assertion of its own.
+#
+# Under --selftest the three codes mean: every case produced the code it
+# declares (0), at least one did not (1), and the cases could not be built or
+# driven at all (2). `--self-test` is accepted as an alias because the repo
+# spells it both ways.
 set -euo pipefail
 
 # Byte-identical behaviour across machines and locales: character ranges,
@@ -221,11 +243,14 @@ export LC_ALL=C
 
 VERSION="check-pending-ruling-scope 1.1"
 ROOT=""
+MODE="measure"
 
 usage() {
-  printf 'usage: check-pending-ruling-scope.sh [--version] [--help] [--root DIR]\n'
+  printf 'usage: check-pending-ruling-scope.sh [--version] [--help] [--root DIR] [--selftest]\n'
   printf '  --root DIR  the repo work tree to examine. Defaults to the git\n'
   printf '              top level, never to the working directory.\n'
+  printf '  --selftest  replay the committed fixture and read this check`s exit\n'
+  printf '              code off each case. --self-test is an alias.\n'
 }
 
 die_unmeasured() { printf 'check-pending-ruling-scope: %s\n' "$1" >&2; exit 2; }
@@ -238,10 +263,143 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die_unmeasured "--root needs a directory"
       ROOT="$2"; shift 2 ;;
     --root=*) ROOT="${1#--root=}"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     -*) printf 'check-pending-ruling-scope: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *) printf 'check-pending-ruling-scope: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest: replay the committed fixture into a temporary git repository and
+# drive THIS script against it once per case. Nothing is written into the
+# repository being checked, and the committed fixture is read, never written.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SELFDIR="$(cd "$(dirname "$0")" && pwd -P)" ||
+    die_unmeasured "cannot resolve the directory this script lives in, so the committed fixture could not be located"
+  FIXDIR="$SELFDIR/../fixtures/ruling-scope/r12-different-trigger"
+  [ -d "$FIXDIR" ] ||
+    die_unmeasured "the fixture is not at fixtures/ruling-scope/r12-different-trigger beside this script, so no case could be built. Unmeasured, not a pass"
+  FIXDIR="$(cd "$FIXDIR" && pwd -P)" ||
+    die_unmeasured "the fixture directory could not be entered"
+  for fx in base-spec.md raised-spec.md merged-spec.md unrelated-spec.md D1-merge-nothing.md; do
+    { [ -f "$FIXDIR/$fx" ] && [ -r "$FIXDIR/$fx" ]; } ||
+      die_unmeasured "the fixture is missing or unreadable: $fx. Unmeasured, not a pass"
+  done
+  # The same premise guard the self-assertion applies: a ruling that is not
+  # pending holds no window open, and every case below would then be testing
+  # nothing while still going green.
+  grep -qxF 'Status: pending' "$FIXDIR/D1-merge-nothing.md" ||
+    die_unmeasured "the fixture's D1-merge-nothing.md is not pending, so the window the cases turn on is not open and none of them tests anything"
+
+  SELFWORK="$(mktemp -d "${TMPDIR:-/tmp}/check-pending-ruling-scope-selftest.XXXXXX")" ||
+    die_unmeasured "cannot create a temporary directory to replay the fixture into; nothing was driven"
+  # Removed on every exit path, signal included.
+  trap 'rm -rf "$SELFWORK"' EXIT HUP INT TERM
+
+  mkdir -p "$SELFWORK/fixture/.claude/productizer" ||
+    die_unmeasured "could not lay out the temporary repository"
+  # Resolved, so the marker below and the nested run's own resolved ROOT are
+  # the same string. On macOS $TMPDIR is a symlink and they would not be.
+  FIXROOT="$(cd "$SELFWORK/fixture" && pwd -P)" ||
+    die_unmeasured "the temporary repository could not be entered"
+  git -c init.defaultBranch=main init -q "$FIXROOT" ||
+    die_unmeasured "git could not create the temporary repository the cases replay the fixture into"
+  selfcommit() {
+    git -C "$FIXROOT" -c user.name=fixture -c user.email=fixture@example.invalid \
+        -c commit.gpgsign=false commit -q -m "$1" ||
+      die_unmeasured "git could not commit the fixture: $1"
+  }
+  cp "$FIXDIR/base-spec.md" "$FIXROOT/.claude/productizer/spec.md"
+  git -C "$FIXROOT" add .claude || die_unmeasured "git could not stage the fixture"
+  selfcommit "fixture: the spec before the contradiction was raised"
+  mkdir -p "$FIXROOT/.claude/productizer/rulings"
+  cp "$FIXDIR/raised-spec.md" "$FIXROOT/.claude/productizer/spec.md"
+  cp "$FIXDIR/D1-merge-nothing.md" "$FIXROOT/.claude/productizer/rulings/D1-merge-nothing.md"
+  git -C "$FIXROOT" add .claude || die_unmeasured "git could not stage the fixture"
+  selfcommit "fixture: raise D1 and its concern row in one commit"
+
+  CASES=0; UPHELD=0; REPORT=""
+  REACHED_0=0; REACHED_1=0; REACHED_2=0
+
+  tally() {
+    NAME="$1"; WANT="$2"; GOT="$3"; WHY="$4"
+    CASES=$((CASES + 1))
+    if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+    case "$GOT" in
+      0) REACHED_0=1 ;;
+      1) REACHED_1=1 ;;
+      2) REACHED_2=1 ;;
+    esac
+    REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
+"
+  }
+
+  # $1 case name · $2 the spec version to put in the temporary repository ·
+  # $3 the exit code the case declares · $4 the reason, one line.
+  # The nested run's stdout is captured, never re-printed: its coverage lines
+  # name paths inside a temporary directory, which are not this repository's
+  # files. `|| GOT=$?` sits on the command's own line - a `$(...)` in an
+  # argument list and a pipeline both RESET `$?`.
+  drive_spec() {
+    cp "$FIXDIR/$2" "$FIXROOT/.claude/productizer/spec.md" ||
+      die_unmeasured "could not place $2 in the temporary repository"
+    GOT=0
+    PRODUCTIZER_RULING_SCOPE_SELFTEST="$FIXROOT" bash "$0" --root "$FIXROOT" \
+      > "$SELFWORK/$1.out" 2> "$SELFWORK/$1.err" || GOT=$?
+    tally "$1" "$3" "$GOT" "$4"
+  }
+
+  # 1 - the audit's case. The incoming behaviour merged under a different EARS
+  # keyword while D1 is pending against the requirement it restates.
+  drive_spec merged merged-spec.md 1 \
+    "the incoming behaviour merged under a different EARS keyword - refused"
+
+  # 0 - the other half. A pending ruling blocks its own delta and nothing
+  # else; without this case the one above would also pass for a check that
+  # refuses everything, which is the halt rulings.md calls the worse failure.
+  drive_spec unrelated unrelated-spec.md 0 \
+    "an unrelated requirement allocated in the same window - let through"
+
+  # 0 - the window's own starting point, with nothing merged into it yet.
+  drive_spec raised raised-spec.md 0 \
+    "the spec as the ruling was raised - nothing has moved since"
+
+  # 2 - could not measure. A directory that is not a git work tree has no
+  # commit for the window to start at.
+  mkdir -p "$SELFWORK/not-a-repo/.claude/productizer" ||
+    die_unmeasured "could not lay out the not-a-repo case"
+  cp "$FIXDIR/raised-spec.md" "$SELFWORK/not-a-repo/.claude/productizer/spec.md"
+  GOT=0
+  PRODUCTIZER_RULING_SCOPE_SELFTEST="$SELFWORK/not-a-repo" bash "$0" \
+    --root "$SELFWORK/not-a-repo" \
+    > "$SELFWORK/not-a-repo.out" 2> "$SELFWORK/not-a-repo.err" || GOT=$?
+  tally not-a-repo 2 "$GOT" "a root outside any git work tree - the window has no start"
+
+  # 2 - bad usage, reaching the same code through the argument parser.
+  GOT=0
+  bash "$0" --frobnicate > "$SELFWORK/bad-usage.out" 2> "$SELFWORK/bad-usage.err" || GOT=$?
+  tally bad-usage 2 "$GOT" "an option this script does not take"
+
+  printf '    selftest cases driven: %d\n' "$CASES"
+  printf '%s' "$REPORT"
+  if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
+  printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
+    "each case exits with the code it declares"
+  # `if`, not `[ ... ] && ...`: a false test as the last statement of a list is
+  # a non-zero status, and `set -e` would end the run on the code that was NOT
+  # reached - a self-test killed by its own summary line.
+  REACHED=""
+  if [ "$REACHED_0" = 1 ]; then REACHED="$REACHED 0"; fi
+  if [ "$REACHED_1" = 1 ]; then REACHED="$REACHED 1"; fi
+  if [ "$REACHED_2" = 1 ]; then REACHED="$REACHED 2"; fi
+  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
+    "${REACHED:- none}"
+  printf '    NOT ASSERTED: every nested run carries the marker that switches the self-assertion off, so this mode measures the SWEEP and never the self-assertion count the ordinary run prints\n'
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  exit 0
+fi
 
 # Defaulting to the working directory has caused four separate silent-wrong-
 # answer bugs here: the script reads a directory that is not the repo and

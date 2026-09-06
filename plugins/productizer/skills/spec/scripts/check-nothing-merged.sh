@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-nothing-merged.sh [--root DIR] [--fixture DIR] [--merge-command PROGRAM]
-#                        [--version] [--help]
+#                        [--version] [--help] [--selftest]
 #
 # Asserts R24: IF AN INTENT CONTRADICTS AN ACTIVE REQUIREMENT, THEN THE
 # LIFECYCLE SHALL MERGE NOTHING.
@@ -119,6 +119,28 @@
 #   2  could not run - bad usage, no fixture, no contradiction checker, no
 #      python3, a premise that did not hold, or a merge path that never ran.
 #      Never confused with 0.
+#
+# --SELFTEST DRIVES ALL THREE, AND IT USES THE HOOK THE HEADER ALREADY NAMED.
+# `--merge-command` was written so that "every assertion above can be OBSERVED
+# FAILING by pointing it at a program that merges", and until now nothing
+# committed did the pointing - the hook existed and the falsification lived in
+# somebody's terminal history. Five cases run under `mktemp -d`: the default
+# contradiction path, which must merge nothing; a program written on the spot
+# that DOES merge, which must be caught; a merge path that errors, which is
+# not a spec the lifecycle declined to merge; an intent that does not
+# contradict, so R24's condition never occurred; and bad usage. Each runs THIS
+# script and its exit code is compared with the one the case declares.
+#
+# The spec that gets merged into is a COPY under the temporary directory. The
+# committed fixture is read and never written, so the second run measures the
+# same case as the first.
+#
+# Under --selftest the three codes mean: every case produced the code it
+# declares (0), at least one did not (1), and the cases could not be built or
+# driven at all (2). `--self-test` is accepted as an alias because the repo
+# spells it both ways. Note that the `--selftest` named at the top of this
+# header belongs to `contradiction-check.py` and always did; it is a
+# cross-reference to another tool's self-test, not a claim about this one.
 set -euo pipefail
 
 VERSION="check-nothing-merged 1.0"
@@ -129,9 +151,10 @@ SKILL="$(dirname "$HERE")"
 ROOT=""
 FIXTURE="$SKILL/fixtures/nothing-merged"
 MERGE_COMMAND=""
+MODE="measure"
 
 usage() {
-  printf 'usage: check-nothing-merged.sh [--version] [--help] [--root DIR] [--fixture DIR] [--merge-command PROGRAM]\n'
+  printf 'usage: check-nothing-merged.sh [--version] [--help] [--root DIR] [--fixture DIR] [--merge-command PROGRAM] [--selftest]\n'
   printf '  --root DIR             what printed paths are relative to. Defaults to the\n'
   printf '                         git top level, never to the working directory.\n'
   printf '  --fixture DIR          the standing case. Defaults to fixtures/nothing-merged\n'
@@ -139,6 +162,8 @@ usage() {
   printf '  --merge-command PROG   the path that would merge, run as\n'
   printf '                         PROG <sandbox-root> <intent-file> <requirement-id>.\n'
   printf '                         Defaults to request-ruling.sh beside this script.\n'
+  printf '  --selftest             drive this check against five built cases and read\n'
+  printf '                         the exit code off each. --self-test is an alias.\n'
   printf 'exit: 0 nothing merged - 1 something merged - 2 could not run\n'
 }
 
@@ -154,12 +179,129 @@ while [ "$#" -gt 0 ]; do
     --fixture=*)     FIXTURE="${1#--fixture=}";             shift ;;
     --merge-command) [ "$#" -ge 2 ] || die_unmeasured "--merge-command needs a program"; MERGE_COMMAND="$2"; shift 2 ;;
     --merge-command=*) MERGE_COMMAND="${1#--merge-command=}"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --) shift; break ;;
     -*) printf 'check-nothing-merged: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *)  printf 'check-nothing-merged: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
 [ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1"
+
+# ---------------------------------------------------------------------------
+# --selftest: build the cases, drive THIS script against each, read the exit
+# code off it. The committed fixture is READ by these cases and never written.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/check-nothing-merged-selftest.XXXXXX")" \
+    || die_unmeasured "cannot create a temporary directory to build the cases in; nothing was driven"
+  # Removed on every exit path, signal included. Nothing is written into the
+  # repository this script lives in, nor into the committed fixture.
+  trap 'rm -rf "$WORK"' EXIT HUP INT TERM
+
+  CASES=0; UPHELD=0; REPORT=""
+  REACHED_0=0; REACHED_1=0; REACHED_2=0
+
+  # `|| GOT=$?` on the same line as the command. A `$(...)` in an argument list
+  # and a pipeline both RESET `$?`, and reading the status one line later is
+  # how a self-test comes to report a pass it never observed.
+  drive() {
+    NAME="$1"; WANT="$2"; WHY="$3"; shift 3
+    GOT=0
+    bash "$0" "$@" > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
+    CASES=$((CASES + 1))
+    if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+    case "$GOT" in
+      0) REACHED_0=1 ;;
+      1) REACHED_1=1 ;;
+      2) REACHED_2=1 ;;
+    esac
+    REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
+"
+  }
+
+  # A program that MERGES. This is the falsification the header promised and
+  # never committed: it takes the incoming behaviour's id, writes it into the
+  # spec under `## Requirements`, gives it a change-log row and advances the
+  # counter - three of the four ways R24 can be violated, in one run. It exits
+  # 0, because a merge path that errors is a different case, below.
+  cat > "$WORK/merger.sh" <<'MERGER'
+#!/usr/bin/env bash
+# $1 sandbox root · $2 intent file · $3 the contradicted requirement id
+set -euo pipefail
+SPEC="$1/.claude/productizer/spec.md"
+awk '
+  /^- \*\*R1\*\*/ {
+    print
+    print "- **R2** — If a request body fails schema validation, then the service shall accept it anyway."
+    next
+  }
+  /^\| 2026-08-31 \|/ {
+    print
+    print "| 2026-09-01 | — | — | R2 | — | — | the losing side of a contradiction, merged. |"
+    next
+  }
+  { print }
+' "$SPEC" > "$SPEC.merged"
+sed -e 's/`R2` — allocate from here/`R3` — allocate from here/' "$SPEC.merged" > "$SPEC"
+rm -f "$SPEC.merged"
+MERGER
+
+  # A merge path that ERRORS. A spec left untouched because the program died
+  # is not a spec the lifecycle declined to merge, and reading the two the same
+  # way is a pass earned by an error.
+  printf '#!/usr/bin/env bash\nexit 3\n' > "$WORK/broken.sh"
+
+  # An intent that AGREES. R24's condition never occurs, so nothing about R24
+  # was tested and the run has to say so rather than pass.
+  mkdir -p "$WORK/agreeing-fixture" \
+    || die_unmeasured "could not lay out the agreeing-intent case"
+  cp "$FIXTURE/spec.md" "$WORK/agreeing-fixture/spec.md" \
+    || die_unmeasured "the committed fixture's spec.md could not be copied, so the premise case could not be built"
+  printf 'The incoming intent, restating the requirement rather than contradicting it.\n\nIf a request body fails schema validation, then the service shall reject it with 400.\n' \
+    > "$WORK/agreeing-fixture/intent.md"
+
+  # 0 - the default contradiction path, which is the thing under test. Without
+  # it every failing case below proves only that something is red.
+  drive nothing-merged 0 "the default contradiction path against the committed fixture" \
+    --root "$WORK"
+
+  # 1 - a path that merges. This is the case that decides whether the four
+  # assertions are worth anything at all.
+  drive a-merger 1 "a merge path that allocates R2, logs it and advances the counter" \
+    --root "$WORK" --merge-command "$WORK/merger.sh"
+
+  # 2 - the merge path never ran to completion.
+  drive merge-path-errors 2 "a merge path that exits 3, so the spec is untouched for the wrong reason" \
+    --root "$WORK" --merge-command "$WORK/broken.sh"
+
+  # 2 - the premise. An intent that does not contradict never entered the state
+  # R24 speaks about.
+  drive premise-not-met 2 "an intent that restates the requirement instead of contradicting it" \
+    --root "$WORK" --fixture "$WORK/agreeing-fixture"
+
+  # 2 - bad usage, reaching the same code through the argument parser.
+  drive bad-usage 2 "an option this script does not take" \
+    --root "$WORK" --frobnicate
+
+  printf '    selftest cases driven: %d\n' "$CASES"
+  printf '%s' "$REPORT"
+  if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
+  printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
+    "each case exits with the code it declares"
+  # `if`, not `[ ... ] && ...`: a false test as the last statement of a list is
+  # a non-zero status, and `set -e` would end the run on the code that was NOT
+  # reached - a self-test killed by its own summary line.
+  REACHED=""
+  if [ "$REACHED_0" = 1 ]; then REACHED="$REACHED 0"; fi
+  if [ "$REACHED_1" = 1 ]; then REACHED="$REACHED 1"; fi
+  if [ "$REACHED_2" = 1 ]; then REACHED="$REACHED 2"; fi
+  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
+    "${REACHED:- none}"
+  printf '    NOT ASSERTED: the merger case proves the four assertions can go red together; it does NOT prove each one goes red on its own, which is read off the a-merger case output by hand\n'
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  exit 0
+fi
 
 # The work tree, never the working directory. Defaulting to the working
 # directory has caused several silent wrong answers here: the script reads a

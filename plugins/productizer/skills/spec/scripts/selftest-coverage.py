@@ -194,7 +194,23 @@ def main():
     except OSError:
         refuse("%s could not be re-read for its continue-on-error setting. "
                "Unmeasured, not a pass" % workflow_rel)
-    wf_continue_on_error = "continue-on-error" in wf_text
+    # Parsed, never grepped. A raw substring here reads a COMMENT saying a step
+    # sets no continue-on-error as proof that one does - measured 2026-09-06,
+    # when exactly that comment turned all 32 tools into R40 findings. This is
+    # the same mention-versus-dispatch distinction this tool already makes for
+    # self-test flags; it simply was not applied here.
+    try:
+        import yaml as _yaml
+        _wf = _yaml.safe_load(wf_text) or {}
+        _steps = []
+        for _job in (_wf.get("jobs") or {}).values():
+            _steps.extend(_job.get("steps") or [])
+        wf_continue_on_error = any(
+            bool(_s.get("continue-on-error")) for _s in _steps
+            if isinstance(_s, dict))
+    except Exception:
+        refuse("%s could not be parsed to read continue-on-error. Unmeasured, "
+               "not a pass" % workflow_rel)
 
     # --- the tool set -----------------------------------------------------
     # rel path (or external name) -> record

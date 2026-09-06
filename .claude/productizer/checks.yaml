@@ -1817,8 +1817,8 @@ checks:
       - python3
     version_command: [./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh, --version]
     mode: batch
-    command: [./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh]
-    timeout_seconds: 180
+    command: ["./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh", "--probe-timeout", "60"]
+    timeout_seconds: 600
     exit_codes:
       pass: [0]
       fail: [1]        # a tool with no self-test, or a self-test nothing runs

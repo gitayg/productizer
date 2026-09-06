@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-spec-integrity.sh [--version] [--help] [--root DIR] [--max-versions N]
-#                         [--reuse-floor F]
+#                         [--reuse-floor F] [--selftest]
 #
 # Asserts the spec's three STRUCTURAL INVARIANTS, separately, against the real
 # spec of this repository. Everything else in the lifecycle is built on ids
@@ -215,12 +215,17 @@
 #   0  clean - all nine assertions held
 #   1  findings - at least one assertion did not hold
 #   2  could not run, or could not measure. Never 0.
+#
+# Under --selftest (--self-test is accepted too) the same three mean: every
+# case produced the exit code it declares and said what it was supposed to say
+# (0), at least one did not (1), and the corpus could not be driven at all (2).
 set -euo pipefail
 
 VERSION="check-spec-integrity 1.0"
 ROOT=""
 MAX_VERSIONS=400
 REUSE_FLOOR="0.50"
+MODE="measure"
 
 usage() {
   printf 'usage: check-spec-integrity.sh [--version] [--help] [--root DIR]\n'
@@ -231,6 +236,7 @@ usage() {
   printf '                    beyond N commits (default 400).\n'
   printf '  --reuse-floor F   word-set similarity below which an edited\n'
   printf '                    requirement reads as reuse (default 0.50).\n'
+  printf '  --selftest        drive the built-in corpus instead of a repository.\n'
 }
 
 die_unmeasured() { printf 'check-spec-integrity: %s\n' "$1" >&2; exit 2; }
@@ -251,10 +257,568 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die_unmeasured "--reuse-floor needs a number"
       REUSE_FLOOR="$2"; shift 2 ;;
     --reuse-floor=*) REUSE_FLOOR="${1#--reuse-floor=}"; shift ;;
+    --selftest|--self-test) MODE="selftest"; shift ;;
     -*) printf 'check-spec-integrity: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *) printf 'check-spec-integrity: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# --selftest. R39: one case per exit code this tool can return, each built as
+# a real git history in a sandbox, so nothing here reads or writes the
+# repository under test.
+#
+# THE HISTORIES ARE BUILT, NOT COMMITTED AS FIXTURES. R2 is a claim about
+# history and R8.2 is a claim about what a commit ADDED, so neither can be
+# posed by a directory of files: a case under `fixtures/` cannot carry a git
+# history of its own inside this repository. Every case is one or two commits
+# made at run time in the temporary directory this run already owns.
+#
+# EVERY CASE ASSERTS ITS OWN SENTENCE, NOT ONLY ITS EXIT CODE, and here that
+# is load-bearing rather than tidy: NINE assertions share exit 1. A retained
+# id, a renumbering, a revival, a drift past the floor, a counter below a used
+# id, a second living spec, a config that disclaims the invariant and an
+# unrecorded addition are one number to an exit-code-only corpus. A change
+# that turned a renumbering into a plain deletion - they differ by exactly
+# which of R2.2 and R2.3 fires - would stay green through it.
+#
+# THE PRECEDENCE IS DRIVEN TOO. `unmeasured-beats-findings` holds a real
+# counter violation AND has nothing added after its founding commit; the
+# header says the run must then exit 2 with the finding still printed.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SELF="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+  [ -f "$SELF" ] ||
+    die_unmeasured "cannot re-invoke this script for the self-test, so no case was driven"
+  command -v git >/dev/null ||
+    die_unmeasured "git is not on PATH, so no history could be built and no case was driven"
+
+  # `pwd -P` because the temporary directory is reached through a symlink on
+  # macOS and this check compares --root against a resolved git top level.
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-spec-integrity-selftest.XXXXXX")" ||
+    die_unmeasured "could not create a sandbox, so no case was driven"
+  SB="$(cd "$SB" && pwd -P)"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  ST=".claude/productizer"
+
+  new_repo() {
+    mkdir -p "$SB/$1/$ST"
+    git -c init.defaultBranch=main init -q "$SB/$1"
+    git -C "$SB/$1" config user.email "fixture@example.invalid"
+    git -C "$SB/$1" config user.name "check-spec-integrity selftest"
+  }
+  commit_all() {
+    git -C "$SB/$1" add -A
+    git -C "$SB/$1" -c commit.gpgsign=false commit -q -m "$2"
+  }
+  good_config() {
+    cat > "$SB/$1/$ST/config.json" <<'JSON'
+{ "product": { "name": "sandbox",
+               "spec_home": "example/home-repo",
+               "repos": ["example/home-repo"] },
+  "spec": { "path": ".claude/productizer/spec.md", "ids_are_permanent": true } }
+JSON
+  }
+  founding_spec() {
+    cat > "$SB/$1/$ST/spec.md" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R4` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+SPEC
+  }
+  # A case is: a founding commit, then a second commit carrying whatever the
+  # caller pipes in. `added` below then means "present here, absent at the
+  # commit before", which is the shape R8.2 is asserted over.
+  found_case() { new_repo "$1"; good_config "$1"; founding_spec "$1"; commit_all "$1" "founding"; }
+  head_spec()  { cat > "$SB/$1/$ST/spec.md"; commit_all "$1" "$2"; }
+
+  FAILED=0
+  DRIVEN=0
+
+  drive() {
+    # $1 case name, $2 expected exit, $3 expected sentence, $4.. argv override
+    local case_name="$1" want="$2" marker="$3"
+    shift 3
+    local rc=0
+    if [ "$#" -eq 0 ]; then set -- --root "$SB/$case_name"; fi
+    bash "$SELF" "$@" > "$SB/$case_name.out" 2> "$SB/$case_name.err" || rc=$?
+    DRIVEN=$((DRIVEN + 1))
+    local why=""
+    [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
+    # Both files handed to grep directly, never piped into it: under
+    # `set -o pipefail` a `cat a b | grep -q` reports 141 whenever grep matches
+    # early enough to SIGPIPE the cat, and `if !` reads that as no match.
+    if ! grep -q -- "$marker" "$SB/$case_name.out" "$SB/$case_name.err"; then
+      [ -n "$why" ] && why="$why; "
+      why="${why}its output does not say what it was supposed to say"
+    fi
+    if [ -z "$why" ]; then
+      printf '  held: case %-26s exit %d, and said so - %s\n' "$case_name" "$rc" "$marker"
+      return 0
+    fi
+    printf '  FINDING: case %-26s %s - expected: %s\n' "$case_name" "$why" "$marker"
+    FAILED=$((FAILED + 1))
+    return 0
+  }
+
+  # --- clean: R4 allocated, counter raised, addition recorded --------------
+  found_case clean
+  head_spec clean "allocate R4 and record it" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the view requirement was added |
+SPEC
+
+  # --- exit 1 --------------------------------------------------------------
+  # R4 is allocated and recorded in the same commit, so R8.2 is MEASURED here
+  # and the deletion of R2 is the only thing left to report. Without that the
+  # run exits 2 - nothing added after the founding commit - and the case would
+  # be asserting the precedence rule instead of the retention one. Measured,
+  # not reasoned: the first build of this case exited 2 and said so.
+  found_case id-deleted
+  head_spec id-deleted "delete R2 outright while allocating R4" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the view requirement was added |
+SPEC
+
+  found_case renumbered
+  head_spec renumbered "hand R2's sentence to R5" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R6` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R5** — The lifecycle shall keep requirement ids permanent, never reused.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R5 | renumbered from R2 |
+SPEC
+
+  # revived: superseded in a reachable commit, active again today.
+  found_case revived
+  head_spec revived "supersede R3" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+  Superseded by R4. Narrowed.
+- **R4** — The lifecycle shall record every merging classification.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the narrowed requirement was added |
+SPEC
+  head_spec revived "hand R3 back out as if it had never been retired" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall record every merging classification.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the narrowed requirement was added |
+SPEC
+
+  found_case drifted
+  head_spec drifted "rewrite R2 past the similarity floor" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — Nightly evaluation jobs must publish cost figures to the finance dashboard.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the view requirement was added |
+SPEC
+
+  found_case counter-low
+  head_spec counter-low "allocate R4 and drop the counter below it" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R3` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the view requirement was added |
+SPEC
+
+  found_case not-permanent
+  head_spec not-permanent "allocate R4" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the view requirement was added |
+SPEC
+  cat > "$SB/not-permanent/$ST/config.json" <<'JSON'
+{ "product": { "name": "sandbox",
+               "spec_home": "example/home-repo",
+               "repos": ["example/home-repo"] },
+  "spec": { "path": ".claude/productizer/spec.md", "ids_are_permanent": false } }
+JSON
+
+  found_case home-not-in-repos
+  head_spec home-not-in-repos "allocate R4" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the view requirement was added |
+SPEC
+  cat > "$SB/home-not-in-repos/$ST/config.json" <<'JSON'
+{ "product": { "name": "sandbox",
+               "spec_home": "example/somewhere-else",
+               "repos": ["example/home-repo"] },
+  "spec": { "path": ".claude/productizer/spec.md", "ids_are_permanent": true } }
+JSON
+
+  # A second allocator in the spec home: a counter AND requirement definitions.
+  found_case second-living-spec
+  head_spec second-living-spec "allocate R4" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+| 2026-01-02 | R4 | the view requirement was added |
+SPEC
+  cat > "$SB/second-living-spec/$ST/spec-draft.md" <<'SPEC'
+# A second living spec in the same home
+
+Next requirement id
+: `R9` — allocate from here, then increment.
+
+## Requirements
+
+- **R7** — The lifecycle shall do something else entirely.
+SPEC
+
+  found_case unrecorded-addition
+  head_spec unrecorded-addition "allocate R4 and record nothing" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+SPEC
+
+  # --- exit 2 --------------------------------------------------------------
+  found_case nothing-added
+
+  # A finding AND a premise that was never measured. 1 is a complete verdict
+  # and this run does not have one, so it exits 2 with the finding printed.
+  new_repo unmeasured-beats-findings
+  good_config unmeasured-beats-findings
+  cat > "$SB/unmeasured-beats-findings/$ST/spec.md" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R2` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+SPEC
+  commit_all unmeasured-beats-findings "founding, with the counter already below a used id"
+
+  found_case empty-changelog
+  head_spec empty-changelog "allocate R4 and empty the change log" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+SPEC
+
+  found_case no-changelog
+  head_spec no-changelog "allocate R4 and drop the change log" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R5` — allocate from here, then increment.
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+- **R4** — The lifecycle shall publish every view read-only.
+SPEC
+
+  found_case no-counter
+  head_spec no-counter "drop the counter" <<'SPEC'
+# Living spec — sandbox
+
+## Requirements
+
+- **R1** — The lifecycle shall hold exactly one living spec per product.
+- **R2** — The lifecycle shall keep requirement ids permanent, never reused.
+- **R3** — The lifecycle shall record every classification in the change log.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+SPEC
+
+  found_case no-requirements
+  head_spec no-requirements "empty the requirements section" <<'SPEC'
+# Living spec — sandbox
+
+Next requirement id
+: `R4` — allocate from here, then increment.
+
+## Design
+
+Prose, and no requirement definitions at all.
+
+## Change log
+
+| date | ids | why |
+|---|---|---|
+| 2026-01-01 | R1 | the founding commit |
+SPEC
+
+  new_repo no-config
+  founding_spec no-config
+  commit_all no-config "a spec with no config beside it"
+
+  new_repo no-spec-path
+  founding_spec no-spec-path
+  printf '{ "product": { "repos": ["example/home-repo"] }, "spec": {} }\n' \
+    > "$SB/no-spec-path/$ST/config.json"
+  commit_all no-spec-path "a config that names no spec path"
+
+  new_repo spec-absent
+  good_config spec-absent
+  commit_all spec-absent "a config naming a spec that is not there"
+
+  new_repo untracked
+  good_config untracked
+  printf 'a repository that committed something other than its spec\n' > "$SB/untracked/README"
+  commit_all untracked "founding, without the spec"
+  founding_spec untracked
+
+  git clone -q --depth 1 "file://$SB/clean" "$SB/shallow" ||
+    die_unmeasured "could not build a shallow clone, so the case that refuses one was never driven"
+
+  mkdir -p "$SB/not-a-work-tree/$ST"
+  good_config not-a-work-tree
+  founding_spec not-a-work-tree
+
+  printf 'not a directory\n' > "$SB/a-file"
+
+  # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If a repository where all nine
+  # assertions hold does not exit 0 and say so, every red case below would be
+  # red for that reason instead of its own and nothing would have been
+  # measured.
+  CLEAN_RC=0
+  bash "$SELF" --root "$SB/clean" > "$SB/clean.out" 2> "$SB/clean.err" || CLEAN_RC=$?
+  if [ "$CLEAN_RC" -ne 0 ] || ! grep -q 'assertions upheld: 9 of 9' "$SB/clean.out"; then
+    printf '  the clean case exited %d and did not report all nine assertions holding.\n' "$CLEAN_RC"
+    die_unmeasured "the corpus premise did not hold; unmeasured, not a pass"
+  fi
+  printf '  held: case %-26s exit 0, and said so - %s\n' "clean" "assertions upheld: 9 of 9"
+
+  drive id-deleted           1 'is not defined in the spec today'
+  drive renumbered           1 'The requirement was renumbered'
+  drive revived              1 'which is reuse in its unambiguous form'
+  drive drifted              1 'a different requirement wearing an old number'
+  drive counter-low          1 'which is not above'
+  drive not-permanent        1 'not true. A configuration that disclaims'
+  drive home-not-in-repos    1 'is not one of the entries in'
+  drive second-living-spec   1 'a second file in the spec home presents itself as a living spec'
+  drive unrecorded-addition  1 'no row in the `## Change log` table names it'
+
+  drive nothing-added        2 'the allocate-and-record path has never run'
+  drive unmeasured-beats-findings 2 'which is not above'
+  drive empty-changelog      2 'yielded no requirement id at all'
+  drive no-changelog         2 'has no `## Change log` section'
+  drive no-counter           2 'has no `Next requirement id` field'
+  drive no-requirements      2 'holds no requirement definitions'
+  drive no-config            2 'cannot read or parse'
+  drive no-spec-path         2 'declares no `spec.path` string'
+  drive spec-absent          2 'cannot read .claude/productizer/spec.md'
+  drive untracked            2 'is not tracked by git'
+  drive shallow              2 'this is a SHALLOW clone'
+  drive not-a-work-tree      2 'is not inside a git work tree'
+  drive max-versions         2 'Refusing rather than walking the newest' --root "$SB/clean" --max-versions 1
+  drive bad-max-versions     2 'must be a whole number'                  --root "$SB/clean" --max-versions x
+  drive bad-reuse-floor      2 'must lie between 0 and 1'                --root "$SB/clean" --reuse-floor 2
+  drive root-not-a-dir       2 'is not a directory'                      --root "$SB/a-file"
+
+  printf '  cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$((DRIVEN + 1))" "$FAILED"
+  if [ "$FAILED" -ne 0 ]; then
+    printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2, and every case asserts which of the nine assertions produced its finding as well as which code.\n'
+  printf '  NOT ASSERTED: the two blind spots the header names - a second living spec OUTSIDE the spec home directory, and repositories other than this one - are out of scope by design rather than untested, so no case here can pose them.\n'
+  exit 0
+fi
 
 case "$MAX_VERSIONS" in
   ''|*[!0-9]*) die_unmeasured "--max-versions must be a whole number, got '$MAX_VERSIONS'" ;;

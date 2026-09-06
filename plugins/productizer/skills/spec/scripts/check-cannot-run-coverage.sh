@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# check-cannot-run-coverage.sh [--root DIR] [--fixture DIR] [--runner PATH] [--version] [--help]
+# check-cannot-run-coverage.sh [--root DIR] [--fixture DIR] [--runner PATH]
+#                              [--selftest|--self-test] [--version] [--help]
 #
 # A CHECK THAT REACHED NO VERDICT MUST RECORD NO COVERAGE COUNT.
 #
@@ -44,6 +45,12 @@
 #   2  could not run - no fixture, no runner, an unreadable result, or a premise
 #      that did not hold
 #
+# Under --selftest the same three mean: every case produced the exit code this
+# contract declares for it (0), at least one did not (1), and the corpus could
+# not be built at all (2). `--self-test` is accepted as an alias, because this
+# repository spells the flag both ways and a tool that answers only one
+# spelling has a self-test the next caller cannot find.
+#
 # WHAT IT PRINTS. One BARE repo-relative path per file examined, which is what
 # the runner parses as coverage. Findings and notes are INDENTED. Nothing
 # absolute is printed: this text is tailed into a committed result file.
@@ -52,7 +59,7 @@ set -euo pipefail
 VERSION="check-cannot-run-coverage 1.0"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT=""; FIXTURE=""; RUNNER=""
+ROOT=""; FIXTURE=""; RUNNER=""; SELFTEST=""
 
 die_unmeasured() { printf 'check-cannot-run-coverage: %s\n' "$1" >&2; exit 2; }
 
@@ -66,12 +73,155 @@ while [ $# -gt 0 ]; do
     --fixture=*) FIXTURE="${1#--fixture=}"; shift ;;
     --runner)    [ "$#" -ge 2 ] || die_unmeasured "--runner needs a path";  RUNNER="$2";  shift 2 ;;
     --runner=*)  RUNNER="${1#--runner=}";   shift ;;
+    --selftest|--self-test) SELFTEST=1; shift ;;
     --) shift; break ;;
     -*) die_unmeasured "unknown option: $1. Run with --help for the contract." ;;
     *)  die_unmeasured "takes no positional arguments; got: $1." ;;
   esac
 done
 [ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1."
+
+
+# --------------------------------------------------------------- --selftest
+#
+# R39 - EVERY CHECK TOOL SHALL CARRY A SELF-TEST THAT REACHES EACH EXIT CODE IT
+# CAN RETURN. All three of this file's are reachable and all three are driven
+# below.
+#
+# THE FINDING CASE NEEDS A RUNNER THAT MISBEHAVES, and the real one does not -
+# which is the whole reason `--runner` exists as an option. Each case here
+# points this check at a STUB runner written into a temporary directory: one
+# that records a coverage count on a row that reached no verdict (the defect
+# this check was built for), one that records only `missing_tool` rows (the
+# empty set this check exists to fill, which is a premise failure and not a
+# pass), one that deletes the honest zero (the same bug inverted), and one that
+# writes nothing at all. The stub is where the defect lives because the defect
+# is a property of what a runner RECORDS, and this check's whole subject is the
+# result file rather than the exit code that produced it.
+#
+# Nothing is written into the repository. The corpus is removed on every exit
+# path, signal included.
+if [ -n "$SELFTEST" ]; then
+  SELF_TMP="$(mktemp -d)" || {
+    printf 'check-cannot-run-coverage: cannot create a temporary directory to build the self-test corpus in. Unmeasured, not a pass.\n' >&2
+    exit 2; }
+  trap 'rm -rf "$SELF_TMP"' EXIT HUP INT TERM
+
+  mkdir -p "$SELF_TMP/fixture"
+  : > "$SELF_TMP/fixture/checks.yaml"
+  : > "$SELF_TMP/fixture/changed.txt"
+
+  # write_stub <name> <json body> - a runner that ignores every argument but
+  # --out and writes the result this case needs the check to read.
+  write_stub() {
+    stub="$SELF_TMP/$1-runner.sh"
+    cat > "$stub" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --out) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] || exit 2
+cat > "$out" < "$0.json"
+exit 3
+STUB
+    printf '%s' "$2" > "$stub.json"
+    printf '%s\n' "$stub"
+  }
+
+  # A `timeout` row - no verdict - carrying a coverage count nobody measured,
+  # beside a check that ran and recorded a real one. This is the defect.
+  OFFENDER_JSON='{"checks":[{"id":"killed","status":"timeout","coverage":{"observed":{"covered":0}}},{"id":"ran","status":"pass","coverage":{"observed":{"covered":2}}}]}'
+  # The same result with the offending key removed: clean.
+  CLEAN_JSON='{"checks":[{"id":"killed","status":"timeout"},{"id":"ran","status":"pass","coverage":{"observed":{"covered":2}}}]}'
+  # A cannot-run row by the ONE mechanism that never carried a coverage block.
+  # The premise does not hold and the run must refuse rather than pass.
+  MISSING_ONLY_JSON='{"checks":[{"id":"absent","status":"missing_tool"},{"id":"ran","status":"pass","coverage":{"observed":{"covered":2}}}]}'
+  # No cannot-run row at all: same premise failure, different way in.
+  NO_CANNOT_JSON='{"checks":[{"id":"ran","status":"pass","coverage":{"observed":{"covered":2}}}]}'
+  # No rows at all.
+  EMPTY_JSON='{"checks":[]}'
+  # The mirror image: nothing records a coverage count, including the check
+  # that RAN. Deleting a measured zero is this same bug pointed the other way.
+  NO_HONEST_JSON='{"checks":[{"id":"killed","status":"timeout"},{"id":"ran","status":"pass"}]}'
+
+  SELF_CASES=0
+  SELF_UPHELD=0
+
+  # The exit code is captured into a variable on the SAME LINE as the command.
+  # A command substitution in an argument list resets $?, so reading the status
+  # inside the call below would report the status of the call.
+  record() { # <case> <expected> <observed> <what the case is>
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$3" = "$2" ]; then
+      SELF_UPHELD=$((SELF_UPHELD + 1)); verdict="held"
+    else
+      verdict="NOT HELD"
+    fi
+    printf '      %-28s expected %s  got %s  %s  %s\n' "$1" "$2" "$3" "$verdict" "$4"
+  }
+
+  drive() { # <case> <expected> <stub json> <what the case is>
+    stub="$(write_stub "$1" "$3")"
+    got=0
+    bash "$0" --fixture "$SELF_TMP/fixture" --runner "$stub" \
+      > "$SELF_TMP/$1.out" 2> "$SELF_TMP/$1.err" || got=$?
+    record "$1" "$2" "$got" "$4"
+  }
+
+  printf '    selftest: %s\n' "$VERSION"
+
+  # The committed fixture and the real runner: the case this check runs on
+  # every CI invocation, driven here so a green self-test is not green over
+  # stubs alone.
+  got=0
+  bash "$0" > "$SELF_TMP/real.out" 2> "$SELF_TMP/real.err" || got=$?
+  record real-fixture 0 "$got" "the committed timeout-zero fixture through the real runner"
+
+  drive clean 0 "$CLEAN_JSON" \
+    "a row with no verdict carries no coverage key, and the measured zero survives"
+  drive coverage-on-no-verdict 1 "$OFFENDER_JSON" \
+    "a killed check recorded a count nobody measured"
+  drive honest-zero-deleted 1 "$NO_HONEST_JSON" \
+    "the mirror image: a check that RAN records no coverage at all"
+  drive premise-missing-tool-only 2 "$MISSING_ONLY_JSON" \
+    "the only cannot-run row is missing_tool, so the empty set is still empty"
+  drive premise-no-cannot-run 2 "$NO_CANNOT_JSON" \
+    "no row reached no verdict, so nothing was exercised"
+  drive premise-no-rows 2 "$EMPTY_JSON" \
+    "the result records no checks at all"
+
+  got=0
+  bash "$0" --fixture "$SELF_TMP/no-such-fixture" \
+    > "$SELF_TMP/nofix.out" 2> "$SELF_TMP/nofix.err" || got=$?
+  record missing-fixture 2 "$got" "the standing case is not there, which is unmeasured"
+
+  got=0
+  bash "$0" --runner "$SELF_TMP/no-such-runner.sh" \
+    > "$SELF_TMP/norun.out" 2> "$SELF_TMP/norun.err" || got=$?
+  record missing-runner 2 "$got" "there is no runner to drive"
+
+  got=0
+  bash "$0" --not-a-real-option > "$SELF_TMP/badopt.out" 2> "$SELF_TMP/badopt.err" || got=$?
+  record unknown-option 2 "$got" "bad usage is refused, never answered"
+
+  got=0
+  bash "$0" --fixture > "$SELF_TMP/noval.out" 2> "$SELF_TMP/noval.err" || got=$?
+  record option-without-value 2 "$got" "an option missing its argument is refused"
+
+  if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
+  printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
+    "each case exits with the code this file's contract declares for it"
+  printf '    exit codes reached: 0, 1 and 2 - the whole contract.\n'
+  printf '    NOT ASSERTED: the WORDING of any finding, and the exit code of the runner itself, which this check deliberately does not read. A case that went red for the wrong reason is invisible here.\n'
+  [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
+  exit 0
+fi
 
 [ -n "$FIXTURE" ] || FIXTURE="$HERE/../fixtures/timeout-zero"
 [ -d "$FIXTURE" ] || die_unmeasured "no fixture directory; the standing case is missing, which is unmeasured and not a pass"

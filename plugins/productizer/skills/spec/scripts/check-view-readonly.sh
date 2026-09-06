@@ -320,6 +320,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT=""
 BUILDER=""
 FIXTURE=""
+MODE="measure"
 
 die_unmeasured() { printf 'check-view-readonly: %s\n' "$1" >&2; exit 2; }
 
@@ -327,6 +328,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$0"; exit 0 ;;
+    # `--self-test` is an alias, not a second flag: this repository spells the
+    # same obligation both ways and a tool that answers only one spelling reads
+    # as carrying no self-test to whichever scanner is looking for the other.
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --root)      [ "$#" -ge 2 ] || die_unmeasured "--root needs a path";    ROOT="$2";    shift 2 ;;
     --root=*)    ROOT="${1#--root=}";       shift ;;
     --builder)   [ "$#" -ge 2 ] || die_unmeasured "--builder needs a path"; BUILDER="$2"; shift 2 ;;
@@ -385,6 +390,118 @@ _badrow="$(awk -F'\t' '/^#/ || NF == 0 { next }
                        { for (i = 1; i <= 6; i++) if ($i == "") { printf "%d ", NR; bad = 1; break } }
                        END { exit bad ? 1 : 0 }' "$CASES" || :)"
 [ -z "$_badrow" ] || die_unmeasured "cases.tsv has rows that are not six non-empty tab-separated fields (line(s): $_badrow). A case file this check cannot read is not one it may guess at"
+
+# ---------------------------------------------------------------------------
+# --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
+#
+# Four cases, one per way the contract above can be reached, each driven
+# through THIS script so the argument handling and the premise guards are on
+# the path too. No case is asserted by reading source: the exit code is read
+# off a real run.
+#
+#   clean          the committed corpus and the committed builder       -> 0
+#   wrong-name     one corpus row's expected capability NAME changed to
+#                  a name that page never asks for, so the classifier
+#                  and the corpus disagree                              -> 1
+#   no-corpus      a fixture directory holding no cases.tsv             -> 2
+#   bad-usage      an option the parser does not take                   -> 2
+#
+# THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If the committed corpus does not
+# exit 0, every case below would be red for that reason rather than its own -
+# exit 2 for the whole self-test, never a pass on the three that followed.
+#
+# THE MUTATED CORPUS IS A COPY UNDER mktemp AND THE REPOSITORY IS NOT TOUCHED.
+# A1 hashes every tracked file before and after the builder runs; a self-test
+# that wrote a corpus file into the tree would make A1 report the builder
+# moving a repository file, which is the exact false positive this check's own
+# limitations block warns about.
+#
+# WHAT THIS SELF-TEST DOES NOT ASSERT, printed rather than passed silently: it
+# reads the exit CODE and never the wording of a finding, so a case that went
+# red for the wrong reason is invisible here.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-view-readonly-selftest.XXXXXX")" \
+    || die_unmeasured "cannot create a temporary directory to build the self-test's corpus in; nothing was driven"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  mkdir -p "$SB/no-corpus"
+  cp -R "$FIXTURE" "$SB/mutated" \
+    || die_unmeasured "the fixture corpus could not be copied, so the case that must go red was never built. Unmeasured, not a pass"
+
+  # ONE ROW, ONE FIELD. The `names` column of the first spelling case is the
+  # set of capability names the classifier must come back with; pointing it at
+  # a name that page never asks for is the smallest possible disagreement
+  # between the corpus and the classifier, and it is the only difference
+  # between this case and the clean one - so the exit code moving from 0 to 1
+  # is attributable to it and to nothing else.
+  #
+  # awk writes a new file rather than editing in place: `sed -i` takes an
+  # argument on BSD and none on GNU, and this repository has shipped that
+  # difference as a CI-only failure before.
+  awk -F'\t' 'BEGIN { OFS = "\t" }
+              $1 == "bracket-double-quote" { $5 = "a-capability-this-page-never-asks-for" }
+              { print }' \
+      "$FIXTURE/cases.tsv" > "$SB/mutated/cases.tsv" \
+    || die_unmeasured "the corpus copy could not be rewritten, so the case that must go red was never built. Unmeasured, not a pass"
+  if cmp -s "$FIXTURE/cases.tsv" "$SB/mutated/cases.tsv"; then
+    die_unmeasured "rewriting the corpus copy changed nothing, so the wrong-name case is identical to the clean one and would prove only that the clean case passes twice. Unmeasured, not a pass"
+  fi
+
+  SELF_CASES=0
+  SELF_FAILED=0
+
+  # $1 case, $2 expected exit, $3 what the case is, then the argv to drive.
+  #
+  # `|| _rc=$?` on the SAME LINE as the command. Three of the four cases exit
+  # non-zero on purpose, `set -e` would end the run at the first one, and a
+  # `$(...)` or a pipeline between the command and the read of `$?` resets it -
+  # which is how a self-test reports four passes having measured none.
+  self_drive() {
+    _name="$1"; _want="$2"; _why="$3"
+    shift 3
+    _rc=0
+    bash "$0" "$@" > "$SB/$_name.out" 2> "$SB/$_name.err" || _rc=$?
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$_rc" = "$_want" ]; then
+      printf '  held:    case %-12s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+    else
+      printf '  FINDING: case %-12s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  SELF_RC=0
+  bash "$0" --root "$ROOT" --builder "$BUILDER" --fixture "$FIXTURE" \
+    > "$SB/clean.out" 2> "$SB/clean.err" || SELF_RC=$?
+  if [ "$SELF_RC" -ne 0 ]; then
+    printf '  the clean case exited %d, not 0.\n' "$SELF_RC"
+    die_unmeasured "the committed corpus did not produce a clean run, so every failing case below would be red for that reason instead of its own. Unmeasured, not a corpus that held"
+  fi
+  SELF_CASES=1
+  printf '  held:    case %-12s expected %s  observed %s  %s\n' "clean" "0" "0" \
+    "the committed corpus and the committed builder: nothing moved, and every case reached the classification and the names it declares"
+
+  self_drive wrong-name 1 \
+    "one corpus row expects a capability name the page never asks for, so the classifier and the corpus disagree and the disagreement is a finding" \
+    --root "$ROOT" --builder "$BUILDER" --fixture "$SB/mutated"
+  self_drive no-corpus 2 \
+    "a fixture directory with no cases.tsv: the classifier would run against the real page alone, and one that matched nothing would call that page clean too - unmeasured, never a pass" \
+    --root "$ROOT" --builder "$BUILDER" --fixture "$SB/no-corpus"
+  self_drive bad-usage 2 \
+    "an option this parser does not take: bad usage is refused rather than ignored" \
+    --root "$ROOT" --no-such-option
+
+  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$SELF_CASES" "$SELF_FAILED"
+  printf '  NOT ASSERTED: the wording of any finding. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
+  if [ "$SELF_FAILED" -ne 0 ]; then
+    printf 'check-view-readonly: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists and reaches 0, 1 and 2 by driving the real check, not by reading its source.\n'
+  exit 0
+fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

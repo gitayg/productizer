@@ -125,6 +125,7 @@ ROOT=""
 FIXTURE="$SKILL/fixtures/untrusted-execution"
 GATE="$SKILL/templates/publish-gate.sh"
 SELECT="all"
+MODE="measure"
 
 die_unmeasured() { printf 'check-untrusted-execution: %s\n' "$1" >&2; exit 2; }
 
@@ -132,6 +133,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$0"; exit 0 ;;
+    # `--self-test` is an alias, not a second flag: this repository spells the
+    # same obligation both ways and a tool that answers only one spelling reads
+    # as carrying no self-test to whichever scanner is looking for the other.
+    --selftest|--self-test) MODE="selftest"; shift ;;
     --root)      [ "$#" -ge 2 ] || die_unmeasured "--root needs a path";    ROOT="$2";    shift 2 ;;
     --root=*)    ROOT="${1#--root=}";       shift ;;
     --fixture)   [ "$#" -ge 2 ] || die_unmeasured "--fixture needs a path"; FIXTURE="$2"; shift 2 ;;
@@ -188,6 +193,113 @@ SKELETON="$FIXTURE/checks.yaml.in"
 [ -f "$CASES" ]   || die_unmeasured "the fixture has no cases.yaml"
 command -v python3 >/dev/null 2>&1 || die_unmeasured "python3 is not installed; the fixture could not be read"
 python3 -c 'import yaml' || die_unmeasured "python3 has no yaml module; the fixture could not be read"
+
+# ---------------------------------------------------------------------------
+# --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
+#
+# Four cases, one per way the contract above can be reached, each driven
+# through THIS script so the argument handling and the premise guards are on
+# the path too. No case is asserted by reading source: the exit code is read
+# off a real run.
+#
+#   clean           the committed gate and corpus, over the three groups
+#                   the declared check selects                            -> 0
+#   gate-allows-all a gate that exits 0 on every command it is handed,
+#                   asserted over r17-block alone                         -> 1
+#   bad-group       an --assert group this tool does not know             -> 2
+#   no-fixture      a fixture directory that is not there                 -> 2
+#
+# THE SELECTION MATTERS AND IS NOT COSMETIC. A bare run asserts `all`, and this
+# file's own contract says a bare run exits 1 today - so `all` is useless as
+# the clean case. The clean case drives exactly the argv the declared check
+# `untrusted-execution` declares, which is the invocation whose exit code the
+# suite actually reads.
+#
+# THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If the committed gate and corpus
+# do not exit 0 over that selection, every case below would be red for that
+# reason rather than its own - exit 2 for the whole self-test, never a pass on
+# the three that followed.
+#
+# EVERY PAYLOAD STAYS INERT AND NOTHING IS WRITTEN INTO THE REPOSITORY. The
+# broken gate is a copy under mktemp that judges nothing and runs nothing, and
+# the directory goes on every exit path, signal included.
+#
+# WHAT THIS SELF-TEST DOES NOT ASSERT, printed rather than passed silently: it
+# reads the exit CODE and never the wording of a finding, so a case that went
+# red for the wrong reason is invisible here.
+# ---------------------------------------------------------------------------
+if [ "$MODE" = "selftest" ]; then
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/check-untrusted-execution-selftest.XXXXXX")" \
+    || die_unmeasured "cannot create a temporary directory to build the self-test's inputs in; nothing was driven"
+  trap 'rm -rf "$SB"' EXIT HUP INT TERM
+
+  # The production defect the r17-block assertions exist to catch: a gate that
+  # lets every command through, publishes and deploys included. It EXECUTES
+  # NOTHING - it reads the payload and exits 0 - so the corpus stays as inert
+  # under this gate as it is under the real one.
+  cat > "$SB/gate-allows-all.sh" <<'SELFTEST_GATE'
+#!/usr/bin/env bash
+# Built by check-untrusted-execution.sh --selftest. Never registered, never
+# reachable from the repository: it lives under mktemp for one run.
+cat >/dev/null
+exit 0
+SELFTEST_GATE
+  chmod +x "$SB/gate-allows-all.sh"
+
+  SELF_CASES=0
+  SELF_FAILED=0
+
+  # $1 case, $2 expected exit, $3 what the case is, then the argv to drive.
+  #
+  # `|| _rc=$?` on the SAME LINE as the command. Three of the four cases exit
+  # non-zero on purpose, `set -e` would end the run at the first one, and a
+  # `$(...)` or a pipeline between the command and the read of `$?` resets it -
+  # which is how a self-test reports four passes having measured none.
+  self_drive() {
+    _name="$1"; _want="$2"; _why="$3"
+    shift 3
+    _rc=0
+    bash "$0" "$@" > "$SB/$_name.out" 2> "$SB/$_name.err" || _rc=$?
+    SELF_CASES=$((SELF_CASES + 1))
+    if [ "$_rc" = "$_want" ]; then
+      printf '  held:    case %-16s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+    else
+      printf '  FINDING: case %-16s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  SELF_RC=0
+  bash "$0" --root "$ROOT" --fixture "$FIXTURE" --gate "$GATE" \
+    --assert r17-block,r18,r22 > "$SB/clean.out" 2> "$SB/clean.err" || SELF_RC=$?
+  if [ "$SELF_RC" -ne 0 ]; then
+    printf '  the clean case exited %d, not 0.\n' "$SELF_RC"
+    die_unmeasured "the committed gate and corpus did not produce a clean run over r17-block,r18,r22 - the selection the declared check uses - so every failing case below would be red for that reason instead of its own. Unmeasured, not a corpus that held"
+  fi
+  SELF_CASES=1
+  printf '  held:    case %-16s expected %s  observed %s  %s\n' "clean" "0" "0" \
+    "the committed gate and corpus over r17-block,r18,r22: every publish and deploy blocked, every ordinary command let through, and no payload executed"
+
+  self_drive gate-allows-all 1 \
+    "a gate that exits 0 on everything it is handed: the publishes and deploys R17 obliges it to block are not blocked" \
+    --root "$ROOT" --fixture "$FIXTURE" --gate "$SB/gate-allows-all.sh" --assert r17-block
+  self_drive bad-group 2 \
+    "an --assert group this tool does not know: a selection it cannot read is refused rather than silently narrowed to nothing" \
+    --root "$ROOT" --assert there-is-no-such-group
+  self_drive no-fixture 2 \
+    "no fixture directory at the path given, so no case was driven at all - unmeasured, never a pass" \
+    --root "$ROOT" --fixture "$SB/there-is-no-fixture-here" --assert r17-block
+
+  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+    "$SELF_CASES" "$SELF_FAILED"
+  printf '  NOT ASSERTED: the wording of any finding. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
+  if [ "$SELF_FAILED" -ne 0 ]; then
+    printf 'check-untrusted-execution: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  printf '  R39 for this tool: the self-test exists and reaches 0, 1 and 2 by driving the real check, not by reading its source.\n'
+  exit 0
+fi
 
 if [ "$((WANT_R17B + WANT_R17D))" -gt 0 ]; then
   [ -f "$GATE" ] || die_unmeasured "no publish gate at the path given; there is nothing to drive"
