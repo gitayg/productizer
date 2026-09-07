@@ -685,7 +685,21 @@ for entry in \
   # is false fails the whole run, and every template without an example block
   # takes that branch.
   if grep -q 'EXAMPLE:BEGIN' "$tpl"; then scaffolded_form "$tpl"; cmpto="$STRIPPED"; fi
-  gained="$(diff -u -- "$inst" "$cmpto" 2>/dev/null | grep -c '^+[^+]' || true)"
+  # stderr is NOT suppressed here, deliberately. `$cmpto` is `$STRIPPED` for
+  # every template carrying an example block, and that is a temporary file this
+  # script made - a shape that has already failed once, when `scaffolded_form`
+  # returned through `$(...)` and its `mktemp -d` died with the subshell, so the
+  # diff compared against a path that was gone. With stderr hidden that reads as
+  # `gained=0`, which renders as NO DRIFT: a measurement nobody took, reported
+  # as a clean result. So the file is checked before the diff and a missing one
+  # is UNMEASURED, not zero.
+  if [ ! -f "$cmpto" ] || [ ! -r "$cmpto" ]; then
+    UNMEASURED=$((UNMEASURED + 1))
+    printf '  UNMEASURED: %s could not be compared - the form to compare against (%s) is not a readable file. Not a finding of no drift.\n' \
+      "$relp" "$cmpto"
+    continue
+  fi
+  gained="$(diff -u -- "$inst" "$cmpto" | grep -c '^+[^+]' || true)"
   gained="${gained:-0}"
   [ "$gained" -gt 0 ] || continue
   gained_any=1
