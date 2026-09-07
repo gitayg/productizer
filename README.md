@@ -15,6 +15,8 @@ productizer/
 │   └── productizer/
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # the plugin manifest
+│       ├── commands/
+│       │   └── upgrade.md        # /productizer:upgrade
 │       └── skills/
 │           └── spec/
 │               ├── SKILL.md
@@ -37,7 +39,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.54.0"`.
+`plugin.json` sets `"version": "4.55.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -192,6 +194,18 @@ organisation without each person toggling it:
    the probe's counts rather than its exit status, because the probe always
    exits 0; a count whose line is missing from the output is treated as **not
    measured** and fails, never as a zero.
+   Upgraded the plugin in a repo scaffolded by an older version? Run
+   `/productizer:upgrade`. It compares five things — the version that
+   scaffolded the repo, installed executables against the templates they came
+   from, schema versions, checks the plugin ships that the repo never
+   declared, and templates that gained content — and **changes nothing**: it
+   reports the drift and the exact diff, and a person applies each one. It
+   never executes anything from the repo it is reading, and it deliberately
+   does NOT follow `spec.path` from that repo's config, because following it
+   would let a foreign repo choose what gets opened. Exit `3` outranks `1`: a
+   dimension it could not measure beats findings, because a report with a hole
+   in it has not found nothing.
+
    Changing `.claude/productizer/spec.md` too? Run `scripts/spec-doctor.sh`
    first. It runs the existing spec checks and changes nothing: `0` clean, `1`
    findings, `2` a section could not run at all — which outranks findings,

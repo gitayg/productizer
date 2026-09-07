@@ -9,7 +9,7 @@ would become and pairing it with the active requirement it collides with.
 
 It exists because the two numbers answer different questions and get confused:
 
-  contradiction-check.py --selftest   recall 0.70 over its own 21-pair corpus
+  contradiction-check.py --selftest   recall 0.94 over its own 33-pair corpus
   solver-probe.py                     recall over THIS corpus's 16 must-halt cases
 
 The second number is the honest one for the gap this corpus was built to attack.

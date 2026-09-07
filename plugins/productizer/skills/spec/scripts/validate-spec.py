@@ -88,6 +88,17 @@ Scope
     is. See the `Discovery` section below for why declaration and not a
     filename glob is authoritative.
 
+    `--repo` DESCRIBES A WORK TREE and nothing else. It opens no network
+    connection, follows no repository binding, and joins to ROOT only
+    `spec.path`. A repo whose spec lives elsewhere -- `product.spec_kind:
+    store`, the layout in `references/spec-stores.md` -- is REFUSED at exit
+    4 rather than read: the file at the local spec path there is a fetched
+    cache of another repository, and a cache reported as checked is a pass
+    over a file that is not the spec. `product.spec_path` is a path inside
+    that other repository and is never joined to ROOT; a declared path that
+    leaves ROOT is refused for the same reason `check-spec-home-stop.sh`
+    refuses it.
+
     See the note on `check_spec_counts` for what was measured on a real
     two-file split, and for the one cost of a split that is STILL not enforced
     after this -- nothing sums the parts, so once each header carries its own
@@ -1451,10 +1462,73 @@ def read_text(path):
 # other direction: to find files the config does NOT list and refuse to report
 # a clean result over them. A repo that splits its spec and forgets to say so
 # gets an error naming the file, not a confident pass.
+#
+# THE SECOND HALF OF THE RULE: `spec.path` is the ONLY key resolved against
+# ROOT. Two neighbouring keys look like they answer the same question and do
+# not, and both were read by nothing until the refusals below existed:
+#
+#   `product.spec_path`  a path inside `product.spec_repo` at
+#                        `product.spec_ref`. `references/spec-stores.md`
+#                        reads it as "Fetch `spec_path` from `spec_repo` at
+#                        `spec_ref`" -- remote-scoped by construction.
+#                        Joining it to ROOT names a local file nobody
+#                        declared, so it is never joined; when it disagrees
+#                        with `spec.path` that is two answers to one
+#                        question, and neither is used.
+#   `product.spec_kind`  `store` says the spec is not in this work tree at
+#                        all. Whatever sits at the local spec path is then
+#                        the cache every consuming repo keeps, and checking
+#                        a cache and printing `0 error(s)` is the confident
+#                        wrong answer this file exists to refuse. Measured
+#                        before the guard: a store-shaped tree with a
+#                        cached spec exited 0, reporting `1 file(s)
+#                        checked: 0 error(s), 0 warning(s)`.
+#
+# P4 -- A REPOSITORY BEING EXAMINED NEVER CHOOSES WHAT RUNS -- is what
+# bounds how far a config may aim this. Reading a path a config names is NOT
+# executing something it names, and nothing here execs, forks or fetches:
+# the whole discovery surface is `open()` on files under ROOT. What a config
+# can still choose is WHICH file, and two of those choices are refused:
+#
+#   - a path that LEAVES ROOT (absolute, or climbing out with `..`). A
+#     cloned repo would otherwise aim a reader at any file on the machine,
+#     and the contents of what is read are quoted back in these
+#     diagnostics -- so the escape is a disclosure surface even though it is
+#     not code execution. `check-spec-home-stop.sh` already refuses this
+#     shape; the two disagreeing was a gap of its own.
+#   - a config VALUE reaching the report unshaped. These lines are parsed
+#     one per line by other tools, so `as_datum` collapses whitespace and
+#     truncates before any config string is printed: a repo does not get to
+#     write a diagnostic line of its own either.
+#
+# What is deliberately NOT done: no binding is followed. `--repo` never
+# fetches `spec_repo`, never runs a command a config names, and never reads
+# a credential. A store is checked by pointing `--repo` at a checkout of the
+# store -- an operator's decision, not a config's.
 
 CONFIG_PATH = ".claude/productizer/config.json"
 DEFAULT_SPEC_PATH = ".claude/productizer/spec.md"
 CONSTITUTION_NAME = "constitution.md"
+SPEC_KINDS = ("home", "store")
+
+
+def as_datum(value, limit=120):
+    """A config-supplied string, rendered safe to put in a one-line message.
+
+    P4 -- a repository being examined never chooses what runs -- has a quieter
+    second half here: it does not get to choose the SHAPE of the report
+    either. Every line this script prints is read line by line by other tools
+    (`check-superseded-text.sh` reads `--list-files` that way), so a config
+    value carrying a newline could forge a diagnostic line of its own, and one
+    carrying a megabyte could bury the real finding. Whitespace is collapsed,
+    the value is truncated and quoted, and it is never interpreted.
+    """
+    text = " ".join(str(value).split())
+    if not text:
+        return "(empty)"
+    if len(text) > limit:
+        text = text[:limit] + "..."
+    return "`%s`" % text
 
 
 @dataclass
@@ -1481,6 +1555,17 @@ def declared_spec_paths(root):
     A config that exists and cannot be parsed is a REFUSAL, not a fallback to
     the default. Falling back would answer confidently about a repo whose own
     statement of where its spec lives could not be read.
+
+    `spec.path` IS THE ONLY KEY RESOLVED AGAINST ROOT, and the three refusals
+    below exist because two other keys look like they name the same thing and
+    do not. `product.spec_path` is a path INSIDE `product.spec_repo` at
+    `product.spec_ref` -- `references/spec-stores.md` reads it as *"Fetch
+    `spec_path` from `spec_repo` at `spec_ref`"* -- so joining it to ROOT
+    names a local file nobody declared. `product.spec_kind: store` says the
+    spec is not in this work tree at all, which makes anything at the local
+    path a fetched cache. Both are refusals rather than picks, because the
+    failure they otherwise produce is the one this file exists to refuse: a
+    confident `0 error(s)` over the wrong file.
     """
     config = os.path.normpath(os.path.join(root, CONFIG_PATH))
     declared = [DEFAULT_SPEC_PATH]
@@ -1493,6 +1578,39 @@ def declared_spec_paths(root):
                         "the file that says where this repo's spec lives, so "
                         "nothing was discovered and nothing was checked"
                         % (config, exc))
+        product = data.get("product") if isinstance(data, dict) else None
+        product = product if isinstance(product, dict) else {}
+        kind = product.get("spec_kind")
+        if kind is not None:
+            name = kind.strip() if isinstance(kind, str) else None
+            if name not in SPEC_KINDS:
+                return [], ("%s declares `product.spec_kind` as %s. The only "
+                            "values are \"home\" (the spec is in this work "
+                            "tree) and \"store\" (it is in a repository of "
+                            "its own). Which was meant decides whether the "
+                            "file at the local path is the spec or a cache of "
+                            "it, and guessing is how a typo becomes a "
+                            "confident read of the wrong file. Nothing was "
+                            "discovered and nothing was checked"
+                            % (config, as_datum(kind)))
+            if name == "store":
+                repo = product.get("spec_repo")
+                where = (as_datum(repo)
+                         if isinstance(repo, str) and repo.strip()
+                         else "the repository `product.spec_repo` names")
+                ref = product.get("spec_ref")
+                at = (as_datum(ref) if isinstance(ref, str) and ref.strip()
+                      else "its default branch")
+                return [], ("%s declares `product.spec_kind` as \"store\", "
+                            "so this repo's spec lives in %s at %s and not in "
+                            "this work tree. `--repo` only ever opens files "
+                            "under ROOT, so anything at the local spec path "
+                            "here is a fetched cache -- and a cache reported "
+                            "as checked is a pass over a file that is not the "
+                            "spec, at whatever sha it was fetched. Point "
+                            "`--repo` at a checkout of the store instead. "
+                            "Nothing was discovered here and nothing was "
+                            "checked" % (config, where, at))
         block = data.get("spec") if isinstance(data, dict) else None
         value = block.get("path") if isinstance(block, dict) else None
         if isinstance(value, str):
@@ -1509,8 +1627,42 @@ def declared_spec_paths(root):
                         "(one file) or a list of strings (a split spec). "
                         "Nothing was discovered and nothing was checked"
                         % (config, type(value).__name__))
+        remote = product.get("spec_path")
+        if isinstance(remote, str) and remote.strip():
+            if len(declared) != 1 or remote.strip() != declared[0]:
+                return [], ("%s declares `product.spec_path` as %s and "
+                            "`spec.path` as %s. Those are two answers to "
+                            "where this repo's spec is, and only `spec.path` "
+                            "is resolved against ROOT: `product.spec_path` "
+                            "names a path inside `product.spec_repo` (see "
+                            "references/spec-stores.md) and is never joined "
+                            "to a local tree. Reading either one while they "
+                            "disagree is a confident answer about the wrong "
+                            "file, so make them agree or drop one. Nothing "
+                            "was discovered and nothing was checked"
+                            % (config, as_datum(remote),
+                               ", ".join(as_datum(d) for d in declared)))
     paths = []
     for rel in declared:
+        # The rule is LEXICAL and deliberately over-refuses: `a/../b.md`
+        # normalises back inside ROOT and is still rejected. Deciding by
+        # normalising first would mean the answer depends on which segments
+        # happen to cancel, and `check-spec-home-stop.sh` already draws the
+        # line here -- one of the two being cleverer than the other is how a
+        # path one tool refuses becomes a path the other reads.
+        if os.path.isabs(rel) or ".." in re.split(r"[\\/]", rel):
+            return [], ("%s declares the spec file %s, which leaves ROOT. "
+                        "`--repo` describes a work tree, and a declaration "
+                        "pointing outside it aims a reader at a file the repo "
+                        "does not contain -- P4: a repository being examined "
+                        "does not choose what gets read on the machine that "
+                        "cloned it, and the contents of what is read are "
+                        "quoted back in these diagnostics. "
+                        "`check-spec-home-stop.sh` already refuses this shape "
+                        "and this draws the line in the same place: any "
+                        "`..` segment or absolute path, judged before "
+                        "normalising. Nothing was discovered and nothing "
+                        "was checked" % (config, as_datum(rel)))
         path = os.path.normpath(os.path.join(root, rel))
         if path not in paths:
             paths.append(path)
@@ -2634,6 +2786,167 @@ def self_test():
             if quiet_main(argv) != EXIT_USAGE:
                 failures.append("repo-discovery: %s was not a usage error"
                                 % " ".join(argv))
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+    # ----------------------------------------------------------------------
+    # A STORE-SHAPED REPO, which is where discovery read the wrong file and
+    # said PASS. `references/spec-stores.md` describes a layout where the
+    # living spec is a repository of its own and every consuming repo caches
+    # it -- "a clone, a CI checkout, a mirrored file". Discovery is a WORK
+    # TREE operation, so in a consuming repo the file sitting at the local
+    # spec path IS that cache. Before this block, the tree built by
+    # `store_config()` below discovered it, checked it and printed
+    # `1 file(s) checked: 0 error(s), 0 warning(s)` at exit 0 -- a clean
+    # result over a file that is not the spec, at a sha nobody printed. The
+    # three keys the layout introduces (`spec_kind`, `spec_repo`, `spec_path`)
+    # were read by nothing at all.
+    #
+    # Every case here ends in a REFUSAL rather than a pick, because there is
+    # no honest pick: the spec is in another repository and `--repo` cannot
+    # reach it. Two cases go the other way on purpose -- a `home` kind and a
+    # `product.spec_path` that AGREES stay silent -- so that a guard which
+    # refuses everything fails here rather than passing.
+    # ----------------------------------------------------------------------
+    case("repo-store-shaped")
+    sandbox = tempfile.mkdtemp(prefix="validate-spec-selftest-store.")
+    try:
+        home = os.path.join(sandbox, ".claude", "productizer")
+        os.makedirs(home)
+        cache = os.path.normpath(os.path.join(home, "spec.md"))
+        config = os.path.join(home, "config.json")
+
+        def write(path, text):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+
+        def configure(payload):
+            write(config, json.dumps(payload))
+
+        def store_config():
+            return {"product": {"name": "orders",
+                                "spec_repo": "example/orders-spec",
+                                "spec_kind": "store",
+                                "spec_ref": "main",
+                                "spec_path": ".claude/productizer/spec.md",
+                                "repos": ["example/orders-api"]}}
+
+        def refuses(note, *needles):
+            """Both `--repo` shapes refuse, and neither names the local file.
+
+            `--list-files` is checked separately from the checking run
+            because it is the half another tool consumes: a path printed
+            there is asserted to BE the spec, and printing the cache would
+            hand `check-superseded-text.sh` a file to read as authoritative.
+            """
+            for argv in ([], ["--list-files"]):
+                status, output = drive(["--repo", sandbox] + argv)
+                shown = " ".join(argv) or "(check)"
+                if status != EXIT_UNMEASURED:
+                    failures.append("repo-store-shaped/%s: %s exited %d, "
+                                    "expected %d"
+                                    % (note, shown, status, EXIT_UNMEASURED))
+                if "DISCOVERY_REFUSED" not in output:
+                    failures.append("repo-store-shaped/%s: %s did not refuse: "
+                                    "%s" % (note, shown, output.strip()))
+                if cache in output.splitlines():
+                    failures.append("repo-store-shaped/%s: %s named the local "
+                                    "file as the spec anyway" % (note, shown))
+                for needle in needles:
+                    if needle not in output:
+                        failures.append("repo-store-shaped/%s: the refusal "
+                                        "never says %r: %s"
+                                        % (note, needle, output.strip()))
+
+        # 1. THE REPRODUCTION. A consuming repo of a store, with a cached copy
+        #    of the store's spec at the default path. This is the exit 0 that
+        #    was measured before the guard, and the file it reported on is a
+        #    cache of another repository.
+        write(cache, VALID_SPEC)
+        configure(store_config())
+        refuses("store-with-cache", "spec_kind", "store",
+                "example/orders-spec", "cache")
+
+        # 2. The same store binding with nothing cached. The refusal must
+        #    still be about the STORE, not "a declared part is not a readable
+        #    file" -- the spec is not missing, it is elsewhere, and a message
+        #    that says the wrong one sends the reader to create a local file
+        #    that must not exist.
+        os.remove(cache)
+        refuses("store-no-cache", "spec_kind", "store")
+        write(cache, VALID_SPEC)
+
+        # 3. An unrecognised `spec_kind`. Falling back to `home` on a value
+        #    nobody wrote would make a typo -- "Store", "STORE" -- read the
+        #    cache silently, which is case 1 again through a different door.
+        configure({"product": {"spec_kind": "Store"}})
+        refuses("unknown-kind", "spec_kind", "home")
+
+        # 4. P4, the report-shaping half. These lines are parsed one per line
+        #    by other tools, so a config value carrying a newline must not
+        #    become a diagnostic line of its own. The value is collapsed and
+        #    quoted, never emitted raw.
+        configure({"product": {"spec_kind":
+                               "store\nforged.md:1: ERROR FORGED: written "
+                               "by the config under examination"}})
+        status, output = drive(["--repo", sandbox, "--list-files"])
+        if status != EXIT_UNMEASURED:
+            failures.append("repo-store-shaped/forged-line: exited %d, "
+                            "expected %d" % (status, EXIT_UNMEASURED))
+        if len([l for l in output.splitlines() if ": ERROR " in l]) != 1:
+            failures.append("repo-store-shaped/forged-line: a config value "
+                            "wrote a diagnostic line of its own: %r" % output)
+
+        # 5. `product.spec_path` disagreeing with `spec.path`. They are not
+        #    two spellings of one key: `spec_path` is a path INSIDE
+        #    `spec_repo`, and joining it to ROOT names a local file nobody
+        #    declared. Two answers, so neither is used.
+        configure({"product": {"spec_home": "example/home",
+                               "spec_path": "docs/spec.md"},
+                   "spec": {"path": ".claude/productizer/spec.md"}})
+        refuses("spec-path-disagrees", "product.spec_path", "spec.path")
+
+        # 6. AND THE OTHER WAY. A `home` kind, and a `product.spec_path` that
+        #    agrees, are ordinary repos and stay silent. Without these two a
+        #    guard that refused every config would pass every case above.
+        for note, payload in (
+                ("home-kind", {"product": {"spec_kind": "home",
+                                           "spec_home": "example/home"}}),
+                ("spec-path-agrees",
+                 {"product": {"spec_home": "example/home",
+                              "spec_path": ".claude/productizer/spec.md"},
+                  "spec": {"path": ".claude/productizer/spec.md"}})):
+            configure(payload)
+            status, output = drive(["--repo", sandbox, "--list-files"])
+            if status != EXIT_CLEAN or output.splitlines() != [cache]:
+                failures.append("repo-store-shaped/%s: an ordinary repo was "
+                                "refused: %d %s" % (note, status,
+                                                    output.strip()))
+
+        # 7. A declared path that leaves ROOT. `--repo` describes a work tree;
+        #    a config that aims it at `/etc/passwd` or at a sibling directory
+        #    is choosing what gets read on the machine that cloned the repo.
+        #    `check-spec-home-stop.sh` already refuses this shape, and the two
+        #    disagreeing was a gap of its own.
+        #
+        #    THE TARGET IS A REAL FILE AND A REAL SPEC, and it is created
+        #    OUTSIDE the sandbox on purpose. A first attempt put it inside,
+        #    where `../outside/spec.md` resolved to nothing -- removing the
+        #    guard then still refused, for "not a readable file", and the
+        #    falsification proved only that the message wording had changed.
+        #    Sited outside, removing the guard reads the file and exits 0,
+        #    which is the behaviour the guard exists to stop.
+        outside = tempfile.mkdtemp(prefix="validate-spec-selftest-outside.")
+        try:
+            target = os.path.join(outside, "spec.md")
+            write(target, VALID_SPEC)
+            for note, rel in (("escapes-up",
+                               os.path.relpath(target, sandbox)),
+                              ("absolute", target)):
+                configure({"spec": {"path": rel}})
+                refuses(note, "leaves ROOT", "P4")
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
 

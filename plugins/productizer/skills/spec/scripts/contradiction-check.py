@@ -71,19 +71,30 @@ EXIT_UNMEASURED = 4
 
 ID_RE = re.compile(r"^\s*(?:\*\*)?(R\d+)(?:\*\*)?\s*[:.\-]\s*", re.I)
 
+# The determiner before the system noun. `references/format-spec.md` documents
+# `Every ...` as a second spelling of the ubiquitous form, and
+# `scripts/validate-spec.py` accepts it in ALL SIX patterns, not only that one.
+# This tool used to accept only `the`, so R4, R5 and R39 of this repo's own
+# spec validated and then could not be paired -- a Stage 2 halt they could
+# never trigger. The two tools now recognise the same sentences.
+DET = r"(?:the|every)"
+
 PATTERNS = [
     ("complex", re.compile(
-        r"^while\s+(?P<state>.+?),\s*when\s+(?P<trigger>.+?),\s*the\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
+        rf"^while\s+(?P<state>.+?),\s*when\s+(?P<trigger>.+?),\s*{DET}\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
+    # `then` is optional: format-spec.md says `If` without `then` parses but is
+    # non-canonical, and validate-spec.py warns (EARS_IF_MISSING_THEN) rather
+    # than rejecting. Refusing it here made a WARN-level sentence unpairable.
     ("unwanted", re.compile(
-        r"^if\s+(?P<trigger>.+?),\s*then\s+the\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
+        rf"^if\s+(?P<trigger>.+?),\s*(?:then\s+)?{DET}\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
     ("state", re.compile(
-        r"^while\s+(?P<state>.+?),\s*the\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
+        rf"^while\s+(?P<state>.+?),\s*{DET}\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
     ("event", re.compile(
-        r"^when\s+(?P<trigger>.+?),\s*the\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
+        rf"^when\s+(?P<trigger>.+?),\s*{DET}\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
     ("optional", re.compile(
-        r"^where\s+(?P<feature>.+?),\s*the\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
+        rf"^where\s+(?P<feature>.+?),\s*{DET}\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
     ("ubiquitous", re.compile(
-        r"^the\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
+        rf"^{DET}\s+(?P<system>.+?)\s+shall\s+(?P<response>.+?)\.?$", re.I)),
 ]
 
 
@@ -927,6 +938,18 @@ CASES = [
      "R59: While an enterprise account is in arrears for more than 7 days, the ledger shall suspend the account.",
      "R60: While an account is in arrears for more than 14 days, the ledger shall keep the account fully active.",
      "the words narrow and the number widens — neither guard entails the other"),
+    # E1/E2 are the only corpus rows written in the `Every` form. They are
+    # here so the fix is proven end to end -- through compare(), not only
+    # through parse() -- and they are the rows that go PARSE-FAIL if the
+    # determiner is ever narrowed back to `the`.
+    ("E1", CONTRADICTION,
+     "R61: Every archive shall retain the expired record.",
+     "R62: Every archive shall delete the expired record.",
+     "the ubiquitous `Every` form, which this tool once refused to read"),
+    ("E2", CONSISTENT,
+     "R63: Every check shall declare what it must have examined for its pass to count.",
+     "R64: Every check tool shall carry a self-test that reaches each exit code it can return.",
+     "two `Every` requirements from this repo's own spec — must not read as conflict"),
 ]
 
 
@@ -988,6 +1011,7 @@ def selftest(use_z3: bool) -> int:
     # cases run, off the exit code each one actually produced. A literal list
     # would satisfy the reader that parses the line and prove nothing.
     reached: set[int] = set()
+    grammar_failures = selftest_grammar()
     file_failures = selftest_file_mode(reached)
     usage_failures = selftest_usage_mode(reached)
 
@@ -1001,7 +1025,15 @@ def selftest(use_z3: bool) -> int:
     if missing:
         print("documented exit code(s) no self-test case reached: %s"
               % " ".join(str(c) for c in missing), file=sys.stderr)
-    return 1 if (fp or file_failures or usage_failures or missing) else 0
+    # A corpus row that would not PARSE is a broken case, not a result: it is
+    # counted as a true negative or a false negative above and disappears. It
+    # now fails outright, so an `Every` case going unreadable again is loud.
+    parse_failures = sum(1 for r in rows if r[2] == "PARSE-FAIL")
+    if parse_failures:
+        print("corpus rows that did not parse: %d" % parse_failures,
+              file=sys.stderr)
+    return 1 if (fp or parse_failures or grammar_failures
+                 or file_failures or usage_failures or missing) else 0
 
 
 # The corpus above is about verdicts. This half is about the exit code a
@@ -1104,6 +1136,88 @@ def selftest_usage_mode(reached: set) -> int:
         print("  %-5s %-44s exit %d (wanted %d)"
               % ("ok" if ok else "FAIL", name, got, EXIT_USAGE))
     print("  %d of %d held" % (len(USAGE_CASES) - failures, len(USAGE_CASES)))
+    return failures
+
+
+# --------------------------------------------------------------------------
+# Grammar coverage - which sentences this tool agrees to read at all
+# --------------------------------------------------------------------------
+# The corpus above only ever compared sentences this parser already accepted,
+# so it was silent about the sentences it REFUSED. That silence hid a real
+# hole: `Every <system> shall ...` is the ubiquitous form documented in
+# `references/format-spec.md` and accepted by `scripts/validate-spec.py`, and
+# this tool rejected it in all six patterns. R4, R5 and R39 of this repo's own
+# spec are written that way, so they validated clean and could never trigger
+# the Stage 2 halt that runs on this tool. `If <trigger>, the <system> shall
+# ...` -- the `then`-less form format-spec.md calls non-canonical but parseable
+# -- was refused for the same reason.
+#
+# Each row is (sentence, expected pattern or None to refuse, expected system).
+# A row that parses to the wrong PATTERN is as bad as one that does not parse:
+# the guard would be read out of the wrong clause.
+GRAMMAR_CASES = [
+    ("The check shall declare its scope.", "ubiquitous", "check"),
+    ("Every check shall declare its scope.", "ubiquitous", "check"),
+    ("When a client requests the report, the API shall respond in under 200 ms.",
+     "event", "API"),
+    ("When a client requests the report, every API shall respond in under 200 ms.",
+     "event", "API"),
+    ("While a session is idle, the service shall end it.", "state", "service"),
+    ("While a session is idle, every service shall end it.", "state", "service"),
+    ("If the body fails validation, then the API shall reject it with 400.",
+     "unwanted", "API"),
+    ("If the body fails validation, then every API shall reject it with 400.",
+     "unwanted", "API"),
+    ("If the body fails validation, the API shall reject it with 400.",
+     "unwanted", "API"),
+    ("If the body fails validation, every API shall reject it with 400.",
+     "unwanted", "API"),
+    ("Where audit logging is included, the service shall record each access.",
+     "optional", "service"),
+    ("Where audit logging is included, every service shall record each access.",
+     "optional", "service"),
+    ("While a session is idle, when a client requests the report, "
+     "the API shall respond in under 200 ms.", "complex", "API"),
+    ("While a session is idle, when a client requests the report, "
+     "every API shall respond in under 200 ms.", "complex", "API"),
+    # This repo's own three, verbatim from `.claude/productizer/spec.md`.
+    ("Every published view shall be read-only with respect to the spec.",
+     "ubiquitous", "published view"),
+    ("Every check shall declare what it must have examined for its pass to count.",
+     "ubiquitous", "check"),
+    ("Every check tool shall carry a self-test that reaches each exit code it "
+     "can return.", "ubiquitous", "check tool"),
+    # Widening the determiner must not widen it to anything with a determiner.
+    # `any` and `each` are NOT EARS and stay refused, and a sentence with no
+    # `shall` states no obligation however it opens.
+    ("The system should handle invalid input gracefully.", None, ""),
+    ("Any check shall declare its scope.", None, ""),
+    ("Each check shall declare its scope.", None, ""),
+    ("Every check declares its scope.", None, ""),
+]
+
+
+def selftest_grammar() -> int:
+    """Assert the accepted sentence forms. Returns failures."""
+    print("\nGRAMMAR - the sentence forms this tool agrees to read")
+    failures = 0
+    for text, want_pattern, want_system in GRAMMAR_CASES:
+        r = parse(text)
+        got_pattern = r.pattern if r else None
+        got_system = r.system if r else ""
+        ok = got_pattern == want_pattern and (
+            want_pattern is None or got_system == want_system)
+        if not ok:
+            failures += 1
+        shown = text if len(text) <= 62 else text[:59] + "..."
+        print("  %-5s %-64s %s"
+              % ("ok" if ok else "FAIL", shown,
+                 ("refused" if got_pattern is None
+                  else "%s / %r" % (got_pattern, got_system))
+                 + ("" if ok else "   WANTED %s / %r"
+                    % ("refusal" if want_pattern is None else want_pattern,
+                       want_system))))
+    print("  %d of %d held" % (len(GRAMMAR_CASES) - failures, len(GRAMMAR_CASES)))
     return failures
 
 

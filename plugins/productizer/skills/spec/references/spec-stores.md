@@ -51,6 +51,47 @@ classifies today's intent against last quarter's agreements and reports
 `duplicate` and `extend` confidently wrong. Shas belong in the *record of what
 was read*, not in the binding.
 
+### `product.spec_path` is not `spec.path`
+
+These two keys look like one key spelled twice. They are not, and reading
+either as the other is how a tool ends up checking the wrong file and
+reporting a pass.
+
+| Key | Scope | Resolved against | Read by |
+|---|---|---|---|
+| `spec.path` | this work tree | the local repo root | `validate-spec.py --repo`, `check-spec-home.sh`, `check-spec-home-stop.sh`, `check-spec-integrity.sh` |
+| `product.spec_path` | inside `spec_repo` | the store checkout, at `spec_ref` | the fetch in *How a consuming repo reads it* below |
+
+`product.spec_path` is the path the fetch in step 1 asks the store for. It is
+**never** joined to a local repo root — a consuming repo's tree has no file at
+that path except a cache, and a cache is not the spec. `spec.path` is the only
+key any local tool resolves against a work tree.
+
+A config that declares both and disagrees is refused rather than resolved:
+two answers to where the spec is, and nothing states which wins.
+
+### What a store-shaped repo gets from the local tools
+
+`validate-spec.py --repo ROOT` describes a **work tree**. It opens no network
+connection, follows no binding, and reads no credential — so it cannot reach a
+store, and it does not try. When the config declares `spec_kind: store` it
+**refuses at exit 4** with `DISCOVERY_REFUSED`, naming the store and the ref,
+and reads nothing.
+
+That refusal is the point. Every consuming repo caches the store somehow —
+*"a clone, a CI checkout, a mirrored file"*, as **What it costs** says below —
+and the cache usually lands at exactly the default spec path. Before the
+refusal existed, `--repo` in a consuming repo discovered that cache, checked
+it, and printed `1 file(s) checked: 0 error(s), 0 warning(s)`: a clean result
+about another repository's file, at a sha nobody printed, in the tool that is
+the single source of *which files are the spec*.
+
+To check the store, point the tool at a checkout of the store itself. That is
+an operator naming a directory, not a config naming one — which is also why a
+`spec.path` that leaves the work tree (absolute, or climbing out with `..`) is
+refused: a repository being examined does not choose what gets read on the
+machine that cloned it.
+
 ## When it earns the extra repo
 
 Take a store only when at least one of these is true:
@@ -88,8 +129,9 @@ Take a store only when at least one of these is true:
 The consuming repo never holds an editable copy. It fetches the store at the
 binding's ref, uses it, and records what it read.
 
-1. Fetch `spec_path` from `spec_repo` at `spec_ref` — a local clone the reader
-   updates, or the host's contents API.
+1. Fetch `product.spec_path` from `spec_repo` at `spec_ref` — a local clone
+   the reader updates, or the host's contents API. The path is relative to the
+   **store**, never to the consuming repo.
 2. **Record the commit sha of what you fetched**, and state it in the intake
    output, the plan and the PR description: *classified against
    `acme/orders-spec@3f9c1a2`.* Without the sha, a classification cannot be
