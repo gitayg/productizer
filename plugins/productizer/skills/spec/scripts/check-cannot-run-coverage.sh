@@ -283,7 +283,13 @@ import json
 import sys
 
 # The runner's own list of statuses meaning "this check reached no verdict".
-CANNOT_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit"}
+# `nothing_to_examine` added 2026-09-07 with run-checks 2.x: every path in a
+# per-file check's scope was gone from the tree, so no tool was invoked at all.
+# It is a run that could not happen, not a run that found nothing. This set is a
+# SECOND COPY of the runner's own - they must be changed together, and a status
+# the runner can emit that is missing here reads as "ran" to this check.
+CANNOT_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit",
+              "nothing_to_examine"}
 
 out = sys.stdout
 try:

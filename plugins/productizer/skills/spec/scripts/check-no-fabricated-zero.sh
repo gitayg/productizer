@@ -323,7 +323,12 @@ EVALUATED = 0
 # The statuses that mean the check reached no verdict of its own. A row in any
 # of these examined nothing measurable, so a recorded coverage count on it is
 # a number nobody produced.
-VOID_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit"}
+# `nothing_to_examine` added 2026-09-07 with run-checks 2.x: a per-file check
+# whose entire scope was deleted invoked no tool, so any zero it appears to
+# carry was fabricated by the absence rather than measured. This set is a SECOND
+# COPY of the runner's own and they must be changed together.
+VOID_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit",
+            "nothing_to_examine"}
 
 MISSING = object()
 

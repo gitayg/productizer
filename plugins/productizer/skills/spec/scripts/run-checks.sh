@@ -257,9 +257,13 @@ done
 # ---------------------------------------------------------------------------
 # --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
 #
-# Eight cases: six of them one per way the contract at the top of this file can
-# be reached, and two for the change set the runner is handed - the one shape
-# that must be refused and the one that must not be. Each is driven through
+# Eleven cases: six of them one per way the contract at the top of this file
+# can be reached, and five for the change set the runner is handed - the one
+# shape that must be refused, and four for a path in it that is not in the
+# tree. Eight assertions read the RESULT FILE rather than the exit code,
+# because the last three cases are about a mechanism they share an exit code
+# with: two of them exit 3, and so does `refused`.
+# Each is driven through
 # THIS script, so the argument handling, the change-set check, the config
 # parser, the executor and the on_exit rewriting are all on the path. No case
 # is asserted by reading source: the exit code is read off a real run.
@@ -277,6 +281,15 @@ done
 #   deleted       a change set naming a path that is NOT there because
 #                 this change deleted it, which is legitimate and must
 #                 still run                                            -> 0
+#   deleted-in-scope
+#                 the same, with the absent path INSIDE a per_file
+#                 check's scope, so a tool would have been handed it   -> 0
+#   all-scope-gone
+#                 every path in the one check's scope is gone: no
+#                 scan at all, which is not a pass                     -> 3
+#   all-gone-and-no-tool
+#                 the same, with the tool absent too: the absent
+#                 tool is the fact that must be reported               -> 3
 #
 # IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
 # writes over `policy.output`, so a self-test that did it would be slower than
@@ -332,6 +345,23 @@ if [ "$MODE" = "selftest" ]; then
   printf 'fixture/clean.txt\nfixture/deleted-by-this-change.txt\n' > "$SB/changed-deleted.txt"
   printf 'gone\n' > "$SB/fixture/deleted-by-this-change.txt"
   rm -f "$SB/fixture/deleted-by-this-change.txt"
+  # A deleted path INSIDE A CHECK'S SCOPE, which is the case the `deleted`
+  # case above states it does not reach: its absent path matches no check's
+  # `paths`, so no tool was ever asked to open it and the run could not tell a
+  # dropped path from one nobody wanted. These two files are both matched by
+  # one glob, one of them is removed, and the check is per_file - so without
+  # the drop the tool IS handed the absent path and refuses, which is the
+  # whole defect. Measured on this repository before the fix: `shell-lint`
+  # and `stderr-suppression` both came back REFUSED against a change set
+  # spanning the root commit, and a refused check catches no regression.
+  mkdir -p "$SB/fixture/scope"
+  printf 'RUN-CHECKS-SELFTEST-NEEDLE\n' > "$SB/fixture/scope/kept.txt"
+  printf 'RUN-CHECKS-SELFTEST-NEEDLE\n' > "$SB/fixture/scope/gone.txt"
+  rm -f "$SB/fixture/scope/gone.txt"
+  printf 'fixture/scope/kept.txt\nfixture/scope/gone.txt\n' > "$SB/changed-scope.txt"
+  # EVERY path in the one check's scope is gone. An empty list is not a small
+  # scan, it is no scan, and the run must not read as a pass.
+  printf 'fixture/scope/gone.txt\n' > "$SB/changed-scope-all-gone.txt"
 
   # PREMISE. The scanned files must really differ in the needle, or `clean` and
   # `refused` are the same case twice and one of them is reported as a
@@ -347,6 +377,16 @@ if [ "$MODE" = "selftest" ]; then
   # - and it would pass without ever asking about an absent path.
   if [ -e "$SB/fixture/deleted-by-this-change.txt" ]; then
     self_unmeasured "the path the deleted case names is still there, so nothing absent was ever handed to the runner. Unmeasured, not a pass"
+  fi
+  # PREMISE for the two in-scope cases. If the removal did not take, the scope
+  # holds two present files and the drop is never exercised; if the surviving
+  # file lost the needle, its check fails and the case goes red for a reason
+  # that is not the one it was written to observe.
+  if [ -e "$SB/fixture/scope/gone.txt" ]; then
+    self_unmeasured "the in-scope path that must be absent is still there, so no tool was ever at risk of being handed one. Unmeasured, not a pass"
+  fi
+  if grep -q RUN-CHECKS-SELFTEST-NEEDLE "$SB/fixture/scope/kept.txt"; then :; else
+    self_unmeasured "the surviving in-scope file does not hold the needle, so its check would fail on its content and the case would stop being about the absent path. Unmeasured, not a pass"
   fi
 
   # One check, one file, one tool, `spec_coverage` off so no spec has to exist
@@ -443,6 +483,83 @@ checks:
       min_covered: 1
 SELFTEST_CFG_OFF
 
+  # One check whose `paths` glob matches BOTH in-scope files, so the absent one
+  # is inside the scope rather than beside it. per_file, so the executor would
+  # substitute that path straight into argv.
+  cat > "$SB/checks-scope.yaml" <<'SELFTEST_CFG_SCOPE'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  mode: per_file
+  severity: block
+checks:
+  - id: scoped
+    why: its paths glob matches a file that is there and one that is not, so the absent path is inside this check's scope and would be handed to the tool unless the runner drops it
+    when:
+      paths: ["fixture/scope/*.txt"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: per_file
+    command: [grep, -q, RUN-CHECKS-SELFTEST-NEEDLE, "{file}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+SELFTEST_CFG_SCOPE
+
+  # BOTH CONCLUSIONS AT ONCE: the tool is absent AND every path in the scope is
+  # gone. They compete, and `missing_tool` must win - it is the earlier and
+  # larger fact, true whatever the file list holds, and R13 is stated over it.
+  # This case exists because the first version of the drop wrote its status
+  # before the executor looked for the tool, and `fixtures/missing-tool` and
+  # `fixtures/fabricated-zero` - whose one changed path is never created - both
+  # came back as the drop instead, taking R13's check red. The self-test could
+  # not see that; now it can.
+  cat > "$SB/checks-gone-no-tool.yaml" <<'SELFTEST_CFG_GONE_NO_TOOL'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  mode: per_file
+  severity: block
+checks:
+  - id: scoped
+    why: its tool is absent on every machine and every path in its scope is gone, so both conclusions are available at once and the absent tool is the one that must be reported
+    when:
+      paths: ["fixture/scope/*.txt"]
+    severity: block
+    requires: [definitely-not-a-real-tool]
+    version_command: [definitely-not-a-real-tool, --version]
+    mode: per_file
+    command: [definitely-not-a-real-tool, "{file}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+SELFTEST_CFG_GONE_NO_TOOL
+
+  # PREMISE. If somebody has installed a tool by this name the case stops being
+  # about an absent one and quietly becomes a second copy of `all-scope-gone`.
+  if command -v definitely-not-a-real-tool >/dev/null 2>&1; then  # stderr-ok: a presence probe whose EXIT STATUS is the whole answer, and the finding is reported in words on the next line
+    self_unmeasured "a tool named definitely-not-a-real-tool is installed on this machine, so the case that must report an absent tool has a present one. Unmeasured, not a pass"
+  fi
+
   mkdir -p "$SB/locked"
   chmod 500 "$SB/locked"
   # PREMISE, PROBED BY TRYING IT. Root makes a directory inside a mode-500
@@ -455,6 +572,12 @@ SELFTEST_CFG_OFF
 
   SELF_CASES=0
   SELF_FAILED=0
+  # Assertions read off a RESULT FILE rather than off an exit code. Counted
+  # apart from the driven cases because they drive nothing and reach no exit
+  # code of their own - a run that reached the right code by the wrong route is
+  # invisible to a case and visible to one of these. They fail the self-test
+  # through the same SELF_FAILED the cases use, so no new exit code appears.
+  SELF_ASSERTS=0
   # R39.b: the reached half of the declaration below is ACCUMULATED here, one
   # entry per case as it ran - including the clean case, which is driven
   # outside self_drive because it guards the others' premise. A literal list
@@ -479,6 +602,43 @@ SELFTEST_CFG_OFF
       printf '  held:    case %-13s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
     else
       printf '  FINDING: case %-13s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  # $1 result file, $2 key on the first check row, $3 the value it must hold
+  # rendered as JSON, $4 what that asserts. The comparison is a `==` between
+  # two parsed JSON values and NOTHING IS EVALUATED - no expression string is
+  # handed to python, because a check in this repository's own suite exists to
+  # stop a config choosing what this runner executes, and a self-test that
+  # eval()s a string would be the same shape one file over.
+  self_assert() {
+    _file="$1"; _key="$2"; _want="$3"; _what="$4"
+    SELF_ASSERTS=$((SELF_ASSERTS + 1))
+    _got="$(python3 - "$_file" "$_key" "$_want" <<'SELFTEST_ASSERT'
+import json, sys
+path, key, want = sys.argv[1:4]
+try:
+    doc = json.load(open(path))
+except (OSError, ValueError) as exc:
+    print("the result file could not be read: %s" % exc)
+    raise SystemExit(0)
+rows = doc.get("checks") or []
+if not rows:
+    print("the result holds no check rows at all")
+    raise SystemExit(0)
+row = rows[0]
+if key not in row:
+    print("the row has no `%s` key; it holds %s" % (key, ", ".join(sorted(row))))
+    raise SystemExit(0)
+print("held" if row[key] == json.loads(want)
+      else "%s is %s, not %s" % (key, json.dumps(row[key]), want))
+SELFTEST_ASSERT
+)"
+    if [ "$_got" = "held" ]; then
+      printf '  held:    assert %-20s %s\n' "$_key" "$_what"
+    else
+      printf '  FINDING: assert %-20s %s - %s\n' "$_key" "$_what" "$_got"
       SELF_FAILED=$((SELF_FAILED + 1))
     fi
   }
@@ -527,8 +687,48 @@ SELFTEST_CFG_OFF
     --config "$SB/checks-pass.yaml" --root "$SB" \
     --changed "$SB/changed-deleted.txt" --out "$SB/deleted.json"
 
-  printf '  self-test cases driven: %d. Cases that did not hold: %d\n' \
-    "$SELF_CASES" "$SELF_FAILED"
+  # THE CASE THE `deleted` CASE ABOVE SAYS IT DOES NOT REACH. Here the absent
+  # path is INSIDE the one check's scope, the check is per_file, and without
+  # the drop the executor substitutes that path into argv and grep exits 2 -
+  # refused, blocking, exit 3. The assertions under it read the result file, so
+  # the case pins the MECHANISM and not only the code: what was handed over,
+  # what was dropped, and under which label.
+  self_drive deleted-in-scope 0 \
+    "a deleted path inside a check's scope, in per_file mode: dropped before argv, so the check runs over what survives instead of being handed a path no tool can open" \
+    --config "$SB/checks-scope.yaml" --root "$SB" \
+    --changed "$SB/changed-scope.txt" --out "$SB/scope.json"
+  self_assert "$SB/scope.json" status '"pass"' \
+    "the check RAN over the surviving file - it is not refused, which is what being handed the absent path produced"
+  self_assert "$SB/scope.json" files_in_scope 2 \
+    "the declared scope is still both files: the drop shrinks what is handed over, never what is demanded"
+  self_assert "$SB/scope.json" files_handed_over 1 \
+    "exactly one path reached a command line"
+  self_assert "$SB/scope.json" files_dropped_absent '["fixture/scope/gone.txt"]' \
+    "the dropped path is NAMED, and labelled absent rather than deleted, because --changed has no second source that could corroborate a deletion"
+  self_assert "$SB/scope.json" files_dropped_deleted '[]' \
+    "nothing is called deleted on a run that cannot know that it was"
+
+  # EVERY path in scope gone. Without the guard the drop leaves an empty list,
+  # per_file iterates zero times, and the executor's `worst` stays at its
+  # initial 0 - a PASS over a set nothing opened.
+  self_drive all-scope-gone 3 \
+    "every path in the check's scope is gone: an empty list is no scan, so the check is recorded as unable to run and blocks, rather than passing over nothing" \
+    --config "$SB/checks-scope.yaml" --root "$SB" \
+    --changed "$SB/changed-scope-all-gone.txt" --out "$SB/all-gone.json"
+  self_assert "$SB/all-gone.json" status '"nothing_to_examine"' \
+    "the row says why it could not run, and is neither a pass nor a refusal - nothing refused anything, because no tool was invoked"
+  self_assert "$SB/all-gone.json" files_handed_over 0 \
+    "no path reached a command line"
+
+  self_drive all-gone-and-no-tool 3 \
+    "the tool is absent AND every path in scope is gone: the absent tool is the earlier and larger fact, so that is what is reported" \
+    --config "$SB/checks-gone-no-tool.yaml" --root "$SB" \
+    --changed "$SB/changed-scope-all-gone.txt" --out "$SB/gone-no-tool.json"
+  self_assert "$SB/gone-no-tool.json" status '"missing_tool"' \
+    "an absent tool outranks an empty file list - R13 is stated over the tool, and a drop that reported itself first took R13 red once already"
+
+  printf '  self-test cases driven: %d, result-file assertions: %d. Cases and assertions that did not hold: %d\n' \
+    "$SELF_CASES" "$SELF_ASSERTS" "$SELF_FAILED"
 
   # The R39.b declaration. The reached half is computed from the cases above;
   # the documented half is the four-code contract at the top of this file.
@@ -538,8 +738,9 @@ SELFTEST_CFG_OFF
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '  exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
-  printf '  NOT ASSERTED: the content of any result file. Each case reads the exit CODE, so a run that reached the right code by the wrong route is invisible here and is read off the case output by hand.\n'
-  printf '  NOT ASSERTED: the `deleted` case proves the absent path was ACCEPTED, not that the verdict script counted it as deleted rather than as unexamined - the path it names falls outside the scope of the one check, so no tool was asked to open it.\n'
+  printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The last three cases are the exception - eight assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, and the code alone cannot tell them apart.\n'
+  printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` case alone proves only that an absent path was ACCEPTED, because the path it names falls outside the one check scope and no tool was asked to open it. `deleted-in-scope` puts an absent path INSIDE a per_file check scope, where the executor would have substituted it into argv, and five assertions read off the result file: the check ran, the scope is still 2, one path was handed over, the dropped one is named, and it is labelled absent and not deleted.\n'
+  printf '  NOT ASSERTED: the `deleted` LABEL, and the git query that produces it. Both in-scope cases run under --changed, which has no second source, so every drop in them is labelled `absent`. The --base path that asks git --diff-filter=D is exercised only by a real run against a repository, measured by hand on this one, and no case here drives it.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
     exit 1
@@ -641,6 +842,14 @@ if [ -n "$CHANGED" ]; then
     fi
     cp "$CHANGED_SRC" "$WORK/changed.txt"
   fi
+  # WHY A PATH IN THE CHANGE SET IS ABSENT: this mode cannot say. The caller
+  # handed over a list and nothing here knows where it came from, so the empty
+  # file below is a real answer - no second source - and never a claim that
+  # nothing was deleted. The runner still drops absent paths from what it hands
+  # a tool, because that question is about the TREE and the tree answers it in
+  # both modes; only the LABEL on the drop differs, and it says which it is.
+  : > "$WORK/deleted.txt"
+  DELETED_SOURCE="none: --changed hands over a list, and nothing here can say why a path in it is absent"
 elif [ -n "$BASE" ]; then
   command -v git >/dev/null 2>&1 || die_usage "--base needs git on PATH"
   merge_base="$(cd "$ROOT" && git merge-base "$BASE" HEAD 2>/dev/null)" ||
@@ -649,6 +858,15 @@ elif [ -n "$BASE" ]; then
   if [ ! -s "$WORK/changed.txt" ]; then
     die_usage "the diff against $BASE is empty. An empty diff is far more often a base problem than a change that did nothing; resolve the base before believing a green run."
   fi
+  # THE SECOND SOURCE THIS MODE HAS AND THE OTHER DOES NOT. It does not decide
+  # what is handed to a tool - the tree decides that, in both modes - it
+  # decides what the drop is CALLED in the report. A path this range removed is
+  # named `deleted`; one absent for some other reason is named `absent`, which
+  # is what a typo or a path that was never in this repository looks like from
+  # here. Both are dropped and both are printed; only a reader can tell the
+  # third case from the second, and this is what gives them the chance.
+  (cd "$ROOT" && git diff --name-only --diff-filter=D "$merge_base" HEAD) > "$WORK/deleted.txt"
+  DELETED_SOURCE="git diff --diff-filter=D against $BASE"
 else
   die_usage "no change given. Pass --changed <file> or --base <ref>."
 fi
@@ -751,7 +969,7 @@ done < "$WORK/changed.txt"
 cat > "$WORK/plan.py" <<'PY'
 import json, os, re, sys
 
-CONFIG, WORK, CHANGED, TAGS, ROOT, ROOT_SOURCE, CONFIG_SOURCE = sys.argv[1:8]
+CONFIG, WORK, CHANGED, TAGS, ROOT, ROOT_SOURCE, CONFIG_SOURCE, DELETED, DELETED_SOURCE = sys.argv[1:10]
 
 def bad(msg):
     sys.stderr.write("run-checks: %s: %s\n" % (os.path.basename(CONFIG), msg))
@@ -1061,6 +1279,30 @@ files = ordered
 for f in files:
     if "\x00" in f or "\n" in f:
         bad("a changed path contains a control character; refusing rather than splitting it into two paths")
+
+
+def rel(p):
+    p = p.strip()
+    if p.startswith("./"):
+        p = p[2:]
+    _r = ROOT.rstrip("/") + "/"
+    if p.startswith(_r):
+        p = p[len(_r):]
+    return p
+
+
+# IS THIS PATH IN THE TREE THE TOOLS WILL BE POINTED AT? The same reading the
+# verdict script's norm() takes, asked here so the question gets ONE answer at
+# both stages rather than two that can drift apart.
+def in_tree(p):
+    return os.path.exists(os.path.join(ROOT, rel(p)))
+
+
+# WHAT THE OTHER SOURCE SAYS, where the mode has one. Empty under `--changed`,
+# and that emptiness is reported in words by DELETED_SOURCE rather than read as
+# "this change deleted nothing".
+with open(DELETED) as fh:
+    REMOVED_BY_CHANGE = set(rel(ln) for ln in fh if ln.strip())
 
 tags = [t.strip() for t in TAGS.split(",") if t.strip()]
 
@@ -1401,6 +1643,79 @@ for idx, chk in enumerate(checks):
             if f not in seen:
                 seen.add(f); file_set.append(f)
 
+    # --- WHAT CAN ACTUALLY BE HANDED TO THE TOOL -------------------------
+    #
+    # THE SAME RULE THE COVERAGE STAGE ALREADY APPLIES, ONE STAGE EARLIER.
+    # Down there a path DELETED by this change is dropped from what coverage
+    # DEMANDS, because no tool can open it and demanding coverage for it
+    # manufactures a gap. Every word of that applies to INVOCATION: handing a
+    # tool a path that is gone from the tree manufactures a REFUSAL the same
+    # way. Measured 2026-09-07 on this repository: the root-commit-to-HEAD
+    # change set names 14 deleted paths, two of them `.sh`, and `shell-lint`
+    # and `stderr-suppression` both exited 2 - correctly, since check-stderr
+    # cannot read a file that is not there - so both were REFUSED. A refused
+    # check catches no regression, which is why v4.55.0 passed every local
+    # check and went red in CI on `stderr-suppression`: CI diffs against a
+    # real base where nothing is deleted, so it actually ran the check.
+    #
+    # DROPPED AND COUNTED, NEVER DROPPED QUIETLY. `files` stays the whole
+    # declared scope - it is still the coverage denominator and still what
+    # `files_in_scope` reports - and `files_deleted` is carried into the
+    # result and rendered per check. A rule that silently shrinks what it
+    # hands over is the same failure as a check that silently shrinks what it
+    # examined.
+    #
+    # ONE QUESTION, ONE ANSWER, IN BOTH MODES. `--base <ref>` could ask git
+    # (`--diff-filter=D`) and `--changed <file>` could not, and that would be
+    # two answers to one question. It is not done, and not merely because one
+    # mode cannot: the question the runner needs answered is "can a tool open
+    # this path", and only the TREE answers that. git answers a different one
+    # - "did this range remove it" - and the two come apart in both directions
+    # against a working tree, which is what the tools are actually pointed at:
+    # a path deleted in the range and re-created uncommitted is openable and
+    # git still calls it D, and a path untouched by the range but removed from
+    # the working tree is unopenable and git does not call it D at all. So
+    # `os.path.exists` is not the mode-agnostic compromise, it is the more
+    # correct of the two everywhere. Measured on this repository's
+    # root-commit-to-HEAD range: git's D list and the absent-from-tree set are
+    # the same 14 paths, no disagreement either way, so nothing is lost by
+    # asking the tree.
+    #
+    # THE LINE THIS DOES NOT CROSS. A path absent for ANY OTHER REASON - a
+    # typo, a path that was never in this repository - is absent too, and
+    # `os.path.exists` alone cannot tell it from a deletion. So the drop is
+    # LABELLED from whatever second source the mode has: under `--base`,
+    # git's own `--diff-filter=D` list for the same range, and under
+    # `--changed` there is no second source and the label says so. Both are
+    # dropped either way, because what a tool can open is a fact about the
+    # tree - but a reader sees `absent` beside a path git never removed, which
+    # is what a typo looks like from here, and sees it named.
+    #
+    # Nothing is dropped quietly, and that is the whole safeguard: the
+    # change-set check above already REFUSES an entry that could never have
+    # been a path, and every drop below is counted and printed under its own
+    # name in the run's output and in checks-result.json. THIS REPOSITORY'S
+    # OWN FIXTURES DEPEND ON THE DROP BEING ALLOWED: `fixtures/missing-tool`
+    # and `fixtures/fabricated-zero` hand the runner
+    # `fixture/one-changed-file.txt`, which is never created anywhere, so a
+    # rule that handed absent-for-another-reason paths to the tool anyway
+    # would be a rule this repository violates on purpose in two committed
+    # places.
+    files_present, files_deleted, files_absent = [], [], []
+    for f in file_set:
+        if in_tree(f):
+            files_present.append(f)
+        elif rel(f) in REMOVED_BY_CHANGE:
+            files_deleted.append(f)
+        else:
+            files_absent.append(f)
+
+    # DOES THIS CHECK EVEN READ THE LIST? A batch command with no `{files}` in
+    # it is handed no paths at all, so nothing was dropped from its invocation
+    # and saying so would be noise. `per_file` reads the list by construction:
+    # the executor iterates it.
+    consumes_files = (mode == "per_file") or any("{files}" in a for a in cmd)
+
     plan.append({
         "index": idx, "id": cid, "severity": sev, "mode": mode,
         "timeout_seconds": timeout, "command": cmd, "requires": req,
@@ -1421,6 +1736,12 @@ for idx, chk in enumerate(checks):
         # anything. The reader of the result cannot tell them apart without this.
         "trigger_scope": "always" if when.get("always") is True else "scoped",
         "triggered": enabled and bool(reasons), "triggered_by": reasons, "files": file_set,
+        # `files` is the declared scope and the coverage denominator.
+        # `files_present` is what the executor is allowed to substitute into
+        # argv, and `files_deleted` is the difference, kept so it can be
+        # counted rather than inferred from a subtraction downstream.
+        "files_present": files_present, "files_deleted": files_deleted,
+        "files_absent": files_absent, "consumes_files": consumes_files,
     })
 
 for _eid in sorted(local_checks):
@@ -1584,6 +1905,10 @@ with open(os.path.join(WORK, "plan.json"), "w") as fh:
                "root": ROOT, "root_source": ROOT_SOURCE,
                "policy": {"empty_run": empty_run,
                "output": OUTPUT}, "files": files, "tags": tags,
+               # WHERE THE REASON FOR A DROP CAME FROM, in words, so a result
+               # file says whether the `absent` label meant "git looked and did
+               # not name it" or "nothing looked at all".
+               "deleted_source": DELETED_SOURCE,
                "local_overrides_ignored": ignored_local,
                "waivers": {"declared": WAIVER_DIR is not None, "dir": WAIVER_DIR,
                            "today": WAIVER_TODAY, "entries": waivers},
@@ -1614,8 +1939,32 @@ for c in plan:
             fh.write(b"".join(a.encode() + b"\x00" for a in cc))
     with open(os.path.join(d, "requires"), "w") as fh:
         fh.write("".join(r + "\n" for r in c["requires"]))
+    # WHAT THE EXECUTOR MAY SUBSTITUTE INTO ARGV: the present ones only. The
+    # deleted ones stay in the plan, in `files` and in `files_deleted`, and
+    # never reach a command line.
     with open(os.path.join(d, "files"), "w") as fh:
-        fh.write("".join(f + "\n" for f in c["files"]))
+        fh.write("".join(f + "\n" for f in c["files_present"]))
+    # EVERY PATH IN SCOPE IS GONE. Dropping them all leaves an empty list, and
+    # an empty list is not a small scan - it is no scan. `per_file` would
+    # iterate zero times and the executor's `worst` would stay at its initial
+    # 0, which the map reads as PASS; a batch `{files}` would invoke the tool
+    # with no paths and get whatever that tool does with none. Either way a
+    # check whose entire scope vanished would read as a clean bill of health
+    # over a set nothing opened. check-hygiene reached the same conclusion
+    # about its own arguments - "Nothing was scanned, so nothing is clean.
+    # Unmeasured, not a pass" - and exits 2. The runner does not delegate that
+    # to the tool: it invokes none and records a status that cannot run.
+    #
+    # A MARKER, NOT THE STATUS ITSELF, and the difference is a defect this
+    # already caused. Written as `status_override` it short-circuited the
+    # executor before the requires check, and `fixtures/missing-tool` - whose
+    # one path is never created and whose tool is deliberately absent - came
+    # back as this instead of `missing_tool`, taking R13's check red. An
+    # absent TOOL is the earlier and larger fact: it is true whatever the file
+    # list holds. So the executor decides the order, after it has looked.
+    if c["consumes_files"] and not c["files_present"]:
+        with open(os.path.join(d, "nothing_to_examine"), "w") as fh:
+            fh.write("%d\n" % (len(c["files_deleted"]) + len(c["files_absent"])))
     # The check's OWN verdict map, written where per_file aggregation can read
     # it. Without this the shell has only the numbers, and a number cannot say
     # which outcome it means: a check declaring `pass: [1]` and `fail: [0]` is
@@ -1628,7 +1977,7 @@ for c in plan:
 sys.stdout.write("\n".join(str(c["index"]) for c in plan if c["triggered"]) + "\n")
 PY
 
-TRIGGERED="$(python3 "$WORK/plan.py" "$CONFIG_ABS" "$WORK" "$WORK/changed.txt" "$TAGS" "$ROOT" "$ROOT_SOURCE" "$CONFIG_SOURCE")" || {
+TRIGGERED="$(python3 "$WORK/plan.py" "$CONFIG_ABS" "$WORK" "$WORK/changed.txt" "$TAGS" "$ROOT" "$ROOT_SOURCE" "$CONFIG_SOURCE" "$WORK/deleted.txt" "$DELETED_SOURCE")" || {
   rc=$?
   cleanup
   exit "$rc"
@@ -1694,6 +2043,16 @@ for idx in $TRIGGERED; do
   if [ -n "$MISSING" ]; then
     printf '%s\n' "${MISSING# }" > "$D/missing"
     printf 'missing_tool\n' > "$D/status_override"
+    continue
+  fi
+
+  # AFTER the tool check, on purpose. Every path this check would have been
+  # pointed at is gone from the tree, so there is nothing to open; running it
+  # anyway means running it over an empty list, which is the hollow pass the
+  # plan wrote this marker to refuse. An absent TOOL outranks it - that is
+  # true whatever the file list holds - so this is asked second.
+  if [ -e "$D/nothing_to_examine" ]; then
+    printf 'nothing_to_examine\n' > "$D/status_override"
     continue
   fi
 
@@ -1820,7 +2179,13 @@ results, blocking_failures, advisory_failures, triggered = [], [], [], 0
 # finding. `advise` means "argue with this check's findings"; it never means
 # "it is acceptable for this check to be absent". So these statuses block
 # whatever the severity says.
-CANNOT_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit"}
+#
+# `nothing_to_examine` is here for the same reason as the rest: every path in
+# the check's scope is gone from the tree, so no tool was invoked and no
+# verdict exists. It is not a pass, and it is not `refused` either - nothing
+# refused anything, because nothing was asked.
+CANNOT_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit",
+              "nothing_to_examine"}
 
 
 def record_failure(row):
@@ -1855,7 +2220,30 @@ for c in plan["checks"]:
     triggered += 1
     d = os.path.join(WORK, "run", str(c["index"]))
 
+    # WHAT WAS NOT HANDED OVER, on every triggered row, counted rather than
+    # left to be worked out from a subtraction. `files_in_scope` above is the
+    # declared scope; these say how much of it reached a command line, and the
+    # two lists say what happened to the rest - `deleted` where the mode had a
+    # second source that named it removed, `absent` where nothing corroborated
+    # it and a typo would look identical.
+    row["files_handed_over"] = len(c["files_present"])
+    row["files_dropped_deleted"] = c["files_deleted"][:200]
+    row["files_dropped_absent"] = c["files_absent"][:200]
+    row["file_list_consumed"] = c["consumes_files"]
+    row["dropped_source"] = plan["deleted_source"]
+
     override = read(d, "status_override").strip()
+    if override == "nothing_to_examine":
+        _nd, _na = len(c["files_deleted"]), len(c["files_absent"])
+        row["status"] = "nothing_to_examine"
+        row["detail"] = ("every one of the %d path(s) in scope is gone from the tree (%d deleted by "
+                         "this change, %d absent with nothing to say why), so nothing survives for a "
+                         "tool to open and none was invoked. Not a pass: a check whose entire scope "
+                         "vanished examined nothing." % (_nd + _na, _nd, _na))
+        row["tool"] = {"version": None}
+        results.append(row)
+        record_failure(row)
+        continue
     if override == "missing_tool":
         row["status"] = "missing_tool"
         row["detail"] = ("declared tool not installed: %s. Not skipped — a check whose tool is absent "
@@ -1954,10 +2342,28 @@ for c in plan["checks"]:
         # check. It is dropped from the requirement and COUNTED, never dropped
         # quietly: a rule that silently shrinks what it demands is the same
         # failure as a check that silently shrinks what it examined.
+        #
+        # THE PLAN ALREADY ASKED. It partitioned this check's scope before the
+        # executor ran, dropped the absent side from what was handed to the
+        # tool, and recorded it. This used to ask `os.path.exists` a second
+        # time, here, after the run - two answers to one question, from two
+        # readings of a tree that can move in between. It reads the one answer
+        # now, so what coverage stops demanding is exactly what invocation
+        # stopped handing over, by construction rather than by coincidence.
+        #
+        # BOTH LABELS, and that is not a shortcut. The labels split WHY a path
+        # is not in the tree; what coverage can demand turns on WHETHER it is,
+        # because a path nothing can open cannot be examined whatever the
+        # reason. Forgiving only the corroborated half would demand coverage
+        # for a path that was never handed to the tool - reporting `hollow`
+        # over the runner's own decision, which is the manufactured accusation
+        # this whole block exists to refuse. Measured: with only the `deleted`
+        # half here the `deleted-in-scope` self-test case came back `hollow`.
+        gone = set(norm(f) for f in c["files_deleted"] + c["files_absent"])
         for f in c["files"]:
             if norm(f) in have:
                 continue
-            if not os.path.exists(os.path.join(plan["root"], norm(f))):
+            if norm(f) in gone:
                 deleted_files.append(norm(f))
             else:
                 missing_files.append(f)
@@ -2106,7 +2512,8 @@ by_id = {r["id"]: r for r in results}
 # A Covered or Partial claim is a measurement, and a check that could not reach
 # a verdict measured nothing. A disabled check is out of force entirely, n/a
 # included: a claim from something switched off covers nothing.
-VOID_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit", "fail", "hollow"}
+VOID_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit", "fail", "hollow",
+            "nothing_to_examine"}
 
 spec_report = {"mode": sc["mode"], "spec": sc["spec"], "status": sc["status"],
                "detail": sc["detail"], "enforced": sc["enforced"],
@@ -2256,7 +2663,13 @@ for r in results:
             cov_txt += "/%d files" % cv["observed"]["files_in_scope"]
             _gone = len(cv["observed"].get("deleted_not_required", []))
             if _gone:
-                cov_txt += " (%d deleted by this change, not required)" % _gone
+                # "gone from the tree", not "deleted by this change". The set
+                # behind this number is every path coverage stopped demanding,
+                # and that turns on whether a tool could open it, not on why -
+                # so calling all of them deleted would assert a cause on the
+                # absent-for-another-reason half. The line under this row
+                # splits them, and names them.
+                cov_txt += " (%d gone from the tree, not required)" % _gone
         if cv["observed"]["rules_loaded"] is not None:
             cov_txt += ", %d rules" % cv["observed"]["rules_loaded"]
     # R38 - RENDERED AS FAILED AND WAIVED, NEVER AS PASSED. The word FAIL stays
@@ -2270,6 +2683,26 @@ for r in results:
             % (_label, r["id"], r["severity"],
                r.get("exit_code", "-"),
                ((r.get("tool") or {}).get("version") or "version unknown")[:44], cov_txt))
+    # WHAT THE RUNNER DID NOT HAND OVER. Printed only where the check reads the
+    # file list at all - for a batch command with no `{files}` in it nothing was
+    # handed over in the first place and the number would say nothing. Printed
+    # whatever the status, including a pass: a run that quietly narrowed what it
+    # pointed the tools at is the thing this line exists to make visible.
+    _del = r.get("files_dropped_deleted") or []
+    _abs = r.get("files_dropped_absent") or []
+    if r.get("file_list_consumed") and (_del or _abs):
+        _parts = []
+        if _del:
+            _parts.append("%d deleted by this change (%s%s)"
+                          % (len(_del), ", ".join(_del[:4]), ", ..." if len(_del) > 4 else ""))
+        if _abs:
+            _parts.append("%d absent, and this run has no second source to say why - a typo or a "
+                          "path that was never here looks the same (%s%s)"
+                          % (len(_abs), ", ".join(_abs[:4]), ", ..." if len(_abs) > 4 else ""))
+        e.write("             -> %d of %d path(s) in scope not handed over, %d handed over: %s. "
+                "Reason source: %s.\n"
+                % (len(_del) + len(_abs), r["files_in_scope"], r["files_handed_over"],
+                   "; ".join(_parts), r.get("dropped_source")))
     if r.get("detail"):
         e.write("             -> %s\n" % r["detail"])
 
