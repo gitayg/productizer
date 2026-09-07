@@ -239,9 +239,15 @@ if [ "$MODE" = "selftest" ]; then
 
   SELF_CASES=0
   SELF_FAILED=0
+  # R39.b: the reached half of the declaration below is ACCUMULATED here, one
+  # entry per case as it ran. A literal list would satisfy the reader and prove
+  # nothing.
+  CODES=""
   self_report() { # $1 case, $2 expected exit, $3 what the case is
     _rc="$(cat "$SB/$1.rc")"
     SELF_CASES=$((SELF_CASES + 1))
+    CODES="$CODES$_rc
+"
     if [ "$_rc" = "$2" ]; then
       printf '  held:    case %-16s expected %s  observed %s  %s\n' "$1" "$2" "$_rc" "$3"
     else
@@ -271,11 +277,24 @@ if [ "$MODE" = "selftest" ]; then
   self_report bad-usage 2 \
     "an option this parser does not take: bad usage is refused rather than ignored"
 
-  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+  printf '  self-test cases driven: %d. Cases that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_FAILED"
+
+  # The R39.b declaration. The reached half is computed from the cases above;
+  # the documented half is the contract in this file's header.
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '  NOT ASSERTED: which of the eighty assertions moved. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'check-waiver-rendering: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  if [ -n "$MISSING" ]; then
+    printf 'check-waiver-rendering: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
     exit 1
   fi
   printf '  R39 for this tool: the self-test exists and reaches 0, 1 and 2 by driving the real check against a real runner, not by reading its source.\n'

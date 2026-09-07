@@ -31,6 +31,8 @@ Exit codes
 
 Usage
     validate-spec.py [--strict] [--quiet] [--kind spec|constitution|backlog] FILE...
+    validate-spec.py --repo ROOT [--strict] [--quiet]
+    validate-spec.py --repo ROOT --list-files
     validate-spec.py --baseline OLD_SPEC.md NEW_SPEC.md
     validate-spec.py --counts SPEC.md
     validate-spec.py --format speckit SPEC.md
@@ -49,24 +51,47 @@ Input formats
                           `references/speckit-format.md`.
 
 Scope
-    MOST CHECKS HERE ARE PER FILE. Counts, the id allocator, EARS and
-    supersession are judged inside one document, even when several are given
-    on one command line. TWO ARE NOT, and both exist because the spec header
-    promises ids "stay unique across the whole repo even if this spec is later
-    split into several files" -- a promise no per-file check can keep:
+    MOST CHECKS HERE ARE PER FILE. Counts, EARS and supersession are judged
+    inside one document, even when several are given on one command line. FIVE
+    ARE NOT, and all five exist because the spec header promises ids "stay
+    unique across the whole repo even if this spec is later split into several
+    files" -- a promise no per-file check can keep:
 
       - ID_DEFINED_TWICE: an id defined in one spec file of the run and again
         in another spec file of the same run is an ERROR in both.
       - citations resolve against EVERY spec file of the run, so a plan or an
         acceptance row citing a requirement that lives in a sibling spec file
         is not CITATION_UNKNOWN.
+      - COUNTER_DISAGREES: two spec files of the run declaring different
+        `Next requirement id` values. One id space has one allocator, and
+        which of the two is authoritative is stated nowhere.
+      - SIBLING_ID_AT_OR_ABOVE_COUNTER: this file's declared next id is at or
+        below an id another spec file already defines, so the next allocation
+        hands out an id the repo is using. ID_DEFINED_TWICE catches that after
+        the duplicate is written; this catches it before.
+      - TEXT_DUPLICATE_ACROSS_FILES: one behaviour under two ids, one per
+        file -- the shape the per-file TEXT_DUPLICATE cannot see, and the
+        shape a split produces by construction.
 
-    Both are inert on a single-file spec: the sibling index is empty, and the
-    code paths they guard do not run. See the note on `check_spec_counts` for
-    what was measured on a real two-file split, and for the one cost of a
-    split that is STILL not enforced after this -- nothing sums the parts, so
-    once each header carries its own total the product-level total is stated
-    nowhere and checked by nothing.
+    All five are inert on a single-file spec: the sibling index and the
+    sibling document list are both empty, and the code paths they guard return
+    before reading a requirement.
+
+    WHICH FILES ARE "THE RUN" WAS THE CALLER'S DECISION until `--repo`. Every
+    check above still fires only over the files one command line names, so a
+    split whose halves were never listed together was unchecked again.
+    `--repo ROOT` replaces that decision with a rule: the parts a repo
+    DECLARES in `spec.path`, plus the constitution beside them, and an ERROR
+    -- never a silent inclusion -- for any other file in the spec directory
+    that reads as a spec. `--repo ROOT --list-files` prints the same list for
+    another tool to consume, so two tools cannot disagree about what the spec
+    is. See the `Discovery` section below for why declaration and not a
+    filename glob is authoritative.
+
+    See the note on `check_spec_counts` for what was measured on a real
+    two-file split, and for the one cost of a split that is STILL not enforced
+    after this -- nothing sums the parts, so once each header carries its own
+    total the product-level total is stated nowhere and checked by nothing.
 
 Deterministic: no wall clock, no environment, no network is read, and problems
 are emitted sorted by (line, code, message). Two runs of the same input are
@@ -77,7 +102,11 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import glob
+import json
+import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass, field
 
@@ -513,7 +542,46 @@ def siblings_for(index, doc):
     return siblings
 
 
-def check_spec(doc, siblings=None):
+def spec_siblings(documents, doc):
+    """The OTHER spec documents of this run, in command-line order.
+
+    `siblings_for` answers "which ids are defined elsewhere", and that is all
+    ID_DEFINED_TWICE and the citation union need. Three later checks need more
+    than the ids -- a sibling's declared allocator, and a sibling's requirement
+    TEXT -- so they are handed the documents themselves.
+
+    Sameness is decided on the path as given, the same rule `siblings_for`
+    uses, so the same file named twice on one command line is still one file
+    and compares against nothing.
+    """
+    return [other for other in documents
+            if other.kind == "spec" and other.path != doc.path]
+
+
+def declared_counter(doc, name="Next requirement id", prefix="R"):
+    """A document's `Next <thing> id` as an int, or None. ADDS NO DIAGNOSTICS.
+
+    `field_number` is the reporting reader and is right for the file being
+    checked. A SIBLING's counter is read silently on purpose: a malformed
+    counter in part B is part B's own COUNTER_MALFORMED, emitted against part
+    B's line when part B is checked, and emitting it a second time against
+    part A would name the wrong file for the defect.
+    """
+    entry = doc.fields.get(name)
+    if entry is None:
+        return None
+    value = entry[1]
+    backtick = BACKTICK_RE.search(value)
+    if backtick:
+        token = backtick.group(1).strip()
+    else:
+        words = value.split()
+        token = words[0].strip() if words else ""
+    match = re.match(r"^%s([1-9][0-9]*)$" % prefix, token)
+    return int(match.group(1)) if match else None
+
+
+def check_spec(doc, siblings=None, others=None):
     if "requirements" not in doc.sections:
         doc.add(1, ERROR, "NO_REQUIREMENTS_SECTION",
                 "no `## Requirements` heading: nothing in this file was "
@@ -535,6 +603,8 @@ def check_spec(doc, siblings=None):
     check_spec_counts(doc)
     check_spec_siblings(doc, siblings)
     check_spec_citations(doc, siblings)
+    check_spec_allocator(doc, counter, others)
+    check_spec_text_siblings(doc, others)
 
 
 def check_spec_ids(doc, counter):
@@ -776,10 +846,23 @@ def check_spec_counts(doc):
          split re-runs at 0 warnings.
 
     ONLY 1 IS STILL OPEN, and it is the one this function is about: nothing
-    sums the parts. Both halves of 2 and 3 are a cross-file pass over the spec
-    documents `main` loaded, and they are per-run, not per-repo - a split whose
-    halves are never given to one invocation is unchecked again, so the caller
-    that lists the spec files decides how much of the promise holds.
+    sums the parts. 2 and 3 were a cross-file pass over the spec documents
+    `main` loaded, which made them per-RUN and not per-repo - a split whose
+    halves were never given to one invocation was unchecked again, and the
+    caller that listed the spec files decided how much of the promise held.
+    FIXED 2026-09-07 - see the `Discovery` section. `--repo ROOT` derives the
+    file list from `spec.path` instead of taking it from the caller, and
+    reports any undeclared spec file in the spec directory rather than
+    reporting a clean result over a file it did not read. Three further
+    per-file blind spots went with it: COUNTER_DISAGREES,
+    SIBLING_ID_AT_OR_ABOVE_COUNTER and TEXT_DUPLICATE_ACROSS_FILES, each
+    measured at `0 error(s), 0 warning(s)`, exit 0, on a two-file split the
+    day before.
+
+    NOTHING SUMS THE PARTS EVEN SO. `--repo` now knows every part, which is
+    what a product-level total would need, and computing one is still not
+    done: the header field is per file, and changing what it means is a spec
+    change rather than a check change.
     """
     lineno, _value, declared, counted = spec_counts(doc)
     if not declared:
@@ -844,6 +927,108 @@ def check_spec_citations(doc, siblings=None):
             continue
         reported.add((lineno, ident))
         doc.add(lineno, WARN, "CITATION_UNKNOWN", unknown % ident)
+
+
+def check_spec_allocator(doc, counter, others):
+    """The allocator is a claim about the REPO, and it stops being checked at
+    the file boundary exactly like the id space did.
+
+    Two defects, both measured on a two-file split on 2026-09-06 and both
+    reported as `0 error(s), 0 warning(s)`, exit 0, before this landed:
+
+      COUNTER_DISAGREES -- part A declares `R9`, part B declares `R4`. Which
+        one the next allocation reads from is undefined, and whichever it is,
+        the other file's header is a false statement about the repo. Reported
+        against BOTH files for the same reason ID_DEFINED_TWICE is: there is
+        nothing in the text that says which is authoritative, and naming a
+        winner would be this script guessing.
+
+      SIBLING_ID_AT_OR_ABOVE_COUNTER -- part A declares `R2` while part B
+        already defines R2 and R3. `ID_AT_OR_ABOVE_COUNTER` catches this
+        inside one file and cannot see part B; ID_DEFINED_TWICE catches the
+        consequence only AFTER somebody has written the duplicate. This
+        catches it BEFORE the allocation.
+
+    Both are reported at this file's counter line, not at the sibling's
+    requirement line: the defect is what THIS header claims, and the file the
+    diagnostic names has to be the file whose edit clears it.
+
+    Inert by construction on a single-file spec: `others` is empty.
+    """
+    if not others or counter is None:
+        return
+    entry = doc.fields.get("Next requirement id")
+    if entry is None:
+        return
+    lineno = entry[0]
+    for other in others:
+        theirs = declared_counter(other)
+        if theirs is not None and theirs != counter:
+            doc.add(lineno, ERROR, "COUNTER_DISAGREES",
+                    "this file allocates from R%d and %s allocates from R%d; "
+                    "a spec split across several files is one id space with "
+                    "one allocator, and which of the two is authoritative is "
+                    "stated nowhere" % (counter, other.path, theirs))
+    for other in others:
+        for requirement in other.requirements:
+            if requirement.number < counter:
+                continue
+            doc.add(lineno, ERROR, "SIBLING_ID_AT_OR_ABOVE_COUNTER",
+                    "%s is defined at %s line %d and this file declares the "
+                    "next id as R%d; the next allocation hands out an id the "
+                    "repo already uses"
+                    % (requirement.ident, other.path, requirement.line,
+                       counter))
+
+
+def check_spec_text_siblings(doc, others):
+    """TEXT_DUPLICATE_ACROSS_FILES: one behaviour under two ids, one per file.
+
+    The per-file `TEXT_DUPLICATE` above compares a file with itself, so the
+    cheapest way to hide a duplicated behaviour from it has always been to put
+    the two ids in different files -- which is what a split does by
+    construction. Measured: two halves each holding one copy of the same
+    sentence under a different id reported `0 error(s), 0 warning(s)`, exit 0.
+
+    A separate code rather than the per-file one: the message has to name a
+    file and a line the per-file message has no room for, and a consumer that
+    parses `TEXT_DUPLICATE` should not have to learn a second message shape.
+
+    BOTH copies are reported, once each, when their own file is checked --
+    there is no original, the same as for ID_DEFINED_TWICE. Only active
+    requirements take part, matching the per-file check: a superseded one is a
+    frozen record and its text is REQUIRED to stay verbatim.
+
+    THE SAME id in both files is skipped: that is ID_DEFINED_TWICE, already an
+    ERROR against both copies, and "R30 repeats the text of R30" adds a second
+    finding about one defect. Measured on a spec literally copied under a
+    second name -- 82 errors, and 70 warnings of which every one was that
+    sentence about an id and itself. This check is about ONE behaviour under
+    TWO ids.
+    """
+    if not others:
+        return
+    mine = {}
+    for requirement in doc.requirements:
+        if requirement.status != "active" or not requirement.text:
+            continue
+        mine.setdefault(normalise(requirement.text), requirement)
+    if not mine:
+        return
+    for other in others:
+        for requirement in other.requirements:
+            if requirement.status != "active" or not requirement.text:
+                continue
+            match = mine.get(normalise(requirement.text))
+            if match is None or match.ident == requirement.ident:
+                continue
+            doc.add(match.line, WARN, "TEXT_DUPLICATE_ACROSS_FILES",
+                    "%s repeats the text of %s at %s line %d; one behaviour "
+                    "under two ids splits its citations and only one gets "
+                    "tested, and a spec split across several files is still "
+                    "one spec"
+                    % (match.ident, requirement.ident, other.path,
+                       requirement.line))
 
 
 # --------------------------------------------------------------------------
@@ -1223,24 +1408,168 @@ def load_document(path, text, kind=None):
     return build_document(path, text, resolved)
 
 
-def check_document(doc, spec=None, siblings=None):
+def check_document(doc, spec=None, siblings=None, others=None):
     if doc.kind == "spec":
-        check_spec(doc, siblings=siblings)
+        check_spec(doc, siblings=siblings, others=others)
     elif doc.kind == "constitution":
         check_constitution(doc, spec=spec)
     elif doc.kind == "backlog":
         check_backlog(doc)
 
 
-def validate_text(path, text, kind=None, spec=None, siblings=None):
+def validate_text(path, text, kind=None, spec=None, siblings=None,
+                  others=None):
     doc = load_document(path, text, kind=kind)
-    check_document(doc, spec=spec, siblings=siblings)
+    check_document(doc, spec=spec, siblings=siblings, others=others)
     return doc
 
 
 def read_text(path):
     with open(path, "r", encoding="utf-8") as handle:
         return handle.read()
+
+
+# --------------------------------------------------------------------------
+# Discovery -- which files ARE the spec
+# --------------------------------------------------------------------------
+#
+# Everything above is per RUN. A cross-file check only runs over the files one
+# command line happens to name, so before this section the caller decided how
+# much of the header's promise held, and a split whose halves were never listed
+# together was unchecked again. `--repo ROOT` moves that decision out of the
+# caller and into a rule.
+#
+# THE RULE, in one sentence: a repo's spec is what its config DECLARES, and
+# every other file in the spec directory that reads as a spec is an ERROR
+# rather than a silent inclusion.
+#
+# Declaration, not inference, is the load-bearing half. Inferring the parts
+# from a filename glob (`spec-*.md`) would mean a file named to look like a
+# part joins the id space by accident and a part named anything else never
+# does -- a discovery rule whose answer depends on a naming convention nobody
+# wrote down. So the config is authoritative, and the glob is used only in the
+# other direction: to find files the config does NOT list and refuse to report
+# a clean result over them. A repo that splits its spec and forgets to say so
+# gets an error naming the file, not a confident pass.
+
+CONFIG_PATH = ".claude/productizer/config.json"
+DEFAULT_SPEC_PATH = ".claude/productizer/spec.md"
+CONSTITUTION_NAME = "constitution.md"
+
+
+@dataclass
+class Discovery:
+    """What `--repo` found. `refusal` non-empty means nothing was measured."""
+    spec_paths: list = field(default_factory=list)
+    other_paths: list = field(default_factory=list)
+    undeclared: list = field(default_factory=list)
+    refusal: str = ""
+
+    def files(self):
+        return self.spec_paths + self.other_paths
+
+
+def declared_spec_paths(root):
+    """The spec parts a repo declares, as `(paths, refusal)`.
+
+    `.claude/productizer/config.json` -> `spec.path`, which is EITHER a string
+    (one file, the shape every repo has today) OR a list of strings (a split
+    spec, in the order the product reads them). No config, or a config with no
+    `spec.path`, means the default single file -- so a repo that has never
+    heard of this still discovers correctly.
+
+    A config that exists and cannot be parsed is a REFUSAL, not a fallback to
+    the default. Falling back would answer confidently about a repo whose own
+    statement of where its spec lives could not be read.
+    """
+    config = os.path.normpath(os.path.join(root, CONFIG_PATH))
+    declared = [DEFAULT_SPEC_PATH]
+    if os.path.isfile(config):
+        try:
+            with open(config, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError) as exc:
+            return [], ("%s exists and could not be read as JSON (%s). It is "
+                        "the file that says where this repo's spec lives, so "
+                        "nothing was discovered and nothing was checked"
+                        % (config, exc))
+        block = data.get("spec") if isinstance(data, dict) else None
+        value = block.get("path") if isinstance(block, dict) else None
+        if isinstance(value, str):
+            declared = [value]
+        elif isinstance(value, list):
+            if not value or not all(isinstance(item, str) for item in value):
+                return [], ("%s declares `spec.path` as a list that is empty "
+                            "or holds a non-string. It is the file that says "
+                            "where this repo's spec lives, so nothing was "
+                            "discovered and nothing was checked" % config)
+            declared = list(value)
+        elif value is not None:
+            return [], ("%s declares `spec.path` as %s; it must be a string "
+                        "(one file) or a list of strings (a split spec). "
+                        "Nothing was discovered and nothing was checked"
+                        % (config, type(value).__name__))
+    paths = []
+    for rel in declared:
+        path = os.path.normpath(os.path.join(root, rel))
+        if path not in paths:
+            paths.append(path)
+    for path in paths:
+        if not os.path.isfile(path):
+            return [], ("%s is declared as a spec file of this repo and is "
+                        "not a readable file. A declared part that is not "
+                        "there is not a part that is empty" % path)
+    return paths, ""
+
+
+def discover_repo(root):
+    """Every governed document of a repo, discovered rather than listed by hand.
+
+    Returns a `Discovery`. `spec_paths` are the declared parts, in declared
+    order. `other_paths` adds the constitution beside them when there is one,
+    because its `Enforced by` ids resolve against the spec and a run that
+    dropped it would report ids as unknown that are not.
+
+    `undeclared` holds the files this refuses to be quiet about: any other
+    `.md` in the spec directory that `detect_kind` reads as a spec, and any
+    that could not be read at all -- an unreadable file is not a file ruled
+    out. The backlog is deliberately NOT discovered: it is not part of the id
+    space this exists to protect, and pulling a document nothing checks today
+    into a gate is a separate decision from closing this gap.
+    """
+    found = Discovery()
+    paths, refusal = declared_spec_paths(root)
+    if refusal:
+        found.refusal = refusal
+        return found
+    found.spec_paths = paths
+    spec_dir = os.path.dirname(paths[0])
+    constitution = os.path.normpath(os.path.join(spec_dir, CONSTITUTION_NAME))
+    if os.path.isfile(constitution):
+        found.other_paths.append(constitution)
+    known = set(found.files())
+    for candidate in sorted(glob.glob(os.path.join(spec_dir, "*.md"))):
+        candidate = os.path.normpath(candidate)
+        if candidate in known:
+            continue
+        try:
+            text = read_text(candidate)
+        except OSError as exc:
+            found.undeclared.append(
+                (candidate,
+                 "is in the spec directory and could not be read (%s), so it "
+                 "could not be ruled out as a spec file. A file nobody read "
+                 "is not a file that is not a spec" % exc))
+            continue
+        if detect_kind(text) == "spec":
+            found.undeclared.append(
+                (candidate,
+                 "reads as a spec file and `spec.path` in %s does not list "
+                 "it, so its ids, its allocator and its requirement text took "
+                 "part in no cross-file check. Declare it there or it is not "
+                 "part of this spec"
+                 % os.path.normpath(os.path.join(root, CONFIG_PATH))))
+    return found
 
 
 def emit(doc, out):
@@ -1545,6 +1874,46 @@ SPLIT_A_STRAY = SPLIT_A_SPEC.replace("| R3 | `test_four_classes` |",
                                      "| R3 | `test_four_classes` |\n"
                                      "| R9 | `test_absent` |")
 
+# The allocator half of a split. Part B keeps its own ids and moves only the
+# header, so the disagreement is the ONLY defect in the pair -- a fixture that
+# also tripped an id check would not tell which check caught it.
+SPLIT_B_OTHER_COUNTER = SPLIT_B_SPEC.replace("`R4` — allocate",
+                                             "`R9` — allocate")
+
+# Both halves wound back to `R2` while part B already defines R2 and R3. The
+# counters AGREE here on purpose: part B trips the per-file
+# ID_AT_OR_ABOVE_COUNTER on its own ids, and part A -- whose only id is R1 and
+# which is clean by every per-file rule -- is the file the cross-file check has
+# to catch.
+SPLIT_A_LOW_COUNTER = SPLIT_A_SPEC.replace("`R4` — allocate",
+                                           "`R2` — allocate")
+SPLIT_B_LOW_COUNTER = SPLIT_B_SPEC.replace("`R4` — allocate",
+                                           "`R2` — allocate")
+
+# One behaviour, two ids, one per file. Deliberately not built from SPLIT_A/B:
+# moving a sentence between those two sections trips EARS_SECTION_MISMATCH as
+# well, and a fixture that raises two codes cannot falsify either one.
+TEXT_SPLIT_A = """# Widget — living spec, part A
+
+Next requirement id
+: `R4` — allocate from here.
+
+Requirements
+: 1 active, 0 superseded, 0 withdrawn.
+
+## Requirements
+
+### Event-driven
+
+- **R1** — When an intent arrives, the widget shall classify it.
+"""
+
+TEXT_SPLIT_B = TEXT_SPLIT_A.replace("part A", "part B").replace("**R1**",
+                                                                "**R2**")
+TEXT_SPLIT_B_DISTINCT = TEXT_SPLIT_B.replace(
+    "When an intent arrives, the widget shall classify it.",
+    "When a batch completes, the widget shall notify the caller.")
+
 RENUMBERED_SPEC = """# Widget — living spec
 
 Next requirement id
@@ -1698,7 +2067,8 @@ def self_test():
                      for path, text in pairs]
         index = spec_id_locations(documents)
         for doc in documents:
-            check_spec(doc, siblings=siblings_for(index, doc))
+            check_spec(doc, siblings=siblings_for(index, doc),
+                       others=spec_siblings(documents, doc))
         return documents
 
     def codes(doc):
@@ -1981,6 +2351,293 @@ def self_test():
         shutil.rmtree(sandbox, ignore_errors=True)
 
     # ----------------------------------------------------------------------
+    # The allocator and the requirement text, across files. Each of the three
+    # was MEASURED as `0 error(s), 0 warning(s)`, exit 0, on 2026-09-06 before
+    # the check that catches it existed, so each red case below has a green
+    # case beside it and the green case is the one that used to be the only
+    # answer.
+    # ----------------------------------------------------------------------
+    documents = run_set("split-counter-disagrees",
+                        [("split-a.md", SPLIT_A_SPEC),
+                         ("split-b.md", SPLIT_B_OTHER_COUNTER)])
+    for doc in documents:
+        expect("split-counter-disagrees:" + doc.path, doc,
+               ["COUNTER_DISAGREES"])
+        for problem in doc.problems:
+            if problem.code == "COUNTER_DISAGREES" and problem.severity != ERROR:
+                failures.append("split-counter-disagrees: %s is %s, expected %s"
+                                % (problem.code, problem.severity, ERROR))
+    # Named in BOTH directions, for ID_DEFINED_TWICE's reason: nothing in the
+    # text says which header is authoritative, so a check that reported one of
+    # them would be guessing which file to edit.
+    if not any("split-b.md" in p.message for p in documents[0].problems
+               if p.code == "COUNTER_DISAGREES"):
+        failures.append("split-counter-disagrees: part A does not name part B")
+    if not any("split-a.md" in p.message for p in documents[1].problems
+               if p.code == "COUNTER_DISAGREES"):
+        failures.append("split-counter-disagrees: part B does not name part A")
+    # The green half: the same two files with the same allocator are silent.
+    documents = run_set("split-counter-agrees",
+                        [("split-a.md", SPLIT_A_SPEC),
+                         ("split-b.md", SPLIT_B_SPEC)])
+    for doc in documents:
+        for problem in doc.problems:
+            if problem.code == "COUNTER_DISAGREES":
+                failures.append("split-counter-agrees: %s" % problem.message)
+
+    documents = run_set("split-sibling-above-counter",
+                        [("split-a.md", SPLIT_A_LOW_COUNTER),
+                         ("split-b.md", SPLIT_B_LOW_COUNTER)])
+    expect("split-sibling-above-counter", documents[0],
+           ["SIBLING_ID_AT_OR_ABOVE_COUNTER"])
+    above = [p for p in documents[0].problems
+             if p.code == "SIBLING_ID_AT_OR_ABOVE_COUNTER"]
+    # R2 and R3 both sit at or above R2, and both are named: reporting only
+    # the lowest would leave the second allocation still broken after the fix.
+    if len(above) != 2:
+        failures.append("split-sibling-above-counter: %d id(s) reported, "
+                        "expected R2 and R3" % len(above))
+    if any(p.severity != ERROR for p in above):
+        failures.append("split-sibling-above-counter: not an ERROR")
+    # Part A is clean under every per-file rule -- that is the whole point.
+    if any(p.code == "ID_AT_OR_ABOVE_COUNTER" for p in documents[0].problems):
+        failures.append("split-sibling-above-counter: part A tripped the "
+                        "per-file check, so this fixture proves nothing about "
+                        "the cross-file one")
+    # The green half: the same pair with the allocator ahead of every id.
+    documents = run_set("split-counter-ahead",
+                        [("split-a.md", SPLIT_A_SPEC),
+                         ("split-b.md", SPLIT_B_SPEC)])
+    for doc in documents:
+        for problem in doc.problems:
+            if problem.code == "SIBLING_ID_AT_OR_ABOVE_COUNTER":
+                failures.append("split-counter-ahead: %s" % problem.message)
+
+    documents = run_set("split-text-duplicate",
+                        [("text-a.md", TEXT_SPLIT_A),
+                         ("text-b.md", TEXT_SPLIT_B)])
+    for doc in documents:
+        expect("split-text-duplicate:" + doc.path, doc,
+               ["TEXT_DUPLICATE_ACROSS_FILES"])
+        for problem in doc.problems:
+            if (problem.code == "TEXT_DUPLICATE_ACROSS_FILES"
+                    and problem.severity != WARN):
+                failures.append("split-text-duplicate: %s is %s, expected %s"
+                                % (problem.code, problem.severity, WARN))
+    documents = run_set("split-text-distinct",
+                        [("text-a.md", TEXT_SPLIT_A),
+                         ("text-b.md", TEXT_SPLIT_B_DISTINCT)])
+    for doc in documents:
+        for problem in doc.problems:
+            if problem.code == "TEXT_DUPLICATE_ACROSS_FILES":
+                failures.append("split-text-distinct: %s" % problem.message)
+    # One id in both files with one text is ID_DEFINED_TWICE and nothing else.
+    # Without the same-id skip, a spec copied under a second name reports the
+    # sentence "R30 repeats the text of R30" once per requirement -- 70 of them
+    # on this repository's own spec, next to the 82 errors that are the defect.
+    documents = run_set("split-text-same-id",
+                        [("text-a.md", TEXT_SPLIT_A),
+                         ("text-b.md", TEXT_SPLIT_A)])
+    for doc in documents:
+        expect("split-text-same-id:" + doc.path, doc, ["ID_DEFINED_TWICE"])
+        for problem in doc.problems:
+            if problem.code == "TEXT_DUPLICATE_ACROSS_FILES":
+                failures.append("split-text-same-id: an id duplicated across "
+                                "files also reported %s" % problem.message)
+
+    # INERT ON ONE FILE, the three new checks together. `others` is empty for a
+    # one-spec run, and this repository is a one-spec repository today.
+    doc = run("single-file-allocator.md", SPLIT_A_LOW_COUNTER)
+    for problem in doc.problems:
+        if problem.code in ("COUNTER_DISAGREES",
+                            "SIBLING_ID_AT_OR_ABOVE_COUNTER",
+                            "TEXT_DUPLICATE_ACROSS_FILES"):
+            failures.append("single-file-allocator: a one-file run reported "
+                            "%s" % problem.code)
+
+    # ----------------------------------------------------------------------
+    # DISCOVERY, through `main`, on a real directory tree. Everything above is
+    # per RUN: it proves the checks fire when a caller lists both halves. This
+    # is the part that stops depending on the caller, so nothing here may be
+    # asserted against a hand-built file list -- the list is the thing under
+    # test.
+    # ----------------------------------------------------------------------
+    case("repo-discovery")
+    sandbox = tempfile.mkdtemp(prefix="validate-spec-selftest-repo.")
+    try:
+        home = os.path.join(sandbox, ".claude", "productizer")
+        os.makedirs(home)
+        part_a = os.path.join(home, "spec.md")
+        part_b = os.path.join(home, "spec-b.md")
+        config = os.path.join(home, "config.json")
+
+        def write(path, text):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+
+        def declare(paths):
+            write(config, json.dumps({"spec": {"path": paths}}))
+
+        write(part_a, SPLIT_A_SPEC)
+        write(part_b, SPLIT_B_DUPLICATE)
+
+        # 1. Both halves declared: the duplicate id is caught with no file
+        #    named on the command line at all.
+        declare([".claude/productizer/spec.md",
+                 ".claude/productizer/spec-b.md"])
+        status, output = drive(["--repo", sandbox])
+        if status != EXIT_FAILED:
+            failures.append("repo-discovery: a declared split with an id in "
+                            "both halves exited %d, expected %d"
+                            % (status, EXIT_FAILED))
+        if output.count("ERROR ID_DEFINED_TWICE") != 2:
+            failures.append("repo-discovery: %d ID_DEFINED_TWICE line(s) from "
+                            "a discovered split: %s"
+                            % (output.count("ERROR ID_DEFINED_TWICE"),
+                               output.strip()))
+
+        # 2. THE FALSIFICATION OF DISCOVERY ITSELF. The same two files on disk,
+        #    with the config listing only one of them. Before the undeclared
+        #    detector this is a confident `1 file(s) checked: 0 error(s)` over
+        #    a repo whose spec is split and whose ids collide -- the
+        #    per-invocation gap moved one layer down.
+        declare(".claude/productizer/spec.md")
+        status, output = drive(["--repo", sandbox])
+        if status != EXIT_FAILED:
+            failures.append("repo-discovery: an undeclared spec part exited "
+                            "%d, expected %d" % (status, EXIT_FAILED))
+        if output.count("ERROR SPEC_FILE_UNDECLARED") != 1:
+            failures.append("repo-discovery: undeclared part not reported "
+                            "exactly once: %s" % output.strip())
+        if "spec-b.md" not in output:
+            failures.append("repo-discovery: the undeclared file is not named")
+        # It is reported and NOT checked: joining it silently would be the
+        # inference this refuses to make.
+        if "1 file(s) checked" not in output:
+            failures.append("repo-discovery: an undeclared part was pulled "
+                            "into the run: %s" % output.strip())
+
+        # 3. `--list-files` is the contract another tool reads. It refuses on
+        #    an undeclared part rather than printing a list it knows is short.
+        status, output = drive(["--repo", sandbox, "--list-files"])
+        if status != EXIT_FAILED or part_a in output:
+            failures.append("repo-discovery: --list-files printed a list over "
+                            "an undeclared part: %d %s"
+                            % (status, output.strip()))
+        declare([".claude/productizer/spec.md",
+                 ".claude/productizer/spec-b.md"])
+        status, output = drive(["--repo", sandbox, "--list-files"])
+        if status != EXIT_CLEAN:
+            failures.append("repo-discovery: --list-files exited %d" % status)
+        if output.splitlines() != [os.path.normpath(part_a),
+                                   os.path.normpath(part_b)]:
+            failures.append("repo-discovery: --list-files printed %r"
+                            % output.splitlines())
+
+        # 4. The allocator, discovered rather than listed: part A wound back to
+        #    R2 while part B defines R2 and R3, which is the exact input
+        #    measured at exit 0 before this landed.
+        write(part_a, SPLIT_A_LOW_COUNTER)
+        write(part_b, SPLIT_B_SPEC)
+        status, output = drive(["--repo", sandbox])
+        if "ERROR SIBLING_ID_AT_OR_ABOVE_COUNTER" not in output:
+            failures.append("repo-discovery: the discovered split did not "
+                            "reach the allocator check: %s" % output.strip())
+        if "ERROR COUNTER_DISAGREES" not in output:
+            failures.append("repo-discovery: the discovered split did not "
+                            "reach the counter check: %s" % output.strip())
+
+        # 5. A repo with no config and one spec: the default, and silent.
+        os.remove(config)
+        os.remove(part_b)
+        write(part_a, SPLIT_B_SPEC)
+        status, output = drive(["--repo", sandbox])
+        if status != EXIT_CLEAN or "1 file(s) checked" not in output:
+            failures.append("repo-discovery: a one-file repo with no config "
+                            "exited %d: %s" % (status, output.strip()))
+
+        # 6. A config that exists and cannot be read is a REFUSAL. Falling back
+        #    to the default would answer confidently about a repo whose own
+        #    statement of where its spec lives was unreadable.
+        write(config, "{not json")
+        status, output = drive(["--repo", sandbox])
+        if status != EXIT_UNMEASURED:
+            failures.append("repo-discovery: an unparseable config exited %d, "
+                            "expected %d" % (status, EXIT_UNMEASURED))
+        if "DISCOVERY_REFUSED" not in output or "NOT MEASURED" not in output:
+            failures.append("repo-discovery: an unparseable config did not "
+                            "report NOT MEASURED: %s" % output.strip())
+
+        # 7. A declared part that is not on disk. NOT MEASURED, not "the other
+        #    part was clean": a part that is not there is not a part that is
+        #    empty, and reporting the rest as checked would be the confident
+        #    partial answer this whole file exists to refuse.
+        declare([".claude/productizer/spec.md",
+                 ".claude/productizer/spec-gone.md"])
+        status, output = drive(["--repo", sandbox])
+        if status != EXIT_UNMEASURED:
+            failures.append("repo-discovery: a declared part that is not on "
+                            "disk exited %d, expected %d"
+                            % (status, EXIT_UNMEASURED))
+        if "DISCOVERY_REFUSED" not in output or "spec-gone.md" not in output:
+            failures.append("repo-discovery: a declared part that is not on "
+                            "disk was reported as an ordinary read failure "
+                            "over a discovery that had already succeeded: %s"
+                            % output.strip())
+        # `--list-files` is where refusing rather than reading-and-failing is
+        # load-bearing: the consumer of the list never opens the file itself,
+        # so a path printed here is asserted to exist.
+        status, output = drive(["--repo", sandbox, "--list-files"])
+        if status != EXIT_UNMEASURED or "spec.md\n" in output:
+            failures.append("repo-discovery: --list-files printed a list that "
+                            "names a part which is not on disk: %d %s"
+                            % (status, output.strip()))
+
+        # 8. The constitution beside the spec is discovered too, because its
+        #    `Enforced by` ids resolve against the spec and a run that dropped
+        #    it would report ids as unknown that are not.
+        declare(".claude/productizer/spec.md")
+        write(os.path.join(home, "constitution.md"), VALID_CONSTITUTION)
+        status, output = drive(["--repo", sandbox])
+        if "2 file(s) checked" not in output:
+            failures.append("repo-discovery: the constitution beside the spec "
+                            "was not discovered: %s" % output.strip())
+        os.remove(os.path.join(home, "constitution.md"))
+
+        # 9. A `.md` in the spec directory that cannot be read at all. A
+        #    directory with that name is used because it raises OSError for
+        #    every user, root included -- a permission bit does not.
+        os.makedirs(os.path.join(home, "notes.md"))
+        status, output = drive(["--repo", sandbox])
+        if "ERROR SPEC_FILE_UNDECLARED" not in output or status != EXIT_FAILED:
+            failures.append("repo-discovery: an unreadable file in the spec "
+                            "directory was treated as ruled out: %d %s"
+                            % (status, output.strip()))
+        os.rmdir(os.path.join(home, "notes.md"))
+
+        # 10. The usage guards. Two answers to "which files are the spec" is
+        #     the defect --repo removes, so it refuses rather than picking one.
+        def quiet_main(argv):
+            captured = io.StringIO()
+            saved_out, saved_err = sys.stdout, sys.stderr
+            sys.stdout = sys.stderr = captured
+            try:
+                return main(argv)
+            finally:
+                sys.stdout, sys.stderr = saved_out, saved_err
+
+        for argv in (["--repo", sandbox, part_a],
+                     ["--repo", sandbox, "--baseline", part_a],
+                     ["--repo", sandbox, "--counts"],
+                     ["--repo", sandbox, "--format", "speckit"],
+                     ["--list-files", part_a]):
+            if quiet_main(argv) != EXIT_USAGE:
+                failures.append("repo-discovery: %s was not a usage error"
+                                % " ".join(argv))
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+    # ----------------------------------------------------------------------
     # --format speckit. Four fixtures, one per thing the adapter can be wrong
     # about: the rules firing, a line no rule matched, nothing to adapt at all,
     # and a finding the adapter itself manufactured.
@@ -2075,6 +2732,74 @@ def self_test():
             failures.append("speckit-section: EARS_SECTION_MISMATCH survived "
                             "the n/a drop")
 
+    # ------------------------------------------------------------------
+    # R39.b - WHICH EXIT CODES THIS SELF-TEST ACTUALLY DROVE.
+    #
+    # The fixtures above call functions; they never leave the process, so
+    # they drive no exit code at all. Every code below is taken from a REAL
+    # subprocess whose status is read, and the list printed at the end is
+    # computed from those statuses - not typed. A hardcoded list here would
+    # be a claim with nothing checking it, which is the thing this protocol
+    # exists to refuse.
+    #
+    # Exit 3 is the self-test's OWN failure code, so it cannot be driven by
+    # asking this file to succeed. It is driven from a patched COPY with one
+    # deliberate failure injected. The copy runs with the guard variable set,
+    # which is what stops it copying itself forever.
+    # ------------------------------------------------------------------
+    reached = set()
+    if not os.environ.get("VALIDATE_SPEC_CHILD"):
+        import subprocess
+        import tempfile
+        env = dict(os.environ, VALIDATE_SPEC_CHILD="1")
+        me = os.path.abspath(__file__)
+
+        def drive(args, want, note):
+            proc = subprocess.run([sys.executable, me] + args,
+                                  capture_output=True, text=True, env=env)
+            reached.add(proc.returncode)
+            if proc.returncode != want:
+                failures.append("r39b-%s: expected exit %d, got %d"
+                                % (note, want, proc.returncode))
+
+        work = tempfile.mkdtemp(prefix="validate-spec-r39b.")
+        try:
+            clean = os.path.join(work, "clean.md")
+            with open(clean, "w", encoding="utf-8") as fh:
+                fh.write(VALID_SPEC)
+            drive([clean, "--quiet"], EXIT_CLEAN, "clean")
+
+            broken = os.path.join(work, "broken.md")
+            with open(broken, "w", encoding="utf-8") as fh:
+                fh.write(BROKEN_SPEC)
+            drive([broken, "--quiet"], EXIT_FAILED, "errors")
+
+            drive(["--counts", "--baseline", clean, clean], EXIT_USAGE, "usage")
+            drive([os.path.join(work, "absent.md")], EXIT_UNMEASURED, "unread")
+
+            copy = os.path.join(work, "patched.py")
+            source = open(me, encoding="utf-8").read()
+            injected = source.replace(
+                "    if failures:\n        for failure in failures:",
+                '    failures.append("deliberate injection, driving exit 3")\n'
+                "    if failures:\n        for failure in failures:", 1)
+            if injected == source:
+                failures.append("r39b-selftest: the injection anchor moved, so "
+                                "exit 3 was NOT driven. Unmeasured, not clean.")
+            else:
+                with open(copy, "w", encoding="utf-8") as fh:
+                    fh.write(injected)
+                drive_copy = subprocess.run(
+                    [sys.executable, copy, "--self-test"],
+                    capture_output=True, text=True, env=env)
+                reached.add(drive_copy.returncode)
+                if drive_copy.returncode != EXIT_SELFTEST:
+                    failures.append("r39b-selftest: a self-test with an injected "
+                                    "failure exited %d, not %d"
+                                    % (drive_copy.returncode, EXIT_SELFTEST))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
     if failures:
         for failure in failures:
             sys.stdout.write("SELF-TEST FAIL: " + failure + "\n")
@@ -2082,6 +2807,17 @@ def self_test():
         return EXIT_SELFTEST
     sys.stdout.write("self-test passed: %d fixtures, 0 failures\n"
                      % len(fixtures))
+    if reached:
+        documented = [EXIT_CLEAN, EXIT_FAILED, EXIT_USAGE,
+                      EXIT_SELFTEST, EXIT_UNMEASURED]
+        sys.stdout.write("    exit codes reached: %s   documented: %s\n"
+                         % (" ".join(str(c) for c in sorted(reached)),
+                            " ".join(str(c) for c in documented)))
+        missing = [c for c in documented if c not in reached]
+        if missing:
+            sys.stderr.write("R39.b: documented exit code(s) no case reached: "
+                             "%s\n" % " ".join(str(c) for c in missing))
+            return EXIT_SELFTEST
     return EXIT_CLEAN
 
 
@@ -2170,6 +2906,17 @@ def main(argv):
                         help="input notation. `speckit` adapts a GitHub "
                              "spec-kit spec.md into this grammar in memory "
                              "before checking it; the file is never written")
+    parser.add_argument("--repo", metavar="ROOT",
+                        help="discover this repo's spec files instead of "
+                             "listing them: `spec.path` in "
+                             "ROOT/.claude/productizer/config.json, plus the "
+                             "constitution beside them. Any other file in the "
+                             "spec directory that reads as a spec is an error, "
+                             "not a silent inclusion")
+    parser.add_argument("--list-files", dest="list_files", action="store_true",
+                        help="with --repo, print the discovered spec files one "
+                             "per line and check nothing, so another tool can "
+                             "read the same list this does")
     parser.add_argument("--self-test", "--selftest", dest="self_test",
                         action="store_true",
                         help="run the built-in fixtures and exit")
@@ -2178,6 +2925,44 @@ def main(argv):
     out = sys.stdout
     if args.self_test:
         return self_test()
+    discovery = None
+    if args.repo is not None:
+        for flag, given in (("files", bool(args.files)),
+                            ("--baseline", bool(args.baseline)),
+                            ("--counts", args.counts),
+                            ("--format speckit", args.format == "speckit")):
+            if given:
+                sys.stderr.write("validate-spec.py: --repo discovers which "
+                                 "files are the spec; %s names them, and two "
+                                 "answers to the same question is the defect "
+                                 "--repo exists to remove\n" % flag)
+                return EXIT_USAGE
+        discovery = discover_repo(args.repo)
+        if discovery.refusal:
+            out.write("%s:1: %s DISCOVERY_REFUSED: %s\n"
+                      % (os.path.normpath(os.path.join(args.repo,
+                                                       CONFIG_PATH)),
+                         ERROR, discovery.refusal))
+            if not args.quiet:
+                out.write("NOT MEASURED: no file under %s was read -- a repo "
+                          "whose spec could not be located has not passed.\n"
+                          % args.repo)
+            return EXIT_UNMEASURED
+        if args.list_files:
+            for path, why in discovery.undeclared:
+                out.write("%s:1: %s SPEC_FILE_UNDECLARED: %s\n"
+                          % (path, ERROR, why))
+            if discovery.undeclared:
+                return EXIT_FAILED
+            for path in discovery.spec_paths:
+                out.write("%s\n" % path)
+            return EXIT_CLEAN
+        args.files = discovery.files()
+    elif args.list_files:
+        sys.stderr.write("validate-spec.py: --list-files reports what --repo "
+                         "discovered; without --repo there is no discovery to "
+                         "report\n")
+        return EXIT_USAGE
     if not args.files:
         parser.print_usage(sys.stderr)
         sys.stderr.write("validate-spec.py: no files given\n")
@@ -2252,13 +3037,17 @@ def main(argv):
     # did not run reads to a later reader as a cross-file check that passed.
     specs = [d for d in documents if d.kind == "spec"]
     index = {}
+    cross = documents
     if speckit and len(specs) > 1:
+        cross = []
         out.write("speckit: %d spec files adapted in one run. The cross-file "
-                  "checks (ID_DEFINED_TWICE, and citations resolved against "
-                  "sibling spec files) were NOT applied: rule 7 synthesises "
-                  "each file's allocator and rule 3 renumbers each file's ids "
-                  "from R1, so ids from two spec-kit files are not comparable. "
-                  "Not applied is not a pass.\n" % len(specs))
+                  "checks (ID_DEFINED_TWICE, COUNTER_DISAGREES, "
+                  "SIBLING_ID_AT_OR_ABOVE_COUNTER, TEXT_DUPLICATE_ACROSS_FILES, "
+                  "and citations resolved against sibling spec files) were NOT "
+                  "applied: rule 7 synthesises each file's allocator and rule 3 "
+                  "renumbers each file's ids from R1, so ids from two spec-kit "
+                  "files are not comparable. Not applied is not a pass.\n"
+                  % len(specs))
     elif not speckit:
         index = spec_id_locations(documents)
 
@@ -2266,11 +3055,13 @@ def main(argv):
     # its `Enforced by` ids resolved against real requirements.
     spec = specs[0] if specs else None
     if spec is not None:
-        check_spec(spec, siblings=siblings_for(index, spec))
+        check_spec(spec, siblings=siblings_for(index, spec),
+                   others=spec_siblings(cross, spec))
     for doc in documents:
         if doc is spec:
             continue
-        check_document(doc, spec=spec, siblings=siblings_for(index, doc))
+        check_document(doc, spec=spec, siblings=siblings_for(index, doc),
+                       others=spec_siblings(cross, doc))
 
     if args.baseline and spec is not None:
         baseline_text = None
@@ -2322,6 +3113,16 @@ def main(argv):
                 errors += 1
             else:
                 warnings += 1
+
+    # A file the run did NOT check has no document to carry a diagnostic, so
+    # it is emitted here, in the same format, and counted like any other error.
+    # Discovery that found an undeclared spec part and stayed quiet about it
+    # would be the per-invocation gap moved one layer down.
+    if discovery is not None:
+        for path, why in discovery.undeclared:
+            out.write("%s:1: %s SPEC_FILE_UNDECLARED: %s\n"
+                      % (path, ERROR, why))
+            errors += 1
 
     if unmeasured:
         if not args.quiet:

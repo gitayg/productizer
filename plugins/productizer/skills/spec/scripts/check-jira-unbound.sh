@@ -118,7 +118,10 @@ if [ "$MODE" = "selftest" ]; then
   trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 
   CASES=0; UPHELD=0; REPORT=""
-  REACHED_0=0; REACHED_1=0; REACHED_2=0
+  # R39.b: the reached half of the declaration below is ACCUMULATED here, one
+  # entry per case as it ran. A literal list would satisfy the reader and prove
+  # nothing.
+  CODES=""
 
   # $1 case name · $2 the `jira` line of the config, verbatim · $3 a backlog
   # body. The config is written as text rather than assembled, so a case that
@@ -139,11 +142,8 @@ if [ "$MODE" = "selftest" ]; then
     bash "$0" "$@" > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
     CASES=$((CASES + 1))
     if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
-    case "$GOT" in
-      0) REACHED_0=1 ;;
-      1) REACHED_1=1 ;;
-      2) REACHED_2=1 ;;
-    esac
+    CODES="$CODES$GOT
+"
     REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
 "
   }
@@ -195,17 +195,22 @@ if [ "$MODE" = "selftest" ]; then
   printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
     "each case exits with the code it declares, with the guard shut and with it open"
-  # `if`, not `[ ... ] && ...`: a false test as the last statement of a list is
-  # a non-zero status, and `set -e` would end the run on the code that was NOT
-  # reached - a self-test killed by its own summary line.
-  REACHED=""
-  if [ "$REACHED_0" = 1 ]; then REACHED="$REACHED 0"; fi
-  if [ "$REACHED_1" = 1 ]; then REACHED="$REACHED 1"; fi
-  if [ "$REACHED_2" = 1 ]; then REACHED="$REACHED 2"; fi
-  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
-    "${REACHED:- none}"
+  # The R39.b declaration. The reached half is computed from the cases above;
+  # the documented half is the contract in this file's header.
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: the cases compare the exit CODE and never the wording of a finding, so a case that went red for the wrong reason is invisible here and is read off its captured output by hand\n'
   [ "$CASES" = "$UPHELD" ] || exit 1
+  # A documented code nothing drove is the gap R39.b exists to make visible, so
+  # it ends the run rather than being printed past.
+  if [ -n "$MISSING" ]; then
+    printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+    exit 1
+  fi
   exit 0
 fi
 

@@ -389,10 +389,16 @@ def _drive(argv, cwd=None):
 def selftest() -> int:
     cases = 0
     failed = 0
+    # R39.b: the reached half of the declaration at the end of this function is
+    # ACCUMULATED here, one entry per case as it runs, off the exit code the
+    # child actually returned. A literal list would satisfy the reader that
+    # parses the line and prove nothing.
+    reached = set()
 
     def report(name, want, got, why):
         nonlocal cases, failed
         cases += 1
+        reached.add(got)
         if got == want:
             print("  held:    case %-14s expected %s  observed %s  %s"
                   % (name, want, got, why))
@@ -458,8 +464,16 @@ def selftest() -> int:
            "a --break value the parser does not accept: bad usage is refused rather than "
            "silently read as no ablation at all")
 
-    print("  self-test cases driven: %d, exit codes reached: 0, 2. Cases that did not hold: %d"
+    print("  self-test cases driven: %d. Cases that did not hold: %d"
           % (cases, failed))
+    # The R39.b declaration. The reached half is computed from the cases above;
+    # the documented half is this file's contract, stated in the R39 block near
+    # the top of this section: 0 and 2 and nothing else.
+    documented = (0, 2)
+    print("    exit codes reached: %s   documented: %s"
+          % (" ".join(str(c) for c in sorted(reached)),
+             " ".join(str(c) for c in documented)))
+    missing = [c for c in documented if c not in reached]
     print("  NOT REACHED: exit 1. This tool has no failure exit - `run` returns 0 over any "
           "corpus, including one where every case missed - so there is no code 1 to drive, "
           "and no case here pretends to drive one.")
@@ -471,6 +485,10 @@ def selftest() -> int:
     if failed:
         sys.stderr.write("solver-probe: %d self-test case(s) did not produce the exit code or "
                          "the measurement they declare.\n" % failed)
+        return 1
+    if missing:
+        sys.stderr.write("solver-probe: documented exit code(s) no case reached: %s\n"
+                         % " ".join(str(c) for c in missing))
         return 1
     print("  R39 for this tool: the self-test exists and reaches 0 and 2, the only two codes "
           "this tool can return, by driving the real probe rather than reading its source.")

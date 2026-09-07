@@ -447,6 +447,11 @@ def selftest():
 
     cases = 0
     upheld = 0
+    # R39.b: the reached half of the declaration below is ACCUMULATED here, one
+    # entry per case as it runs, off the exit code the child actually returned.
+    # A literal list would satisfy the reader that parses the line and prove
+    # nothing.
+    reached = set()
 
     def run(name, argv, expected, what):
         """Drive one case and read the exit code off the child."""
@@ -454,6 +459,7 @@ def selftest():
         proc = subprocess.run([sys.executable, os.path.abspath(__file__)] + argv,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         got = proc.returncode
+        reached.add(got)
         cases += 1
         if got == expected:
             upheld += 1
@@ -488,10 +494,21 @@ def selftest():
                      % ("selftest-cases-produce-declared-exit", cases, upheld,
                         verdict, "each case exits with the code this file's "
                         "contract declares for it"))
-    sys.stdout.write("    exit codes reached: 0, 1, 2 and 3 - the whole contract.\n")
+    # The R39.b declaration. The reached half is computed from the cases above;
+    # the documented half is the `Exit status:` block in this file's usage.
+    documented = (0, 1, 2, 3)
+    sys.stdout.write("    exit codes reached: %s   documented: %s\n"
+                     % (" ".join(str(c) for c in sorted(reached)),
+                        " ".join(str(c) for c in documented)))
+    missing = [c for c in documented if c not in reached]
+    if missing:
+        sys.stderr.write("%s: documented exit code(s) no self-test case reached: %s\n"
+                         % (SELF, " ".join(str(c) for c in missing)))
     sys.stdout.write("    NOT ASSERTED: the WORDING of any finding. The corpus drives the "
                      "exit code, so a case that went red for the wrong reason is "
                      "invisible here and is read off the case output by hand.\n")
+    if missing:
+        return 1
     return 0 if cases == upheld else 1
 
 

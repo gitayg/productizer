@@ -455,6 +455,11 @@ SELFTEST_CFG_OFF
 
   SELF_CASES=0
   SELF_FAILED=0
+  # R39.b: the reached half of the declaration below is ACCUMULATED here, one
+  # entry per case as it ran - including the clean case, which is driven
+  # outside self_drive because it guards the others' premise. A literal list
+  # would satisfy the reader and prove nothing.
+  CODES=""
 
   # $1 case, $2 expected exit, $3 what the case is, then the argv to drive.
   #
@@ -468,6 +473,8 @@ SELFTEST_CFG_OFF
     _rc=0
     bash "$0" "$@" > "$SB/$_name.out" 2> "$SB/$_name.err" || _rc=$?
     SELF_CASES=$((SELF_CASES + 1))
+    CODES="$CODES$_rc
+"
     if [ "$_rc" = "$_want" ]; then
       printf '  held:    case %-13s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
     else
@@ -485,6 +492,8 @@ SELFTEST_CFG_OFF
     self_unmeasured "a configuration whose one check passes did not produce a clean run, so every case below would be red for that reason instead of its own. Unmeasured, not a corpus that held"
   fi
   SELF_CASES=1
+  CODES="$CODES$SELF_RC
+"
   printf '  held:    case %-13s expected %s  observed %s  %s\n' "clean" "0" "0" \
     "one blocking check, it passes, and it covered the file it was given"
 
@@ -518,12 +527,25 @@ SELFTEST_CFG_OFF
     --config "$SB/checks-pass.yaml" --root "$SB" \
     --changed "$SB/changed-deleted.txt" --out "$SB/deleted.json"
 
-  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2, 3. Cases that did not hold: %d\n' \
+  printf '  self-test cases driven: %d. Cases that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_FAILED"
+
+  # The R39.b declaration. The reached half is computed from the cases above;
+  # the documented half is the four-code contract at the top of this file.
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2 3; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '  exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
   printf '  NOT ASSERTED: the content of any result file. Each case reads the exit CODE, so a run that reached the right code by the wrong route is invisible here and is read off the case output by hand.\n'
   printf '  NOT ASSERTED: the `deleted` case proves the absent path was ACCEPTED, not that the verdict script counted it as deleted rather than as unexamined - the path it names falls outside the scope of the one check, so no tool was asked to open it.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  if [ -n "$MISSING" ]; then
+    printf 'run-checks: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
     exit 1
   fi
   printf '  R39 for this tool: the self-test exists and reaches 0, 1, 2 and 3 by driving the real runner over a corpus built for it, not by reading its source and not by running the declared suite.\n'

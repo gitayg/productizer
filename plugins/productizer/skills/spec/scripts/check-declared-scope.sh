@@ -168,12 +168,18 @@ if [ -n "$SELFTEST" ]; then
 
   SELF_CASES=0
   SELF_UPHELD=0
+  # R39.b: the reached half of the declaration below is ACCUMULATED here, one
+  # entry per case as it ran. A literal list would satisfy the reader and prove
+  # nothing.
+  CODES=""
 
   # The exit code is captured into a variable on the SAME LINE as the command.
   # A command substitution in an argument list resets $?, so reading the status
   # inside the call below would report the status of the call.
   record() { # <case> <expected> <observed> <what the case is>
     SELF_CASES=$((SELF_CASES + 1))
+    CODES="$CODES$3
+"
     if [ "$3" = "$2" ]; then
       SELF_UPHELD=$((SELF_UPHELD + 1)); verdict="held"
     else
@@ -222,9 +228,20 @@ if [ -n "$SELFTEST" ]; then
   printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
     "each case exits with the code this file's contract declares for it"
-  printf '    exit codes reached: 0, 1 and 2 - the whole contract.\n'
+  # The R39.b declaration. The reached half is computed from the cases above;
+  # the documented half is the contract in this file's header.
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: WHICH of the ten assertions went red in the finding case. The corpus drives the exit code, and a case that went red for the wrong reason is invisible here.\n'
   [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
+  if [ -n "$MISSING" ]; then
+    printf 'check-declared-scope: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+    exit 1
+  fi
   exit 0
 fi
 

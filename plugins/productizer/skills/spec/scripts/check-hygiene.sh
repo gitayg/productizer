@@ -187,6 +187,11 @@ if [ -n "$SELFTEST" ]; then
 
   SELF_CASES=0
   SELF_UPHELD=0
+  # R39.b: the reached half of the declaration below is ACCUMULATED here,
+  # one entry per case as it ran. A literal list would satisfy the reader
+  # and prove nothing. The match-not-printed case is deliberately absent:
+  # the status it records is grep's, not this tool's.
+  CODES=""
 
   # `record` is called with the exit code ALREADY IN A VARIABLE. A command
   # substitution in an argument list resets $?, so reading the status inside
@@ -208,16 +213,22 @@ if [ -n "$SELFTEST" ]; then
   bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/clean.txt" \
     > "$SCRATCH/clean.out" 2> "$SCRATCH/clean.err" || got=$?
   record clean-file 0 "$got" "a file holding no forbidden shape is examined and reported clean"
+  CODES="$CODES$got
+"
 
   got=0
   bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/personal-path.txt" \
     > "$SCRATCH/pp.out" 2> "$SCRATCH/pp.err" || got=$?
   record personal-path 1 "$got" "a home-directory path is a finding"
+  CODES="$CODES$got
+"
 
   got=0
   bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/credential.txt" \
     > "$SCRATCH/cred.out" 2> "$SCRATCH/cred.err" || got=$?
   record credential-shape 1 "$got" "a key-shaped string is a finding"
+  CODES="$CODES$got
+"
 
   # The match itself must never reach the report. This is the one assertion
   # here that is about OUTPUT rather than an exit code, and it is the defect
@@ -232,34 +243,55 @@ if [ -n "$SELFTEST" ]; then
   bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/binary.bin" "$SCRATCH/clean.txt" \
     > "$SCRATCH/bin.out" 2> "$SCRATCH/bin.err" || got=$?
   record binary-named-not-scanned 0 "$got" "a NUL-bearing file is named and skipped while the clean file still counts"
+  CODES="$CODES$got
+"
 
   got=0
   bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" \
     > "$SCRATCH/nofiles.out" 2> "$SCRATCH/nofiles.err" || got=$?
   record no-files-given 2 "$got" "nothing scanned is not a clean scan"
+  CODES="$CODES$got
+"
 
   got=0
   bash "$0" --not-a-real-option "$SCRATCH/clean.txt" \
     > "$SCRATCH/badopt.out" 2> "$SCRATCH/badopt.err" || got=$?
   record unknown-option 2 "$got" "bad usage is refused, never answered"
+  CODES="$CODES$got
+"
 
   got=0
   bash "$0" --patterns "$SCRATCH/no-such-list.txt" "$SCRATCH/clean.txt" \
     > "$SCRATCH/nolist.out" 2> "$SCRATCH/nolist.err" || got=$?
   record named-list-unreadable 2 "$got" "a configured local list that could not be read refuses rather than falling back to generic-only"
+  CODES="$CODES$got
+"
 
   got=0
   bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/a-directory" "$SCRATCH/absent.txt" \
     > "$SCRATCH/none.out" 2> "$SCRATCH/none.err" || got=$?
   record nothing-examinable 2 "$got" "every path given was a directory or missing, so the run has no evidence in it"
+  CODES="$CODES$got
+"
 
   if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
   printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
     "each case exits with the code this file's contract declares for it"
-  printf '    exit codes reached: 0, 1 and 2 - the whole contract.\n'
+  # The R39.b declaration. The reached half is computed from the cases above;
+  # the documented half is the contract in this file's header.
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: the default local-list resolution ($PRODUCTIZER_HYGIENE_PATTERNS and .claude/productizer/hygiene-local.txt) is pinned out of every case above, because that file is not committed and a case whose verdict depends on it is not evidence. Only the --patterns arm of that path is driven.\n'
   [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
+  if [ -n "$MISSING" ]; then
+    printf 'check-hygiene: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+    exit 1
+  fi
   exit 0
 fi
 

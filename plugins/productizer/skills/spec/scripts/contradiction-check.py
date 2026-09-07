@@ -984,8 +984,24 @@ def selftest(use_z3: bool) -> int:
     if use_z3:
         print("\n" + verify_with_z3(reqs))
 
-    file_failures = selftest_file_mode()
-    return 1 if (fp or file_failures) else 0
+    # R39.b: the reached half of the declaration below is ACCUMULATED as the
+    # cases run, off the exit code each one actually produced. A literal list
+    # would satisfy the reader that parses the line and prove nothing.
+    reached: set[int] = set()
+    file_failures = selftest_file_mode(reached)
+    usage_failures = selftest_usage_mode(reached)
+
+    # The reached half is computed above; the documented half is the `Exit
+    # codes` block of this module's docstring.
+    documented = (EXIT_CLEAN, EXIT_HALT, EXIT_USAGE, EXIT_UNMEASURED)
+    print("    exit codes reached: %s   documented: %s"
+          % (" ".join(str(c) for c in sorted(reached)),
+             " ".join(str(c) for c in documented)))
+    missing = [c for c in documented if c not in reached]
+    if missing:
+        print("documented exit code(s) no self-test case reached: %s"
+              % " ".join(str(c) for c in missing), file=sys.stderr)
+    return 1 if (fp or file_failures or usage_failures or missing) else 0
 
 
 # The corpus above is about verdicts. This half is about the exit code a
@@ -1025,8 +1041,12 @@ FILE_CASES = [
 ]
 
 
-def selftest_file_mode() -> int:
-    """Drive FILE mode over temporary files. Returns the number of failures."""
+def selftest_file_mode(reached: set) -> int:
+    """Drive FILE mode over temporary files. Returns the number of failures.
+
+    Every exit code a case produced is added to `reached`, which is what the
+    R39.b declaration reports.
+    """
     import contextlib
     import io as _io
     import tempfile
@@ -1041,6 +1061,7 @@ def selftest_file_mode() -> int:
             buf, errbuf = _io.StringIO(), _io.StringIO()
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(errbuf):
                 got = run_file(path, require)
+            reached.add(got)
             said = "NOT MEASURED" in errbuf.getvalue()
             ok = got == want and (said == (want == EXIT_UNMEASURED))
             if not ok:
@@ -1049,6 +1070,40 @@ def selftest_file_mode() -> int:
                   % ("ok" if ok else "FAIL", name, got, want,
                      ", said NOT MEASURED" if said else ""))
     print("  %d of %d held" % (len(FILE_CASES) - failures, len(FILE_CASES)))
+    return failures
+
+
+# EXIT_USAGE is the fourth documented code and FILE mode cannot produce it -
+# every path above returns 0, 1 or 4. It was undriven until the R39.b
+# declaration made the omission visible, so it is driven here, as a real
+# subprocess, so the argument parser and the `return` in main() are both on the
+# measured path rather than asserted from source.
+USAGE_CASES = [
+    ("--pair over statements that are not EARS",
+     ["--pair", "the widget is quite fast", "the widget is rather slow"]),
+    ("--require-records asked for alongside --selftest",
+     ["--selftest", "--require-records"]),
+    ("no file, no --pair, no --selftest", []),
+]
+
+
+def selftest_usage_mode(reached: set) -> int:
+    """Drive the usage-error exit as a subprocess. Returns failures."""
+    import subprocess
+
+    print("\nUSAGE mode - the fourth documented exit code")
+    failures = 0
+    for name, argv in USAGE_CASES:
+        proc = subprocess.run([sys.executable, os.path.abspath(__file__)] + argv,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        got = proc.returncode
+        reached.add(got)
+        ok = got == EXIT_USAGE
+        if not ok:
+            failures += 1
+        print("  %-5s %-44s exit %d (wanted %d)"
+              % ("ok" if ok else "FAIL", name, got, EXIT_USAGE))
+    print("  %d of %d held" % (len(USAGE_CASES) - failures, len(USAGE_CASES)))
     return failures
 
 

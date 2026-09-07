@@ -353,7 +353,7 @@ if [ -n "$SELFTEST" ]; then
   # which prints `examined 0` and reads exactly like a corpus that drove
   # nothing. Measured on this machine, not anticipated.
   CODES="$(sed -n -E 's/^(PASS|FAIL) +[^ ]+ +exit ([0-9]+).*/\2/p' \
-    < "$SELF_TMP/suite.out" | sort -u | tr '\n' ' ')"
+    < "$SELF_TMP/suite.out" | sort -u)"
   DRIVEN="$(sed -n -E 's/^(PASS|FAIL) +[^ ]+ +exit [0-9]+.*/x/p' \
     < "$SELF_TMP/suite.out" | wc -l | tr -d ' ')"
 
@@ -366,9 +366,23 @@ if [ -n "$SELFTEST" ]; then
   printf '    R39  %-38s examined %3s  %s: %s\n' \
     "selftest-cases-produce-declared-verdict" "$DRIVEN" "$SELF_VERDICT" \
     "each committed case produces the exit code and the load-bearing line that history should produce"
-  printf '    exit codes of this check reached by the corpus: %s\n' "${CODES:-none - the corpus drove nothing}"
+  # The R39.b declaration. The reached half is the list read off the case lines
+  # above; the documented half is the contract in this file's header.
+  REACHED="$(printf '%s' "$CODES" | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s\n' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "${REACHED:-none - the corpus drove nothing}"
   printf '    NOT ASSERTED: anything outside the six committed spec versions. The corpus is six histories differing by one thing each; a defect that needs a seventh shape is invisible to it, and R32.5 sets no exit code by design.\n'
-  exit "$SUITE_RC"
+  if [ "$SUITE_RC" -ne 0 ]; then
+    exit "$SUITE_RC"
+  fi
+  if [ -n "$MISSING" ]; then
+    printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+    exit 1
+  fi
+  exit 0
 fi
 
 # Defaulting to the working directory has caused four separate silent-wrong-

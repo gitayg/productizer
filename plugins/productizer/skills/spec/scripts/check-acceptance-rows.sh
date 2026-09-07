@@ -208,6 +208,10 @@ if [ "$MODE" = "selftest" ]; then
   OUTSIDE=0
   CASES=0
   UPHELD=0
+  # R39.b: the reached half of the declaration below is ACCUMULATED here, one
+  # entry per case as it ran. A literal list would satisfy the reader and prove
+  # nothing.
+  CODES=""
   CLEAN_SEEN=0
   CLEAN_HELD=0
   REPORT=""
@@ -241,6 +245,8 @@ if [ "$MODE" = "selftest" ]; then
       > "$SCRATCH/$NAME.out" 2> "$SCRATCH/$NAME.err" || GOT=$?
 
     CASES=$((CASES + 1))
+    CODES="$CODES$GOT
+"
     if [ "$GOT" = "$EXPECTED" ]; then
       UPHELD=$((UPHELD + 1))
       VERDICT="held"
@@ -273,8 +279,21 @@ if [ "$MODE" = "selftest" ]; then
   printf '    R36.f  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
     "each fixture case exits with the code its expect file declares"
+
+  # The R39.b declaration. The reached half is computed from the cases above;
+  # the documented half is the contract in this file's header.
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: the corpus drives the exit CODE, never the wording of a finding; a case that went red for the wrong reason is invisible here and is read off the case output by hand\n'
   [ "$CASES" = "$UPHELD" ] || exit 1
+  if [ -n "$MISSING" ]; then
+    printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+    exit 1
+  fi
   exit 0
 fi
 

@@ -143,6 +143,10 @@ CFG
 
   FAILED=0
   DRIVEN=0
+  # R39.b: the reached half of the declaration below is ACCUMULATED here, one
+  # entry per case as it ran. A literal list would satisfy the reader and prove
+  # nothing.
+  CODES=""
 
   drive() {
     # $1 case name, $2 expected exit, $3 expected sentence, $4.. argv
@@ -152,6 +156,8 @@ CFG
     ( cd "$SB/$case_name" && bash "$SELF" "$@" ) \
       > "$SB/$case_name.out" 2> "$SB/$case_name.err" || rc=$?
     DRIVEN=$((DRIVEN + 1))
+    CODES="$CODES$rc
+"
     local why=""
     [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
     # Both files handed to grep directly, never piped into it: under
@@ -218,6 +224,8 @@ CFG
     die_unmeasured "the corpus premise did not hold; unmeasured, not a pass"
   fi
   printf '  held: case %-22s exit 0, and said so - %s\n' "clean" "PASS: exactly one living spec"
+  CODES="$CODES$CLEAN_RC
+"
 
   drive two-specs        1 'R1 broken'                          --config config.json "${BOTH_MAPPED[@]}"
   drive no-spec          1 'this is a measured zero'            --config config.json "${BOTH_MAPPED[@]}"
@@ -237,10 +245,23 @@ CFG
   drive no-home          2 'names no home repo'                 --config config.json
   drive bad-mapping      2 'is not SLUG=PATH'                   --config config.json --repo no-equals-here
 
-  printf '  cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+  printf '  cases driven: %d. Cases that did not hold: %d\n' \
     "$((DRIVEN + 1))" "$FAILED"
+
+  # The R39.b declaration. The reached half is computed from the cases above;
+  # the documented half is the contract in this file's header.
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   if [ "$FAILED" -ne 0 ]; then
     printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
+    exit 1
+  fi
+  if [ -n "$MISSING" ]; then
+    printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
     exit 1
   fi
   printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2, and every case asserts which verdict it produced as well as which code.\n'

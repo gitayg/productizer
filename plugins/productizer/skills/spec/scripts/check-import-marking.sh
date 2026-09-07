@@ -293,20 +293,30 @@ if [ "$MODE" = "selftest" ]; then
   # <name> exit N` when a case held, `got exit N` when it did not. Read from
   # the observed side on purpose - a code the check never actually returned is
   # not a code the self-test reached, whatever the case declared.
-  REACHED="$(awk '
-    /^ok[ \t]/        { for (i = 1; i <= NF; i++) if ($i == "exit") seen[$(i + 1)] = 1 }
-    /got exit [0-9]/  { for (i = 1; i <= NF; i++) if ($i == "exit") seen[$(i + 1)] = 1 }
-    END { out = ""; for (c = 0; c <= 2; c++) if (c in seen) out = out " " c
-          print (out == "" ? " none" : out) }' "$WORK/suite.out")"
+  CODES="$(awk '
+    /^ok[ \t]/        { for (i = 1; i <= NF; i++) if ($i == "exit") print $(i + 1) }
+    /got exit [0-9]/  { for (i = 1; i <= NF; i++) if ($i == "exit") print $(i + 1) }
+  ' "$WORK/suite.out" | sort -u)"
 
   if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
   printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
     "each committed case produces the verdict it declares"
-  printf '    exit codes this self-test reached:%s. The contract declares 0, 1 and 2; a code missing here is a code nothing drove\n' \
-    "$REACHED"
+  # The R39.b declaration. The reached half is the list read off the suite's
+  # own case lines above; the documented half is the contract in this file's
+  # header. A code missing from the reached half is a code nothing drove.
+  REACHED="$(printf '%s' "$CODES" | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s\n' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "${REACHED:-none - the suite drove nothing}"
   printf '    NOT ASSERTED: the suite compares the exit code and ONE load-bearing line, never the whole finding, so a case red for a second reason on top of the right one is invisible here\n'
   [ "$CASES" = "$UPHELD" ] || exit 1
+  if [ -n "$MISSING" ]; then
+    printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+    exit 1
+  fi
   exit 0
 fi
 

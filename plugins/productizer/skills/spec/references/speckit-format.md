@@ -90,16 +90,27 @@ directory and every directory starts again at `FR-001`, so `R1` in two feature
 directories is two different requirements. A `--baseline` comparison is only
 meaningful against an earlier copy of the same directory's `spec.md`.
 
-That scope is also why the two **cross-file** checks added on 2026-09-06 —
-`ID_DEFINED_TWICE`, and citations resolved against sibling spec files — are
-**not applied** under `--format speckit`. A Productizer spec split across
-several files is one spec with one id space; two spec-kit `spec.md` files are
-two id spaces that both start at `FR-001`, so every id would collide and every
-collision would be rule 3's doing rather than the author's. The same fairness
-rule that makes `EARS_SECTION_MISMATCH` `n/a`. A run given more than one
-spec-kit file prints the suppression on a `speckit:` line and says in it that
-not applied is not a pass; it is **not** counted in the `n/a` family total,
-which reports what `speckit_adapt.py` declares.
+That scope is also why the **cross-file** checks — `ID_DEFINED_TWICE` and
+citations resolved against sibling spec files, added 2026-09-06, and
+`COUNTER_DISAGREES`, `SIBLING_ID_AT_OR_ABOVE_COUNTER` and
+`TEXT_DUPLICATE_ACROSS_FILES`, added 2026-09-07 — are **not applied** under
+`--format speckit`. A Productizer spec split across several files is one spec
+with one id space; two spec-kit `spec.md` files are two id spaces that both
+start at `FR-001`, so every id would collide and every collision would be rule
+3's doing rather than the author's. The allocator checks fail the same way for
+a second reason: rule 7 *synthesises* the `Next requirement id` field a
+spec-kit file does not carry, so comparing two synthesised allocators would
+compare the adapter with itself. The same fairness rule that makes
+`EARS_SECTION_MISMATCH` `n/a`. A run given more than one spec-kit file prints
+the suppression on a `speckit:` line, naming all five, and says in it that not
+applied is not a pass; it is **not** counted in the `n/a` family total, which
+reports what `speckit_adapt.py` declares.
+
+**`--repo` and spec-kit do not combine, and that is a refusal rather than a
+gap.** `--repo ROOT` discovers a Productizer spec from `spec.path`; a spec-kit
+repository keeps its specs under `specs/<nnn>-<slug>/spec.md`, one id space per
+directory, which is not the thing `--repo` is describing. The two are a usage
+error together rather than a silent adaptation of one into the other.
 
 ## Being fair to spec-kit
 
@@ -204,7 +215,17 @@ Restoring each returned the run to exit 0 with one warning and the self-test to
 `25 fixtures, 0 failures`, which is what `--self-test` printed when this
 section was written.
 
-**Re-observed 2026-09-06 — the self-test now prints `32 fixtures, 0 failures`.**
+**Re-observed 2026-09-07 — the self-test now prints `41 fixtures, 0 failures`.**
+Nine further fixtures landed with the per-repo discovery work: red and green
+pairs for `COUNTER_DISAGREES`, `SIBLING_ID_AT_OR_ABOVE_COUNTER` and
+`TEXT_DUPLICATE_ACROSS_FILES`, one for the same id in both halves being
+`ID_DEFINED_TWICE` and not also a text duplicate, one proving all three inert
+on a single file, and one that drives `main --repo` against a real directory
+tree — including the case that falsifies discovery itself, two spec files on
+disk with the config declaring only one. The paragraph below is the record of
+the previous measurement and is left as written.
+
+**Observed 2026-09-06 — the self-test then printed `32 fixtures, 0 failures`.**
 The number above is left as it stands because it is a record of what was
 measured then, not a specification. Two things moved it, neither of them a
 change to the adapter or to any rule in the table:

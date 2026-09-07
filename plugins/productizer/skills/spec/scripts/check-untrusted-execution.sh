@@ -277,6 +277,10 @@ SELFTEST_GATE
 
   SELF_CASES=0
   SELF_FAILED=0
+  # R39.b: the reached half of the declaration below is ACCUMULATED here,
+  # one entry per case as it ran. A literal list would satisfy the reader
+  # and prove nothing.
+  CODES=""
 
   # $1 case, $2 expected exit, $3 what the case is, then the argv to drive.
   #
@@ -290,6 +294,8 @@ SELFTEST_GATE
     _rc=0
     bash "$0" "$@" > "$SB/$_name.out" 2> "$SB/$_name.err" || _rc=$?
     SELF_CASES=$((SELF_CASES + 1))
+    CODES="$CODES$_rc
+"
     if [ "$_rc" = "$_want" ]; then
       printf '  held:    case %-16s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
     else
@@ -306,6 +312,8 @@ SELFTEST_GATE
     die_unmeasured "the committed gate and corpus did not produce a clean run over r17-block,r18,r22 - the selection the declared check uses - so every failing case below would be red for that reason instead of its own. Unmeasured, not a corpus that held"
   fi
   SELF_CASES=1
+  CODES="$CODES$SELF_RC
+"
   printf '  held:    case %-16s expected %s  observed %s  %s\n' "clean" "0" "0" \
     "the committed gate and corpus over r17-block,r18,r22: every publish and deploy blocked, every ordinary command let through, and no payload executed"
 
@@ -319,11 +327,24 @@ SELFTEST_GATE
     "no fixture directory at the path given, so no case was driven at all - unmeasured, never a pass" \
     --root "$ROOT" --fixture "$SB/there-is-no-fixture-here" --assert r17-block
 
-  printf '  self-test cases driven: %d, exit codes reached: 0, 1, 2. Cases that did not hold: %d\n' \
+  printf '  self-test cases driven: %d. Cases that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_FAILED"
+
+  # The R39.b declaration. The reached half is computed from the cases
+  # above; the documented half is the contract in this file's header.
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 1 2; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '  NOT ASSERTED: the wording of any finding. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'check-untrusted-execution: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
+    exit 1
+  fi
+  if [ -n "$MISSING" ]; then
+    printf 'check-untrusted-execution: documented exit code(s) no self-test case reached:%s\n' "$MISSING" >&2
     exit 1
   fi
   printf '  R39 for this tool: the self-test exists and reaches 0, 1 and 2 by driving the real check, not by reading its source.\n'

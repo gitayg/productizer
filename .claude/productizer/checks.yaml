@@ -780,6 +780,42 @@ checks:
       - A classification that left no record at all is invisible. Zero recorded is not detectable as an intake that classified in conversation and wrote nothing.
       - It proves the scope list matches the spec it names. That the named commit is the RIGHT one is established by the writer, not by this.
 
+  # WHICH FILES ARE THE SPEC -- the discovery contract, recorded here because
+  # this is the check that hardcodes a single spec path today, and because a
+  # contract stated only inside one tool is a contract the next tool re-invents
+  # differently.
+  #
+  # `validate-spec.py --repo ROOT --list-files` prints the repo's spec files,
+  # one absolute-or-ROOT-relative path per line, in declared order, and is the
+  # single source of that list. Any tool that reads the spec should take the
+  # list from it rather than hardcoding `.claude/productizer/spec.md`.
+  #
+  #   exit 0  the list is on stdout, one path per line, every path a readable
+  #           file. An empty stdout at exit 0 cannot happen.
+  #   exit 1  an undeclared spec file was found in the spec directory. NO list
+  #           is printed; stdout carries `PATH:1: ERROR SPEC_FILE_UNDECLARED:
+  #           ...`. A caller must treat this as unmeasured for its own purpose,
+  #           not fall back to the default path.
+  #   exit 4  discovery refused - config.json unreadable or `spec.path`
+  #           malformed, or a declared part is not on disk. stdout carries
+  #           `DISCOVERY_REFUSED` and a `NOT MEASURED` line.
+  #   exit 2  usage error, on stderr.
+  #
+  # THE RULE IT IMPLEMENTS. `spec.path` in ROOT/.claude/productizer/config.json
+  # is authoritative: a string is one file, a list of strings is a split spec in
+  # reading order, and no config at all means `.claude/productizer/spec.md`.
+  # Nothing is inferred from a filename - a glob would let a file join the id
+  # space because of what it was called. The glob is used only in the other
+  # direction: any other `.md` in the spec directory that reads as a spec, or
+  # that cannot be read at all, is an ERROR rather than a silent inclusion, so a
+  # repo that splits its spec and forgets to declare it gets a named file
+  # instead of a confident pass.
+  #
+  # Paths are emitted with `os.path.normpath`, so `--repo .` prints
+  # `.claude/productizer/spec.md` and `--repo /abs/root` prints an absolute
+  # path. A caller that needs one form should pass the ROOT that produces it
+  # rather than rewriting what comes back.
+
   - id: superseded-text
     why: a superseded requirement's sentence can be rewritten long after the fact and nothing in the file shows it; only the commit before the supersede holds what was agreed
     when:
@@ -1848,8 +1884,9 @@ checks:
             documented: <codes>`, both halves bare integer lists, the reached half computed
             from the cases as they ran. Three figures are kept apart and never added: how many
             DECLARE, how many of those drove every code they document, and how many were NOT
-            ASKED. Measured 2026-09-06: 3 of 34 declare, 3 of 3 complete, 31 unmeasured - 11
-            emit nothing, 20 emit a prose codes line with no `documented:` half. No exit code
+            ASKED. Measured 2026-09-07: 34 of 34 declare, 34 of 34 complete, 0 unmeasured.
+            (Superseded: on 2026-09-06 this read 3 of 34 declaring and 31 unmeasured - 11
+            emitting nothing, 20 emitting a prose codes line with no `documented:` half.) No exit code
             rests on any of them: a self-test never asked which codes it drove has not been
             shown incomplete, and this reader cannot tell a computed reached-list from a
             hardcoded one. Second gap: the structural NEGATIVES are never executed, so a tool dispatching a
@@ -1899,7 +1936,7 @@ checks:
       pattern: '^(\S+)$'
       min_covered: 20
     limitations:
-      - R39's "reaches each exit code it can return" is COUNTED, NOT ENFORCED, and the claim stays Partial for it. 31 of 34 self-tests do not declare which codes they drove; that is unmeasured, not a shortfall of zero. Writing the emitters is follow-up work. A declaration is also self-reported: this check compares a self-test's two halves against each other and cannot tell a computed reached-list from a hardcoded one, nor whether the `documented:` half is the tool's true contract - a tool that under-documents its codes reads as complete over an incomplete contract.
+      - R39's "reaches each exit code it can return" is COUNTED, NOT ENFORCED, and the claim stays Partial for it - for a smaller reason than before. Superseded 2026-09-07: this said 31 of 34 do not declare and that writing the emitters was follow-up work. All 34 now declare and all 34 are complete. What keeps it Partial is that a declaration is self-reported - this check compares a self-test's two halves against each other and cannot tell a computed reached-list from a hardcoded one, nor whether the `documented:` half is the tool's true contract - a tool that under-documents its codes reads as complete over an incomplete contract.
       - Reachability is static. It reads checks.yaml and one workflow file; an invocation from a Makefile, a git hook or a person is invisible, and a declared check whose tool is absent at run time still reads as reaching the self-test it names.
       - Structural negatives are never executed. A tool dispatching a self-test in an unrecognised shape reads as carrying none, which over-reports the shortfall rather than hiding it.
       - Third-party tools are n/a, not findings. `shellcheck` is a check tool the suite invokes and nobody here can give it a self-test; it is named and counted separately so neither number contaminates the other.

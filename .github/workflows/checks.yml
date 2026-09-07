@@ -129,14 +129,23 @@ jobs:
       # requirements with two `shall` clauses); --strict would fail this job on
       # a pre-existing condition and the first thing anyone did would be to
       # delete the step. WARNs are printed and do not block. See references/ci.md.
+      #
+      # `--repo .` rather than a list of paths. The cross-file checks
+      # (ID_DEFINED_TWICE, COUNTER_DISAGREES, SIBLING_ID_AT_OR_ABOVE_COUNTER,
+      # TEXT_DUPLICATE_ACROSS_FILES, and citations resolved across siblings)
+      # only ever ran over the files the command line named, so with a hardcoded
+      # list the day someone splits the spec is the day this step goes quiet
+      # about the half it was never told to read. `--repo` derives the list from
+      # `spec.path` in .claude/productizer/config.json and turns any undeclared
+      # spec file in that directory into an ERROR. On this repo, which has one
+      # spec file, it discovers exactly the two paths this step used to name and
+      # its output is byte for byte what the list produced.
       - name: Spec — EARS grammar and id permanence
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           python3 plugins/productizer/skills/spec/scripts/validate-spec.py --self-test
-          python3 plugins/productizer/skills/spec/scripts/validate-spec.py \
-            .claude/productizer/spec.md \
-            .claude/productizer/constitution.md
+          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --repo .
 
       # Precision must stay at 1.00. A contradiction checker that halts on a
       # non-conflict gets switched off, and then nothing is checked.
