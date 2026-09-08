@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # build-view.sh [repo-root] [--out FILE] [--stale-after SECONDS|never]
+# build-view.sh --arch [FILE] [repo-root]
+# build-view.sh --selftest
 #
 # Generates the lifecycle dashboard from a repository's real files. Nothing on
 # the page is stored here: every count, every state and every row is read from
@@ -29,7 +31,25 @@
 # property this script otherwise guarantees. That trade is opt-in, never taken
 # for a reader who did not ask for it, and written down in references/views.md.
 #
-# Exit: 0 on success, 2 on a bad argument or a missing template.
+# --arch prints ONE thing and writes no page: the VZ_ARCH graph this script
+# embeds in the page, as JSON on stdout, derived from FILE (default: the
+# repo-root's own checks-result.json). It exists because that graph is the one
+# part of this script with a frozen external contract - another renderer reads
+# it - and a contract that can only be inspected by grepping a 900KB HTML file
+# is a contract nobody checks. It is also what --selftest drives.
+#
+# --selftest drives the cases below as subprocesses of this script and prints
+# the R39.b declaration. R39: one case per exit code this tool can return.
+#
+# EXIT CODES ARE THE CONTRACT
+#   0  the page was written, or --arch printed a graph, or every self-test
+#      case held
+#   2  a bad argument, a missing template, a VZ_ARCH overlay whose five states
+#      do not partition the requirements, or a self-test case that did not hold
+#
+# There is deliberately no third code. Every refusal above is the same fact -
+# this run did not produce what it was asked for - and splitting it would
+# invite a caller to treat one of them as a soft failure.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,8 +96,25 @@ done
 ROOT=""
 OUT=""
 STALE_AFTER=0
+MODE=render
+ARCH_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    # --arch takes an optional FILE the same way --stale-after takes an
+    # optional number: a bare --arch is the common case and means "this repo's
+    # own result", and anything starting with - is the next option, not a value.
+    --arch)
+      MODE=arch
+      case "${2:-}" in
+        ''|-*) shift ;;
+        *)     ARCH_FILE="$2"; shift 2 ;;
+      esac ;;
+    --arch=*) MODE=arch; ARCH_FILE="${1#--arch=}"; shift ;;
+    --selftest|--self-test) MODE=selftest; shift ;;
+    # The graph assertion suite. Driven by --selftest as one of its cases and
+    # separately runnable, because when it goes red the first question is which
+    # of A1..A9 went red and that answer is on its own stdout.
+    --arch-selftest) MODE=archtest; shift ;;
     --out) OUT="${2:-}"; [ -n "$OUT" ] || { echo "build-view: --out needs a file" >&2; exit 2; }; shift 2 ;;
     --out=*) OUT="${1#--out=}"; shift ;;
     # A bare --stale-after is the common case, so it takes the default rather
@@ -90,7 +127,11 @@ while [ $# -gt 0 ]; do
     # --stale-after= with nothing after it is still the flag with no value.
     --stale-after=*) STALE_AFTER="${1#--stale-after=}"
                      [ -n "$STALE_AFTER" ] || STALE_AFTER=120; shift ;;
-    -h|--help) echo "usage: build-view.sh [repo-root] [--out FILE] [--stale-after SECONDS|never]"; exit 0 ;;
+    -h|--help)
+      echo "usage: build-view.sh [repo-root] [--out FILE] [--stale-after SECONDS|never]"
+      echo "       build-view.sh --arch [FILE] [repo-root]   print the VZ_ARCH graph as JSON"
+      echo "       build-view.sh --selftest"
+      exit 0 ;;
     -*) echo "build-view: unknown option: $1" >&2; exit 2 ;;
     *) [ -z "$ROOT" ] || { echo "build-view: only one repo-root" >&2; exit 2; }; ROOT="$1"; shift ;;
   esac
@@ -106,8 +147,90 @@ ROOT="$(cd "$ROOT" && pwd)"
 [ -n "$OUT" ] || OUT="$ROOT/.claude/productizer/pipeline.html"
 [ -f "$TEMPLATE" ] || { echo "build-view: missing template: $TEMPLATE" >&2; exit 2; }
 
+# --- --selftest ------------------------------------------------------------
+# R39: one case per exit code this tool can return, driven as a subprocess of
+# this script so that the code under test is the code that ships, and every
+# case declares BOTH the code it expects and a sentence the run must say.
+# Codes alone could not tell a bad option from a root that is not there, and
+# both of those exit 2.
+#
+# The graph assertions are one case here rather than seven, because they are
+# assertions about a data structure and belong in the language that builds it;
+# `--arch-selftest` is that suite and it names its own cases A1..A9. What this
+# layer adds is the part that suite cannot reach from inside one process: the
+# exit codes.
+if [ "$MODE" = selftest ]; then
+  SELF_FIX="$SKILL/fixtures/arch-graph/five-states.json"
+  DRIVEN=0
+  FAILED=0
+  CODES=""
+  drive() {
+    _name="$1"; _want="$2"; _need="$3"; shift 3
+    set +e
+    _out="$(bash "$SELF" "$@" 2>&1)"
+    _rc=$?
+    set -e
+    DRIVEN=$((DRIVEN + 1))
+    CODES="$CODES$_rc
+"
+    if [ "$_rc" -ne "$_want" ]; then
+      printf '  FAIL %-20s wanted exit %s, got %s\n' "$_name" "$_want" "$_rc"
+      printf '%s\n' "$_out" | sed 's/^/         /' | tail -8
+      FAILED=$((FAILED + 1))
+      return 0
+    fi
+    if ! printf '%s' "$_out" | grep -q -- "$_need"; then
+      printf '  FAIL %-20s exit %s as declared, but nothing it printed says: %s\n' \
+        "$_name" "$_rc" "$_need"
+      FAILED=$((FAILED + 1))
+      return 0
+    fi
+    printf '  ok   %-20s exit %s, and it said: %s\n' "$_name" "$_rc" "$_need"
+  }
+
+  printf 'build-view --selftest\n'
+  drive graph-cases    0 'A9 held'          --arch-selftest
+  drive arch-fixture   0 '"never_ran"'      --arch "$SELF_FIX"
+  drive arch-this-tree 0 '"generated_from"' --arch
+  drive bad-option     2 'unknown option'   --no-such-option
+  drive out-no-value   2 'needs a file'     --out
+  drive no-such-root   2 'no such directory' ./no-such-directory-under-build-view
+  drive bad-stale      2 'whole seconds'    --stale-after=zzz
+
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 2; do
+    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+  done
+  printf '  cases driven: %d. Cases that did not hold: %d\n' "$DRIVEN" "$FAILED"
+  # The R39.b declaration. The reached half is computed from the codes the
+  # cases above actually produced; the documented half is the contract in this
+  # file's header. Hardcoding the reached half would make this line a claim
+  # about what someone once intended rather than about what just ran.
+  printf '    exit codes reached: %s   documented: 0 2\n' "$REACHED"
+  if [ "$FAILED" -ne 0 ]; then
+    printf 'FAIL: %d self-test case(s) did not produce the exit code and the sentence they declare.\n' \
+      "$FAILED" >&2
+    exit 2
+  fi
+  if [ -n "$MISSING" ]; then
+    printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+    exit 2
+  fi
+  printf '  NOT ASSERTED: the rendered page. --selftest drives the VZ_ARCH graph and the\n'
+  printf '  argument contract; that the HTML around it is well formed is asserted by\n'
+  printf '  check-view-readonly.sh and check-view-publish-refused.sh over a real build.\n'
+  exit 0
+fi
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# Everything from here to the python call gathers what the PAGE needs. --arch
+# and --arch-selftest read one JSON file and print, so none of it is theirs -
+# and a mode that walks the whole history to print a graph it does not use is
+# a mode nobody runs twice.
+if [ "$MODE" = render ]; then
 
 # --- stage state -----------------------------------------------------------
 # Not a gate, so a failure here must not fail the build; it becomes "unknown"
@@ -149,12 +272,16 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$ROOT" ls-files --others --exclude-standard >"$TMP/delta-new" 2>/dev/null || :
 fi
 
-python3 - "$ROOT" "$TMP" "$TEMPLATE" "$OUT" "$STALE_AFTER" "$REGEN_CMD" "$HERE" <<'PYEOF'
+fi  # MODE = render
+
+python3 - "$ROOT" "$TMP" "$TEMPLATE" "$OUT" "$STALE_AFTER" "$REGEN_CMD" "$HERE" \
+         "$MODE" "$ARCH_FILE" "$SKILL" <<'PYEOF'
 # -*- coding: utf-8 -*-
 """Render the lifecycle dashboard. Reads only; writes one HTML file."""
 import io, json, os, re, subprocess, sys, time
 
 ROOT, TMP, TEMPLATE, OUT, STALE_AFTER, REGEN_CMD, SCRIPTS = sys.argv[1:8]
+MODE, ARCH_FILE, SKILL_HOME = sys.argv[8:11]
 STALE_AFTER = int(STALE_AFTER)
 
 # --------------------------------------------------------------------------
@@ -613,6 +740,423 @@ if result_raw is not None:
         check_state = 'ok'
     except ValueError:
         check_state = 'unreadable'
+
+# --------------------------------------------------------------------------
+# VZ_ARCH - the DECLARED architecture graph, with a five-state overlay
+# --------------------------------------------------------------------------
+# WHAT THIS IS NOT. It is not a graph of the source tree. This repository holds
+# 72 shell scripts and 16 python files, and a graph built by opening those and
+# looking for one file naming another would be an INFERENCE wearing an
+# authoritative look. A filename inside a file establishes that the file names
+# it and nothing else - the reasoning the board below already refuses to
+# abandon - so 88 files of grep would produce arrows nobody can stand behind.
+#
+# WHAT IT IS. The accurate graph is already DECLARED. Every check in
+# `.claude/productizer/checks.yaml` names the tool it runs and the requirements
+# it claims, and `run-checks.sh` writes both back out with the run's results.
+# Every edge below is one of those declarations, read, never guessed. A node
+# also cannot silently go missing: a check that exists is in this graph by
+# construction, where a hand-listed set of nodes detects exactly nothing about
+# a component nobody added to the list.
+#
+# ONE FILE, AND IT IS NAMED. Everything here comes from the result file that
+# `generated_from` names and from nothing else. `checks.yaml` carries a
+# `requires:` list that is richer - 56 entries over 34 distinct names, because
+# it names git, jq and python3 alongside each check's own script - and reading
+# it too would make `generated_from` name one file while the counts came from
+# two. The tool a check RUNS is in the result, so that is the tool this draws.
+#
+# THE OVERLAY IS THE POINT, AND IT IS WHERE THIS IS EASY TO GET WRONG. Five
+# states, and on this repository's own result file exactly two of them occur:
+# 35 requirements, every one `exercised`, 38 claims, every one `pass`, none
+# voided. So `never_ran`, `void` and `missing` have no example here at all, and
+# a self-test driven by this tree alone would exercise two branches of five and
+# report green over three that had never run. That is the "a control asserting
+# over an empty set" failure this repository has already shipped more than
+# once. `fixtures/arch-graph/five-states.json` is a committed result file built
+# so that each of the five states has exactly one requirement in it, and
+# `--arch-selftest` drives it. The precedent is `check-ruling-requested.sh` and
+# `check-spec-home-stop.sh`, both of which drive committed fixtures for the
+# same reason: the condition they detect is not present in this repository.
+#
+# WHY THE ARCHITECTURE BOARDS FURTHER DOWN THIS FILE STAY, and are not replaced
+# by this. The obvious reading is that they are a hand-picked sample of five
+# components and this graph supersedes them. That reading is wrong, and it was
+# worth checking rather than acting on: what is hand-listed there is five
+# SOURCE PATHS - SKILL.md, stage-status.sh, run-checks.sh, templates/ and
+# .claude/hooks/ - and every node drawn from them is derived. The stages are
+# SKILL.md's own `### n · Name` headings, the states are stage-status.sh's own
+# answers, the gate rows are the files on disk, the exit rows are
+# run-checks.sh's own contract. Delete a stage from the skill and the board
+# loses it. So they are not a list of nodes that fails to notice a sixth.
+#
+# They also answer a different question. Those boards draw the LIFECYCLE: an
+# intent arriving, nine stages in the order the skill writes them, three layers
+# that can refuse. This graph draws the CHECK TOPOLOGY: which check runs which
+# tool and which requirement each one holds up. A reader asking "where in the
+# lifecycle am I" is not helped by 98 nodes of check-to-requirement wiring, and
+# a reader asking "what is holding up R34" is not helped by nine stage badges.
+# Replacing one with the other would answer half the questions the page is for.
+#
+# What the boards genuinely cannot do is notice a component nobody declared,
+# and that is the gap this closes - by construction rather than by looking
+# harder, since a check that exists is in this graph and a check that does not
+# is in nothing. The two live side by side because they fail differently.
+VZ_ARCH_STATES = ('measured', 'never_ran', 'void', 'guard_shut', 'missing')
+
+# run-checks.sh's own list, restated here rather than imported because this
+# script parses a RESULT and must not depend on the runner being present to
+# read one. The result already carries `voided` for every claim the runner
+# voided, so this set is a second opinion and not the first: it catches a claim
+# whose check came back in a state that measures nothing but which the writer
+# of that result did not mark. Both are checked, and either one is enough.
+VZ_ARCH_VOID_RUN = frozenset((
+    'missing_tool', 'timeout', 'no_version', 'refused', 'unmapped_exit',
+    'fail', 'hollow', 'nothing_to_examine', 'disabled'))
+
+# `python3 contradiction-check.py` runs contradiction-check.py. Naming that
+# check's tool `python3` would collapse it onto every other python check and
+# hide the file that does the work; two checks in this repository's live result
+# are reached that way. Only ONE leading interpreter is stripped, and only when
+# what follows is not a flag - `python3 -c '...'` names no script, and inventing
+# one from a code string would be the inference this whole section refuses.
+VZ_ARCH_INTERP = frozenset(('python', 'python2', 'python3', 'bash', 'sh',
+                            'zsh', 'env', 'node', 'perl', 'ruby'))
+
+# The work tree and the home directory of whoever ran the build, longest first
+# so that a tree inside the home directory is replaced as the tree. Nothing on
+# this page may carry an absolute path: the page is published, and an absolute
+# path in it is somebody's home directory - the leak that shipped in v4.2.0,
+# recorded at the top of this file. They are replaced by what they MEAN rather
+# than deleted, because a silently stripped prefix leaves a string that reads
+# as a relative path and is not one.
+VZ_ARCH_REDACT = sorted(
+    [(p, m) for p, m in ((os.path.abspath(ROOT), '<repo>'),
+                         (os.environ.get('HOME') or '', '~'))
+     if p and p != '/'],
+    key=lambda pm: -len(pm[0]))
+
+
+def vz_arch_pub(s):
+    """A string on its way into the published graph."""
+    if s is None:
+        return None
+    for _abs, _mark in VZ_ARCH_REDACT:
+        s = s.replace(_abs, _mark)
+    return s
+
+
+def vz_arch_tool(cmd):
+    """The tool a check runs, from the check's own argv. None if it has none."""
+    argv = [a for a in (cmd or []) if a]
+    if not argv:
+        return None
+    head = os.path.basename(argv[0].rstrip('/')) or argv[0]
+    if head in VZ_ARCH_INTERP and len(argv) > 1 and not argv[1].startswith('-'):
+        return vz_arch_pub(os.path.basename(argv[1].rstrip('/')) or argv[1])
+    return vz_arch_pub(head)
+
+
+def vz_arch_req_state(unit):
+    """One of VZ_ARCH_STATES for one `spec_coverage.units[]` row.
+
+    THE ORDER IS THE ARGUMENT, because several of these are true at once and
+    the reader is owed the one that decides what to do next.
+
+      guard_shut first. `n/a` is a check that ran and reported the obligation
+        UNREACHABLE. Nothing is owed, so nothing about the claims underneath
+        can turn it into something owed, and drawing it as unmet would send
+        somebody to satisfy a requirement that is not in force.
+      void next, and specifically ahead of `missing`. A failing check voids its
+        own claim, so the requirement falls back and the verdict reads Missing
+        - the same word as a requirement nobody ever claimed, and a completely
+        different situation. One says fix the check; the other says write one.
+        A page that collapses them sends the reader to the wrong work.
+      missing then: no claim at all. Mutually exclusive with void, since a
+        requirement with no claims has no claim to void, so their order between
+        themselves does not matter - only that both sit under guard_shut.
+      never_ran: claimed, live, and no check that passed stands behind it. This
+        is the em-dash rendering: not a failure, not a pass, nothing measured.
+      measured last, and it is the only one that has to prove itself: a live
+        claim from a check whose status is `pass`. Falling through to it would
+        let a malformed result read as evidence.
+    """
+    claims = unit.get('claims') or []
+    if unit.get('verdict') == 'n/a':
+        return 'guard_shut'
+    if any(c.get('voided') or c.get('check_status') in VZ_ARCH_VOID_RUN
+           for c in claims):
+        return 'void'
+    if not claims:
+        return 'missing'
+    if unit.get('exercised') and any(c.get('check_status') == 'pass'
+                                     and not c.get('voided') for c in claims):
+        return 'measured'
+    return 'never_ran'
+
+
+def vz_arch_build(res_obj, state, src, mtime):
+    """The frozen VZ_ARCH contract. Another renderer reads this shape."""
+    # Absent or unparseable: the shape is kept so a renderer can index it, and
+    # every value in it is null. NOT ZERO. A zero here would say this
+    # repository declares no check and holds no requirement, which is a
+    # measurement nobody made - it is the `?` rendering, and the reason
+    # check-no-fabricated-zero.sh exists.
+    graph = {
+        'generated_from': src,
+        'state': state,
+        'measured_utc': None,
+        'nodes': [],
+        'edges': [],
+        'delta': {'changed_files': None, 'base': None,
+                  'checks_triggered': None, 'checks_not_triggered': None,
+                  'requirements_touched': None},
+        'counts': {'checks': None, 'tools': None, 'requirements': None,
+                   'by_state': dict((s, None) for s in VZ_ARCH_STATES)},
+    }
+    if state != 'read':
+        return graph
+
+    # The result file carries no timestamp of its own - measured, not assumed:
+    # `productizer.checks.result/1` has thirteen top-level keys and none of
+    # them is a clock. So this is the file's own mtime, which is when the
+    # runner last wrote it, and it is null when it could not be stat'ed. It
+    # does not break this script's byte-identical-output guarantee: the value
+    # only moves when the result file is rewritten, which is a change to the
+    # repository like any other.
+    if mtime is not None:
+        graph['measured_utc'] = time.strftime('%Y-%m-%dT%H:%M:%SZ',
+                                              time.gmtime(mtime))
+
+    rows = res_obj.get('checks') or []
+    cov = res_obj.get('spec_coverage') or {}
+    units = cov.get('units') or []
+
+    tool_order, tool_present = [], {}
+    check_nodes, check_ids = [], set()
+    runs = []
+    for c in rows:
+        cid = vz_arch_pub(c.get('id') or '?')
+        tool = vz_arch_tool(c.get('command'))
+        probe = c.get('tool') if isinstance(c.get('tool'), dict) else None
+        if tool is None and probe:
+            tool = vz_arch_tool(probe.get('command'))
+        if tool is not None:
+            if tool not in tool_present:
+                tool_order.append(tool)
+                tool_present[tool] = None
+            if probe is not None and 'exit_code' in probe:
+                # Sticky false. A tool two checks share is present only if
+                # every probe that ran for it came back 0; one probe that
+                # could not run it is a measurement that it was not there.
+                ok = probe.get('exit_code') == 0
+                if tool_present[tool] is None or not ok:
+                    tool_present[tool] = ok
+            runs.append({'from': cid, 'to': tool, 'kind': 'runs'})
+        dd, da = c.get('files_dropped_deleted'), c.get('files_dropped_absent')
+        dropped = None if dd is None and da is None else len(dd or []) + len(da or [])
+        check_ids.add(cid)
+        check_nodes.append({
+            'id': cid, 'kind': 'check',
+            # The result's own word, never remapped. A status this page does
+            # not recognise is still a status somebody measured, and folding it
+            # into `unknown` would destroy the distinction between a check that
+            # timed out and one whose tool was not installed.
+            'status': c.get('status') or 'unknown',
+            'tool': tool,
+            'triggered': c.get('triggered'),
+            # `files_handed_over` is null when the check CONSUMED NO FILE LIST.
+            # Measured 2026-09-08: 29 of this repo's 32 checks report
+            # `file_list_consumed: false` while carrying a handed-over count of
+            # 566 - the size of the whole change, because an `always` or tag
+            # trigger scopes to it. For those checks nothing was handed over at
+            # all, and printing 566 on the node states a measurement nobody
+            # took. Null renders as the has-not-run glyph; 0 would be a claim
+            # that the runner offered files and the tool took none.
+            'files_handed_over': (c.get('files_handed_over')
+                                  if c.get('file_list_consumed') else None),
+            'files_dropped': dropped})
+
+    # A claim may name a check the result did not record - the runner writes
+    # `check_status: unknown` for exactly that. The edge is drawn and the node
+    # it points at is drawn with it, because an edge into nothing is how a
+    # renderer starts dropping declarations on the floor. It says `unknown`
+    # about everything except that something declared it.
+    claim_edges, req_nodes = [], []
+    triggered_ids = set(c['id'] for c in check_nodes if c['triggered'] is True)
+    touched = []
+    by_state = dict((s, 0) for s in VZ_ARCH_STATES)
+    for u in units:
+        uid = vz_arch_pub(u.get('id') or '?')
+        st = vz_arch_req_state(u)
+        by_state[st] += 1
+        claims = u.get('claims') or []
+        for cl in claims:
+            src_id = vz_arch_pub(cl.get('check') or '?')
+            if src_id not in check_ids:
+                check_ids.add(src_id)
+                check_nodes.append({'id': src_id, 'kind': 'check',
+                                    'status': 'unknown', 'tool': None,
+                                    'triggered': None,
+                                    'files_handed_over': None,
+                                    'files_dropped': None})
+            claim_edges.append({'from': src_id, 'to': uid, 'kind': 'claims',
+                                'voided': bool(cl.get('voided'))})
+            if src_id in triggered_ids and uid not in touched:
+                touched.append(uid)
+        req_nodes.append({
+            'id': uid, 'kind': 'requirement', 'state': st,
+            'verdict': u.get('verdict'), 'text': vz_arch_pub(u.get('text')),
+            'evidence': [vz_arch_pub(c.get('evidence')) for c in claims
+                         if c.get('evidence')]})
+
+    graph['nodes'] = (check_nodes
+                      + [{'id': t, 'kind': 'tool', 'present': tool_present[t]}
+                         for t in tool_order]
+                      + req_nodes)
+    graph['edges'] = runs + claim_edges
+
+    change = res_obj.get('change') or {}
+    files = change.get('files')
+    graph['delta'] = {
+        'changed_files': (change.get('file_count')
+                          if change.get('file_count') is not None
+                          else (len(files) if files is not None else None)),
+        # `productizer.checks.result/1` does not record the base it diffed
+        # against - measured, not assumed: `change` has three keys and they are
+        # files, file_count and tags. Null is what "the file does not say" looks
+        # like; a ref invented here would be a ref nobody diffed against.
+        'base': change.get('base'),
+        'checks_triggered': [c['id'] for c in check_nodes if c['triggered'] is True],
+        # A check whose `triggered` is neither true nor false is in neither
+        # list. The two lists are not a partition and are not drawn as one.
+        'checks_not_triggered': [c['id'] for c in check_nodes if c['triggered'] is False],
+        # A requirement this change actually put under a check that ran. It is
+        # NOT "requirements the changed files relate to" - nothing in the
+        # result says that, and deriving it from filenames would be the
+        # inference the top of this section refuses. What it means is exactly:
+        # a check that triggered claims it.
+        'requirements_touched': touched}
+
+    graph['counts'] = {'checks': len(check_nodes), 'tools': len(tool_order),
+                       'requirements': len(req_nodes), 'by_state': by_state}
+    # The five states are a partition or they are nothing. If they are not, the
+    # overlay is drawing some requirement twice or not at all, and the counts
+    # under it are a lie - so this refuses rather than publishes.
+    if sum(by_state.values()) != len(req_nodes):
+        sys.stderr.write(
+            'build-view: VZ_ARCH by_state sums to %d over %d requirement(s). The five '
+            'states are not a partition, so the overlay would be wrong about at least '
+            'one requirement. Refusing to write.\n' % (sum(by_state.values()), len(req_nodes)))
+        sys.exit(2)
+    return graph
+
+
+def vz_arch_read(path, shown):
+    """Read one result file into (object, state, shown-path, mtime)."""
+    raw = slurp(path)
+    if raw is None:
+        return None, 'absent', shown, None
+    try:
+        obj = json.loads(raw)
+    except ValueError:
+        return None, 'unreadable', shown, None
+    try:
+        mt = os.path.getmtime(path)
+    except OSError:
+        mt = None
+    return obj, 'read', shown, mt
+
+
+def vz_arch_shown(path):
+    """A path fit to publish: relative to the tree, or its bare name."""
+    r = os.path.relpath(os.path.abspath(path), os.path.abspath(ROOT))
+    return os.path.basename(path) if r.startswith(os.pardir) else r
+
+
+VZ_ARCH = vz_arch_build(*vz_arch_read(rel(RESULT_PATH), RESULT_PATH))
+
+if MODE == 'arch':
+    _p = ARCH_FILE or rel(RESULT_PATH)
+    _g = (VZ_ARCH if not ARCH_FILE
+          else vz_arch_build(*vz_arch_read(_p, vz_arch_shown(_p))))
+    sys.stdout.write(json.dumps(_g, indent=1, sort_keys=True, ensure_ascii=False) + '\n')
+    sys.exit(0)
+
+if MODE == 'archtest':
+    # A1..A9. Every case names the state or the property it drives, so a red
+    # line says which branch broke rather than that something did.
+    _fixdir = os.path.join(SKILL_HOME, 'fixtures', 'arch-graph')
+    _fix = os.path.join(_fixdir, 'five-states.json')
+    _g = vz_arch_build(*vz_arch_read(_fix, vz_arch_shown(_fix)))
+    _st = dict((n['id'], n.get('state')) for n in _g['nodes']
+               if n['kind'] == 'requirement')
+    _failed = []
+
+    def _a(name, ok, said):
+        sys.stdout.write('  %s %s %s\n' % (name, 'held' if ok else 'FAILED', said))
+        if not ok:
+            _failed.append(name)
+
+    if _g['state'] != 'read':
+        sys.stderr.write('build-view: the fixture at %s could not be read, so no case '
+                         'was driven and none of A1..A9 means anything.\n'
+                         % vz_arch_shown(_fix))
+        sys.exit(2)
+
+    _a('A1', _st.get('F1') == 'measured',
+       'F1 - a passing check with a live claim reads measured (got %r)' % _st.get('F1'))
+    _a('A2', _st.get('F2') == 'void',
+       'F2 - a failing check voids its own claim and the requirement reads void, '
+       'not missing (got %r)' % _st.get('F2'))
+    _a('A3', _st.get('F3') == 'never_ran',
+       'F3 - a live claim from a check nothing triggered reads never_ran (got %r)'
+       % _st.get('F3'))
+    _a('A4', _st.get('F4') == 'guard_shut',
+       'F4 - an n/a verdict reads guard_shut, unreachable rather than unmet (got %r)'
+       % _st.get('F4'))
+    _a('A5', _st.get('F5') == 'missing',
+       'F5 - a requirement no check names reads missing (got %r)' % _st.get('F5'))
+    _a('A6', (sum(_g['counts']['by_state'].values()) == _g['counts']['requirements']
+              and sorted(_g['counts']['by_state']) == sorted(VZ_ARCH_STATES)
+              and set(_g['counts']['by_state'].values()) == set([1])),
+       'by_state has all five keys, sums to counts.requirements, and this fixture '
+       'puts exactly one requirement in each (got %r)' % (_g['counts']['by_state'],))
+    _tools = set(n['id'] for n in _g['nodes'] if n['kind'] == 'tool')
+    _a('A7', ('fixture-tool.py' in _tools and 'python3' not in _tools
+              and _g['counts']['tools'] == 5 and _g['counts']['checks'] == 6
+              and any(n['kind'] == 'tool' and n['id'] == 'check-charlie.sh'
+                      and n['present'] is False for n in _g['nodes'])),
+       'a tool reached through an interpreter is the script, two checks behind one '
+       'tool are one node, and a failed version probe is present:false '
+       '(6 checks, %d tools)' % _g['counts']['tools'])
+    _absent = vz_arch_build(*vz_arch_read(os.path.join(_fixdir, 'no-such-result.json'),
+                                          'no-such-result.json'))
+    _unread = vz_arch_build(*vz_arch_read(os.path.join(_fixdir, 'README.md'),
+                                          'README.md'))
+    _a('A8', (_absent['state'] == 'absent' and _unread['state'] == 'unreadable'
+              and not _absent['nodes'] and not _unread['edges']
+              and _absent['counts']['checks'] is None
+              and _unread['counts']['requirements'] is None
+              and set(_absent['counts']['by_state'].values()) == set([None])
+              and _absent['delta']['checks_triggered'] is None),
+       'a result that is absent and one that will not parse each say which, draw no '
+       'node, and fabricate NOT ONE zero (%r / %r)' % (_absent['state'], _unread['state']))
+    _blob = json.dumps([_g, VZ_ARCH], ensure_ascii=False)
+    _leak = [p for p, _m in VZ_ARCH_REDACT if p in _blob]
+    _a('A9', not _leak and '/Users/' not in _blob and '/home/' not in _blob,
+       'no absolute path in the graph for the fixture or for this tree, which gets '
+       'published (%d leak(s))' % len(_leak))
+
+    sys.stdout.write('  cases driven: 9. Cases that did not hold: %d\n' % len(_failed))
+    if _failed:
+        sys.stderr.write('FAIL: %s did not hold.\n' % ', '.join(_failed))
+        sys.exit(2)
+    sys.stdout.write(
+        '  NOT ASSERTED: that this repository ever reaches never_ran, void or missing. '
+        'It does not today, which is why the fixture exists; A1..A9 are statements '
+        'about the deriver, not about this tree.\n')
+    sys.exit(0)
 
 bad_checks = [c for c in checks if c['status'] not in ('pass', 'skipped')]
 
@@ -3750,7 +4294,17 @@ p_vz = ('<div class="h">Visualizer — the lifecycle as a drawing</div>'
                   'names, the three layers that can refuse work, and the principles every '
                   'requirement sits under. Nothing on this drawing is a list kept in the '
                   'generator — each part is parsed out of the file that owns it, so editing '
-                  'the lifecycle moves the picture.', p_vz_arch),
+                  'the lifecycle moves the picture. Below the boards, the DECLARED graph: '
+                  'every check, the tool it runs and the requirements it claims, with each '
+                  'requirement carrying what is actually known about it. The boards draw the '
+                  'lifecycle; the graph draws the check topology. They fail differently, so '
+                  'both are here.',
+                  # The mount the graph paints into. The section is this
+                  # generator's to create and the block in view.html only
+                  # paints INSIDE it - the same split the history block uses.
+                  # Without this div the renderer no-ops silently, which is how
+                  # a whole panel goes missing without anything going red.
+                  p_vz_arch + '<div id="vz-arch"></div>'),
            vz_sec('vz-actions', 'What the product must do',
                   'Every active requirement, grouped by the trigger that fires it. A trigger '
                   'owing more than one obligation fans out; a trigger owing exactly one is a '
@@ -4077,13 +4631,18 @@ BODY = BODY + DL + STALE
 
 DATA = ('var PROD = %s;\nvar CUR0 = %d;\nvar HUMAN = %d;\nvar DEFERRED = %d;\nvar HUMANL = %s;\nvar S = %s;\n'
         'var VZ_HISTORY = %s;\n'
+        'var VZ_ARCH = %s;\n'
         % (json.dumps(PRODUCT), CUR0, HUMAN_ITEMS, len(_deferred),
            json.dumps(HUMAN_LIST, ensure_ascii=False),
            json.dumps(S, indent=1, sort_keys=True, ensure_ascii=False),
            # null, not an empty series: a chart drawn from [] is a chart of a
            # repository whose tooling never tested itself, and that is a
            # different claim from "this was not measured".
-           json.dumps(VZ_HIST, sort_keys=True, ensure_ascii=False)))
+           json.dumps(VZ_HIST, sort_keys=True, ensure_ascii=False),
+           # Always an object, never null: its own `state` says whether the
+           # file was read, and a renderer that has to tell absent from
+           # unreadable cannot do it from a missing variable.
+           json.dumps(VZ_ARCH, sort_keys=True, ensure_ascii=False)))
 
 tpl = slurp(TEMPLATE)
 # @@STALECSS@@ sits flush against the end of the last rule in the stylesheet,

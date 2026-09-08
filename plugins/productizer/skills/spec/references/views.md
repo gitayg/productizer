@@ -217,7 +217,50 @@ scripts/build-view.sh ../orders-api --out /tmp/v.html  # another repo, another p
 scripts/build-view.sh --stale-after                    # page notices its own age after 120s
 scripts/build-view.sh --stale-after 900                # ... after 15 minutes
 scripts/build-view.sh --stale-after never              # or 0 - the default, off
+scripts/build-view.sh --arch                           # the declared graph as JSON, nothing written
+scripts/build-view.sh --arch FILE                      # ... derived from another result file
+scripts/build-view.sh --arch-selftest                  # the graph assertions, A1..A9
+scripts/build-view.sh --selftest                       # the exit-code contract
 ```
+
+## The declared graph, and the five states
+
+The architecture section carries two drawings that fail differently, which is
+why both are there. The **boards** draw the lifecycle — the stages in the order
+`SKILL.md` writes them, the layers that can refuse. The **graph** draws the
+check topology: every check, the tool it runs, and the requirements it claims,
+derived from `checks-result.json` alone. A board cannot notice a component
+nobody declared; the graph cannot go stale that way, because a check that
+exists is in it by construction.
+
+Each requirement carries one of five states, and four of them are not a pass:
+
+| state | what it means |
+|---|---|
+| `measured` | a check ran and passed. Genuinely covered |
+| `never_ran` | claimed, but nothing triggered the check in this change. **Not a pass** |
+| `void` | a check claimed it and FAILED. A failing check voids its own claim, so the requirement falls back to Missing |
+| `guard_shut` | the obligation is unreachable here — its `Where...` guard never opens. Not unmet |
+| `missing` | nothing asserts it at all |
+
+They are distinguishable **without colour** — glyph, the word on the node,
+border style and, for a shut guard, a hatch — because colour is pre-attentive
+and a greenish block reads as fine before anyone reads the label. Every node
+also carries the state and its meaning in its `aria-label`, so the distinction
+survives with no pixels at all.
+
+**This repository reaches only two of the five.** Measured 2026-09-08:
+`measured` 32, `guard_shut` 3, and `never_ran`, `void` and `missing` all zero.
+The other three are exercised by `fixtures/arch-graph/five-states.json`, for
+the same reason `ruling-requested` and `spec-home-stop` carry fixtures — a
+sweep over an empty set proves nothing. A break that stops counting one state
+was measured GREEN against this repository and RED against that fixture.
+
+`files_handed_over` is **null for a check that consumed no file list**, which is
+29 of the 32 here. Those checks are triggered by `always` or a tag, so their
+scope is the whole change and the runner records its size — but nothing was
+handed to them, and printing that number on the node would state a measurement
+nobody took.
 
 Bash and python3 only; no network, no dependencies. It reads and writes exactly
 one file, and running it twice on an unchanged repo produces a byte-identical

@@ -945,6 +945,191 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
 @media (max-width:620px){
   .vz-hero-value{font-size:30px}
   #vz-chart{height:210px}}
+
+/* ---------- architecture: the declared graph, and its five states ----------
+   The graph is tools -> checks -> requirements, and the thing a reader must
+   take away from it is which requirements are actually MEASURED. That is the
+   whole reason this block spends four channels on state instead of one.
+
+   COLOUR IS PRE-ATTENTIVE, AND THAT IS THE PROBLEM. A reader sees the hue
+   before the label, so on a diagram any greenish block reads as "fine" long
+   before the word under it is read - and this page's entire discipline is that
+   `not measured` must never look like `measured and fine`. So EVERY state is
+   carried by three things that survive with the colour switched off, and hue
+   is the fourth and the weakest:
+
+     1. A GLYPH, from the vocabulary this page already means something by.
+        A tick is measured. The em dash is `has not run`, as it is in the
+        history section. `n/a` is a shut guard, as it is in the coverage rail.
+        `?` is `read, and could not be determined`. The empty set is `nothing
+        asserts this`. A cross is new here and means the one thing this page
+        had no glyph for: a claim that was made and then FAILED.
+     2. A WORD, uppercase, on the face of every node. Not on hover, not in a
+        legend the reader has to hold in their head - on the node.
+     3. A BORDER STYLE, and the five are different values rather than five
+        weights of one: 2px solid, 1px dashed, 3px double, 1px solid under a
+        diagonal hatch, 1px dotted. Border STYLE is one of the few things a
+        forced-colors mode preserves after it has thrown every colour away.
+     4. Hue last, and only where it repeats something already said.
+
+   The two greys are the ones a legend cannot rescue, so they are the two the
+   hatch separates: `never ran` is dashed and flat, `guard shut` is hatched.
+   A reader who cannot separate the greys can still separate the fills.
+
+   NOT ONE LITERAL COLOUR BELOW. Every value resolves to a token declared at
+   the top of this sheet, so the palette edit that would take this page to a
+   light ground takes this section with it and needs nothing changed here. */
+.ag{display:flex;flex-direction:column;gap:14px}
+.ag-note{margin:0;font-size:12px;color:var(--muted);line-height:1.6;max-width:88ch}
+.ag-note b{color:var(--text)}
+
+/* The five states, drawn once here and worn by nodes, by legend swatches and
+   by the inspector, so the legend cannot drift from the graph it explains. */
+.ag-n{border-width:1px;border-style:solid;border-color:var(--line)}
+.ag-n.a-meas{border-width:2px;border-style:solid;border-color:var(--ok);
+  background-color:color-mix(in srgb,var(--ok) 8%,var(--raised))}
+.ag-n.a-never{border-width:1px;border-style:dashed;border-color:var(--muted);
+  background-color:var(--raised)}
+.ag-n.a-void{border-width:3px;border-style:double;border-color:var(--crit);
+  background-color:color-mix(in srgb,var(--crit) 10%,var(--raised))}
+/* The hatch is the point: it is a FILL, not a colour, so it is still there
+   when every colour on the page has been replaced by two. */
+.ag-n.a-shut{border-width:1px;border-style:solid;border-color:var(--muted);
+  background-image:repeating-linear-gradient(135deg,
+    color-mix(in srgb,var(--muted) 24%,transparent) 0 2px,transparent 2px 7px)}
+.ag-n.a-miss{border-width:1px;border-style:dotted;border-color:var(--warn);
+  background-color:color-mix(in srgb,var(--warn) 7%,var(--raised))}
+.ag-n.a-unk{border-width:2px;border-style:dotted;border-color:var(--muted);
+  background-color:var(--raised)}
+
+/* The glyph box repeats the border style a second time, in a second place, at
+   a size a reader scanning a column of 35 rows actually lands on. */
+.ag-g{display:inline-grid;place-items:center;flex:0 0 auto;width:17px;height:17px;
+  border-radius:4px;font-family:var(--mono);font-size:10px;line-height:1;
+  border:1px solid var(--line);color:var(--muted);background:var(--bg)}
+.a-meas>.ag-g,.ag-g.a-meas{border-color:var(--ok);color:var(--ok);border-width:2px}
+.a-never>.ag-g,.ag-g.a-never{border-style:dashed;border-color:var(--muted);color:var(--text)}
+.a-void>.ag-g,.ag-g.a-void{border-color:var(--crit);color:var(--crit);border-width:3px;
+  border-style:double}
+.a-shut>.ag-g,.ag-g.a-shut{border-color:var(--muted);color:var(--muted);font-size:8.5px;
+  letter-spacing:-.3px;background-image:repeating-linear-gradient(135deg,
+    color-mix(in srgb,var(--muted) 34%,transparent) 0 2px,transparent 2px 5px)}
+.a-miss>.ag-g,.ag-g.a-miss{border-style:dotted;border-color:var(--warn);color:var(--warn)}
+.a-unk>.ag-g,.ag-g.a-unk{border-style:dotted;border-width:2px;border-color:var(--muted);color:var(--text)}
+
+/* The word. Uppercase and on the node, because a state a reader has to hover
+   for is a state the reader guesses at instead. */
+.ag-w{font-family:var(--mono);font-size:8.5px;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The word carries hue, but legibility comes first: a state word a reader has
+   to squint at is a state word that gets skipped, and the whole point of the
+   word is that it is the channel colour cannot take away. Mixed toward the
+   body text so it keeps its hue and still clears the ground. */
+.a-meas .ag-w{color:color-mix(in srgb,var(--ok) 62%,var(--text))}
+.a-void .ag-w{color:color-mix(in srgb,var(--crit) 62%,var(--text))}
+.a-miss .ag-w{color:color-mix(in srgb,var(--warn) 62%,var(--text))}
+
+/* nodes on the canvas */
+.ag-node{position:absolute;z-index:2;display:flex;align-items:center;gap:7px;
+  border-radius:7px;padding:4px 8px;text-align:left;overflow:hidden;
+  background-color:var(--raised);cursor:default;
+  transition:opacity .15s,box-shadow .15s}
+.ag-node:hover{box-shadow:0 0 0 1px var(--muted)}
+.ag-node:focus-visible{outline:2px solid var(--accent);outline-offset:2px;
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 17%,transparent)}
+.ag-lab{display:block;font-size:11px;font-weight:600;color:var(--text);line-height:1.25;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-txtcol{min-width:0;display:flex;flex-direction:column;gap:1px}
+
+/* Focus fades the unrelated rather than hiding it: a wire that vanishes is a
+   wire the reader concludes was never there. */
+.ag-canvas.ag-on .ag-node:not(.hot){opacity:.3}
+.ag-canvas.ag-on .vz-wire:not(.hot){opacity:.1}
+.ag-canvas .vz-wire.hot{stroke:var(--accent);stroke-width:2}
+.ag-wire-void{stroke-dasharray:4 3}
+.ag-lanehd{position:absolute;z-index:0;font-family:var(--mono);font-size:9px;
+  text-transform:uppercase;letter-spacing:.09em;color:var(--muted);line-height:1.5;
+  padding-bottom:5px;border-bottom:1px solid var(--line)}
+
+/* legend */
+.ag-key{display:grid;gap:7px;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface);padding:13px 14px}
+.ag-krow{display:grid;grid-template-columns:44px minmax(88px,auto) minmax(0,1fr) auto;
+  align-items:baseline;column-gap:11px;row-gap:2px}
+.ag-krow .ag-g{align-self:center}
+/* The legend's swatch is a node, not a colour square: it wears the same border
+   style and the same glyph the graph wears, so the key cannot come to explain
+   something the drawing does not do. */
+.ag-swatch{display:inline-flex;align-items:center;justify-content:center;
+  width:42px;height:22px;border-radius:6px;align-self:center}
+.ag-kw{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text);white-space:nowrap}
+.ag-km{font-size:12px;color:var(--muted);line-height:1.55;min-width:0}
+.ag-km b{color:var(--text);font-weight:600}
+.ag-kc{font-family:var(--mono);font-size:11px;color:var(--text);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.ag-kfoot{margin:2px 0 0;font-size:11.5px;color:var(--muted);line-height:1.55}
+@media (max-width:620px){
+  .ag-krow{grid-template-columns:44px minmax(0,1fr) auto}
+  .ag-km{grid-column:1 / -1}}
+/* The inspector's chip wears the state too - same border style, same word. */
+.vz-chip.ag-n{border-radius:4px}
+.vz-chip.a-meas{color:var(--ok)}
+.vz-chip.a-void{color:var(--crit)}
+.vz-chip.a-miss{color:var(--warn)}
+.vz-chip.a-never,.vz-chip.a-shut,.vz-chip.a-unk{color:var(--text)}
+
+/* the delta strip and the counts strip */
+.ag-strip{display:flex;flex-wrap:wrap;gap:8px}
+.ag-stat{display:flex;align-items:baseline;gap:7px;border:1px solid var(--line);
+  border-radius:8px;background:var(--surface);padding:6px 11px;min-width:0}
+.ag-stat b{font-family:var(--mono);font-size:13px;color:var(--text);font-variant-numeric:tabular-nums}
+.ag-stat.unk b{color:var(--muted)}
+.ag-stat span{font-size:11.5px;color:var(--muted)}
+
+/* the inspector: the thing a screenshot of a diagram cannot do */
+/* Sticky, and it has to be. The board is taller than any viewport at this
+   scale, so an inspector parked under it would answer questions about a node
+   the reader can no longer see - and a reader who has to scroll a thousand
+   pixels for the evidence reads the state off the colour instead, which is
+   the one behaviour this section exists to stop. */
+.ag-insp{position:sticky;bottom:12px;z-index:3;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  padding:13px 14px;display:flex;flex-direction:column;gap:8px;min-height:132px;
+  box-shadow:0 6px 22px color-mix(in srgb,var(--bg) 80%,transparent)}
+.ag-ihd{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.ag-iid{font-family:var(--mono);font-size:13px;color:var(--text);font-weight:600}
+.ag-imean{margin:0;font-size:12.5px;color:var(--text);line-height:1.6;max-width:84ch}
+.ag-itext{margin:0;font-size:12.5px;color:var(--muted);line-height:1.6;max-width:84ch}
+.ag-ievh{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--muted);margin:2px 0 0}
+.ag-iev{margin:0;padding-left:17px;display:flex;flex-direction:column;gap:5px}
+.ag-iev li{font-size:12px;color:var(--text);line-height:1.55;max-width:84ch}
+.ag-idim{color:var(--muted)}
+
+/* An unreadable graph never gets drawn as an empty one. It gets this. */
+.ag-unread{display:flex;gap:14px;align-items:flex-start;border:1px dashed var(--muted);
+  border-radius:10px;background:var(--surface);padding:20px 22px}
+.ag-unread .ag-g{width:30px;height:30px;font-size:16px;border-width:2px;border-style:dotted}
+.ag-unread div{display:flex;flex-direction:column;gap:8px;min-width:0}
+.ag-unread b{color:var(--text);font-weight:600;font-size:13px}
+.ag-unread p{margin:0;color:var(--muted);font-size:12.5px;line-height:1.6;max-width:78ch}
+.ag-unread .mono{color:var(--text)}
+
+/* Forced colours throws the palette away and keeps border STYLE, the glyph and
+   the word - which is the whole reason the state is carried by those three.
+   These two lines only stop the hatch and the focus fade from being the one
+   thing that carried a distinction once the fill is gone. */
+@media (forced-colors:active){
+  /* If the hatch survives, this costs nothing; if it is thrown away, the state
+     is still carried by a border WIDTH the other dashed state does not have,
+     on top of its own glyph and its own word. `double` is not available here -
+     it is what `void` already wears. */
+  .ag-n.a-shut{border-style:dashed;border-width:2px}
+  .ag-canvas.ag-on .ag-node:not(.hot),
+  .ag-canvas.ag-on .vz-wire:not(.hot){opacity:1}
+  .ag-node:hover,.ag-node:focus-visible{box-shadow:none}}
+@media (prefers-reduced-motion:reduce){.ag-node{transition:none}}
 @media (max-width:620px){.vz-board{padding:10px}.vz{gap:20px}}@@STALECSS@@
 </style>
 @@BODY@@
@@ -1751,4 +1936,520 @@ openAnchor(location.hash);
 })();
 function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
   document.body.appendChild(ta);ta.select();try{document.execCommand("copy");cb();}catch(err){}ta.remove();}
+
+// ---------- architecture: the declared graph, over five states -------------
+// Reads VZ_ARCH, which the generator embedded in this file's own bytes, and
+// draws it into the mount the generator left. It fetches nothing, stores
+// nothing and posts nothing. If the generator wrote no mount, this is a no-op,
+// exactly as the history block above is: the section is the generator's to
+// create, and this block only paints inside it.
+//
+// THE ONE RULE THIS BLOCK EXISTS FOR. `not measured` must never look like
+// `measured and fine`. So a state is drawn four times over - a glyph, a word
+// on the face of the node, a border style, and hue last - and hue is never
+// the only place an answer is written. See the .ag block in the stylesheet
+// for why, and for which glyph means what.
+//
+// AND ITS COROLLARY. A graph that could not be BUILT is not a graph with
+// nothing wrong in it. `unreadable` and `absent` are drawn as `?` and nothing
+// else: no board, no zeros, no counts. A count nobody measured is worse than
+// no count, because it looks like one somebody did.
+(function(){
+  var mount = document.getElementById("vz-arch");
+  if (!mount) return;
+  var A = (typeof VZ_ARCH === "undefined") ? null : VZ_ARCH;
+
+  var GL_UNK = "?", GL_NEVER = "—";
+
+  // The five requirement states, and what each MEANS. The meaning is the
+  // legend's text and the inspector's text, from one place, so the legend
+  // cannot come to disagree with what a node says about itself.
+  var RS = {
+    measured:   {g:"✓", w:"MEASURED",   k:"a-meas",
+      m:"A check ran here and it PASSED. Genuinely covered."},
+    never_ran:  {g:GL_NEVER, w:"NEVER RAN",  k:"a-never",
+      m:"Claimed, but nothing triggered the check in this change. THIS IS NOT A PASS — " +
+        "it is an absence of evidence, and it is drawn as one."},
+    "void":     {g:"✗", w:"VOID",       k:"a-void",
+      m:"A check claimed this and FAILED. A failing check voids its own claim, so the " +
+        "requirement falls back to Missing. NOT a pass, and not merely “unknown”."},
+    guard_shut: {g:"n/a",    w:"GUARD SHUT", k:"a-shut",
+      m:"Unreachable here — the obligation’s Where… guard never opens in this " +
+        "repository, so there is nothing to meet. Not unmet, and not measured either."},
+    missing:    {g:"∅", w:"MISSING",    k:"a-miss",
+      m:"Nothing asserts this at all. No check names it."}
+  };
+  var RS_ORDER = ["measured","never_ran","void","guard_shut","missing"];
+  // A state this page does not know is never quietly folded into one it does.
+  var RS_BAD = {g:GL_UNK, w:"UNREADABLE STATE", k:"a-unk",
+    m:"The generator emitted a state this page has no rendering for. It is drawn as " +
+      GL_UNK + " rather than as any of the five, because guessing which one it meant is " +
+      "how a dashboard starts lying."};
+
+  var KS = {
+    pass:          {g:"✓", w:"PASS",          k:"a-meas", m:"ran and found nothing"},
+    fail:          {g:"✗", w:"FAIL",          k:"a-void",
+      m:"ran and found something. Every claim it makes is voided by that"},
+    refused:       {g:"⊘", w:"REFUSED",       k:"a-void",
+      m:"declined to answer. A refusal is not a pass"},
+    hollow:        {g:"◌", w:"HOLLOW",        k:"a-miss",
+      m:"exited zero having examined less than it declared. The exit code is not the measurement"},
+    not_triggered: {g:GL_NEVER, w:"NOT TRIGGERED", k:"a-never",
+      m:"nothing in this change reached it, so nothing here was measured. Not a pass"},
+    unknown:       {g:GL_UNK,  w:"UNKNOWN",        k:"a-unk",  m:"its result could not be read"}
+  };
+  var KS_BAD = {g:GL_UNK, w:"UNREADABLE STATUS", k:"a-unk",
+    m:"the generator emitted a status this page has no rendering for"};
+
+  function el(tag, cls, txt){
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (txt !== undefined && txt !== null) n.textContent = txt;
+    return n;
+  }
+  function svg(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
+  function glyph(spec, extra){
+    var g = el("span", "ag-g " + spec.k + (extra ? " " + extra : ""), spec.g);
+    g.setAttribute("aria-hidden", "true");
+    return g;
+  }
+  function swatch(spec){
+    var s = el("span", "ag-swatch ag-n " + spec.k);
+    s.setAttribute("aria-hidden", "true");
+    s.appendChild(glyph(spec));
+    return s;
+  }
+  function num(v){ return typeof v === "number" && isFinite(v); }
+
+  /* --- a graph that could not be built is not an empty graph -------------- */
+  function unreadable(head, body){
+    var box = el("div", "ag-unread");
+    box.appendChild(glyph({g: GL_UNK, k: "a-unk"}));
+    var d = el("div");
+    d.appendChild(el("b", null, head));
+    for (var i = 0; i < body.length; i++) d.appendChild(el("p", null, body[i]));
+    box.appendChild(d);
+    mount.appendChild(box);
+  }
+  var TAIL = "That is " + GL_UNK + ", which this page means by “read, and could not be " +
+    "determined”. It is not an empty graph and it is not a graph with nothing wrong in " +
+    "it: no node, no edge and no count is drawn below, because every one of them would be a " +
+    "figure nobody took.";
+
+  if (!A){
+    unreadable(GL_UNK + " — this page carries no architecture reading at all.",
+      ["The generator embedded no VZ_ARCH in this page, so there is nothing here to draw " +
+       "from — not a graph, and not the absence of one.", TAIL]);
+    return;
+  }
+  var from = A.generated_from ? String(A.generated_from) : null;
+  if (A.state !== "read"){
+    if (A.state === "unreadable"){
+      unreadable(GL_UNK + " — the architecture graph could not be read.",
+        [(from ? "The result file this graph is derived from, " + from + ", was found and " +
+                 "could not be read as a result."
+               : "The result file this graph is derived from could not be read, and the " +
+                 "generator could not name which file it tried."), TAIL]);
+    } else if (A.state === "absent"){
+      unreadable(GL_UNK + " — there is no result to draw a graph from.",
+        [(from ? "No result was found at " + from + ", so no check has reported here and no " +
+                 "claim has been measured."
+               : "No check result was found, so no check has reported here and no claim has " +
+                 "been measured."), TAIL]);
+    } else {
+      unreadable(GL_UNK + " — the architecture reading names a state this page cannot read.",
+        ["The generator reported the state as “" + String(A.state) + "”, which is " +
+         "not one of read, unreadable or absent. A page that guessed which of the three was " +
+         "meant would be inventing the answer.", TAIL]);
+    }
+    return;
+  }
+
+  var nodes = (A.nodes && A.nodes.length) ? A.nodes : [];
+  var edges = (A.edges && A.edges.length) ? A.edges : [];
+  if (!nodes.length){
+    unreadable(GL_UNK + " — the reading was read, and it holds no node.",
+      ["The result at " + (from || "the result file") + " parsed, and it declares no check, " +
+       "no tool and no requirement. A drawing with nothing in it is not a clean architecture; " +
+       "it is a reading that came back empty and says so.", TAIL]);
+    return;
+  }
+
+  var checks = [], tools = [], reqs = [], byId = {};
+  var i, n;
+  for (i = 0; i < nodes.length; i++){
+    n = nodes[i];
+    byId[n.id] = n;
+    if (n.kind === "check") checks.push(n);
+    else if (n.kind === "tool") tools.push(n);
+    else if (n.kind === "requirement") reqs.push(n);
+  }
+  function rspec(r){ return RS[r.state] || RS_BAD; }
+  function kspec(c){ return KS[c.status] || KS_BAD; }
+
+  /* --- claims, both ways, so a node can name its own neighbours ----------- */
+  var claimsOf = {}, claimedBy = {}, runsOf = {}, runBy = {};
+  for (i = 0; i < edges.length; i++){
+    var e = edges[i];
+    if (e.kind === "claims"){
+      (claimsOf[e.from] = claimsOf[e.from] || []).push(e);
+      (claimedBy[e.to] = claimedBy[e.to] || []).push(e);
+    } else if (e.kind === "runs"){
+      runsOf[e.from] = e.to;
+      runBy[e.to] = e.from;
+    }
+  }
+
+  /* --- order: requirements as given, checks by the mean row of what they
+         claim, tools behind their check. One barycentre pass, which is not an
+         optimum and is not claimed to be - it is the difference between a
+         readable set of wires and a hairball. ---------------------------- */
+  var reqRow = {};
+  for (i = 0; i < reqs.length; i++) reqRow[reqs[i].id] = i;
+  function bary(c){
+    var cl = claimsOf[c.id] || [], s = 0, k = 0;
+    for (var j = 0; j < cl.length; j++){
+      if (reqRow[cl[j].to] !== undefined){ s += reqRow[cl[j].to]; k++; }
+    }
+    return k ? s / k : reqs.length + 1;
+  }
+  var cb = {};
+  for (i = 0; i < checks.length; i++) cb[checks[i].id] = bary(checks[i]);
+  checks = checks.slice().sort(function(a, b){
+    return (cb[a.id] - cb[b.id]) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  });
+  var checkRow = {};
+  for (i = 0; i < checks.length; i++) checkRow[checks[i].id] = i;
+  tools = tools.slice().sort(function(a, b){
+    var ra = runBy[a.id] !== undefined ? checkRow[runBy[a.id]] : undefined;
+    var rb = runBy[b.id] !== undefined ? checkRow[runBy[b.id]] : undefined;
+    if (ra === undefined) ra = checks.length + 1;
+    if (rb === undefined) rb = checks.length + 1;
+    return (ra - rb) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  });
+
+  /* --- the section -------------------------------------------------------- */
+  var root = el("div", "ag");
+  mount.appendChild(root);
+
+  var stamp = el("p", "ag-note");
+  stamp.appendChild(el("b", null, "Read from this repository, not stored in this page."));
+  stamp.appendChild(document.createTextNode(
+    " Every node below was derived from " + (from || "the check result") +
+    (A.measured_utc ? " at " + A.measured_utc : "") +
+    ". Colour repeats what the glyph, the word on the node and the border style already say; " +
+    "with colour switched off the five states stay apart."));
+  root.appendChild(stamp);
+
+  /* --- the legend, which states what each state MEANS --------------------- */
+  var derived = {}, sk;
+  for (sk in RS) derived[sk] = 0;
+  var unknownStates = 0;
+  for (i = 0; i < reqs.length; i++){
+    if (RS[reqs[i].state]) derived[reqs[i].state]++; else unknownStates++;
+  }
+  var declared = (A.counts && A.counts.by_state) ? A.counts.by_state : null;
+
+  var key = el("div", "ag-key");
+  key.setAttribute("role", "list");
+  for (i = 0; i < RS_ORDER.length; i++){
+    sk = RS_ORDER[i];
+    var row = el("div", "ag-krow " + RS[sk].k);
+    row.setAttribute("role", "listitem");
+    row.appendChild(swatch(RS[sk]));
+    row.appendChild(el("span", "ag-kw", RS[sk].w));
+    row.appendChild(el("span", "ag-km", RS[sk].m));
+    row.appendChild(el("span", "ag-kc", derived[sk] + " of " + reqs.length));
+    key.appendChild(row);
+  }
+  if (unknownStates){
+    var brow = el("div", "ag-krow " + RS_BAD.k);
+    brow.setAttribute("role", "listitem");
+    brow.appendChild(swatch(RS_BAD));
+    brow.appendChild(el("span", "ag-kw", RS_BAD.w));
+    brow.appendChild(el("span", "ag-km", RS_BAD.m));
+    brow.appendChild(el("span", "ag-kc", unknownStates + " of " + reqs.length));
+    key.appendChild(brow);
+  }
+  // The counts the generator declared are compared against the nodes actually
+  // drawn, and a disagreement is printed rather than resolved in favour of
+  // whichever number arrived first.
+  if (declared){
+    var bad = [];
+    for (i = 0; i < RS_ORDER.length; i++){
+      sk = RS_ORDER[i];
+      if (num(declared[sk]) && declared[sk] !== derived[sk])
+        bad.push(sk + ": declared " + declared[sk] + ", drawn " + derived[sk]);
+    }
+    if (bad.length)
+      key.appendChild(el("p", "ag-kfoot", GL_UNK + " The counts this page was handed do not " +
+        "match the nodes it drew — " + bad.join("; ") + ". The counts above are the " +
+        "nodes, because those are the ones on screen."));
+  }
+  key.appendChild(el("p", "ag-kfoot",
+    "Four of the five are not a pass in different ways, and that is why they are drawn as " +
+    "four different things rather than as one grey. A shut guard is the only one of the four " +
+    "that is not a gap."));
+  root.appendChild(key);
+
+  /* --- the delta strip. A base nobody differenced against does not get a
+         zero: it gets ?, because 0 changed files is a measurement. -------- */
+  var D = A.delta || {};
+  var strip = el("div", "ag-strip");
+  function stat(v, label, tip){
+    var s = el("div", "ag-stat" + (num(v) ? "" : " unk"));
+    s.appendChild(el("b", null, num(v) ? String(v) : GL_UNK));
+    s.appendChild(el("span", null, label));
+    if (tip) s.title = tip;
+    return s;
+  }
+  var hasBase = !!D.base;
+  strip.appendChild(stat(hasBase && num(D.changed_files) ? D.changed_files : null,
+    hasBase ? "files changed since " + D.base
+            : "files changed — no base ref to difference against",
+    hasBase ? "counted against " + D.base
+            : "no base ref was recorded, so this is " + GL_UNK + " and not a change of zero"));
+  strip.appendChild(stat((D.checks_triggered || null) && D.checks_triggered.length,
+    "check(s) triggered here"));
+  strip.appendChild(stat((D.checks_not_triggered || null) && D.checks_not_triggered.length,
+    "not triggered — these measured nothing",
+    "a check that did not run is " + GL_NEVER + ", not a pass"));
+  strip.appendChild(stat((D.requirements_touched || null) && D.requirements_touched.length,
+    "requirement(s) touched"));
+  strip.appendChild(stat(checks.length, "check(s)"));
+  strip.appendChild(stat(tools.length, "tool(s)"));
+  strip.appendChild(stat(reqs.length, "requirement(s)"));
+  root.appendChild(strip);
+
+  /* --- geometry ----------------------------------------------------------- */
+  var LX = [0, 272, 562], LW = [202, 220, 338];
+  var NH = 32, NP = 38, TOP = 44;
+  var rowsMax = Math.max(tools.length, checks.length, reqs.length);
+  var CW = LX[2] + LW[2], CH = TOP + rowsMax * NP + 4;
+
+  var board = el("div", "vz-board");
+  board.setAttribute("tabindex", "0");
+  board.setAttribute("role", "group");
+  board.setAttribute("aria-label",
+    "Declared architecture: " + tools.length + " tools, " + checks.length + " checks and " +
+    reqs.length + " requirements, each carrying its state as a word");
+  var canvas = el("div", "vz-canvas ag-canvas");
+  canvas.style.width = CW + "px";
+  canvas.style.height = CH + "px";
+  canvas.style.minWidth = CW + "px";
+  board.appendChild(canvas);
+
+  var wires = svg("svg");
+  wires.setAttribute("class", "vz-wires");
+  wires.setAttribute("width", CW);
+  wires.setAttribute("height", CH);
+  wires.setAttribute("viewBox", "0 0 " + CW + " " + CH);
+  wires.setAttribute("aria-hidden", "true");
+  canvas.appendChild(wires);
+
+  var HEADS = ["Tool — the file a check runs", "Check — what ran, and how it ended",
+               "Requirement — and what measured it, if anything"];
+  for (i = 0; i < 3; i++){
+    var h = el("div", "ag-lanehd", HEADS[i]);
+    h.style.left = LX[i] + "px";
+    h.style.top = "0px";
+    h.style.width = LW[i] + "px";
+    canvas.appendChild(h);
+  }
+
+  var pos = {};
+  function place(list, lane, spec_of, sub_of){
+    for (var j = 0; j < list.length; j++){
+      var d = list[j], sp = spec_of(d);
+      var b = el("button", "ag-node ag-n " + sp.k);
+      b.type = "button";
+      b.style.left = LX[lane] + "px";
+      b.style.top = (TOP + j * NP) + "px";
+      b.style.width = LW[lane] + "px";
+      b.style.height = NH + "px";
+      b.appendChild(glyph(sp));
+      var col = el("div", "ag-txtcol");
+      col.appendChild(el("span", "ag-lab", d.id));
+      var sub = sub_of ? sub_of(d) : "";
+      col.appendChild(el("span", "ag-w", sp.w + (sub ? " · " + sub : "")));
+      b.appendChild(col);
+      // The state is in the accessible NAME, not only in the pixels: a reader
+      // on a screen reader gets the same four channels collapsed into words.
+      b.setAttribute("aria-label", d.id + " — " + sp.w + ": " + sp.m);
+      b.title = d.id + " — " + sp.w + ": " + sp.m;
+      b.setAttribute("data-ag", d.id);
+      canvas.appendChild(b);
+      pos[d.id] = {x: LX[lane], y: TOP + j * NP + NH / 2, w: LW[lane], el: b, d: d};
+    }
+  }
+  place(tools, 0, function(t){
+    return t.present ? {g:"✓", w:"PRESENT", k:"a-meas",
+                        m:"the file this check names is on disk"}
+                     : {g:"∅", w:"ABSENT", k:"a-miss",
+                        m:"the configuration names this tool and it is not there. A check with " +
+                          "no tool measures nothing"};
+  }, null);
+  place(checks, 1, kspec, function(c){
+    return c.triggered === false ? "not triggered" :
+      (num(c.files_handed_over) ? c.files_handed_over + " handed" : GL_UNK + " handed");
+  });
+  // The verdict beside the state is the CLAIM, not the measurement, and the
+  // two disagree exactly where it matters: the deriver's own fixture carries a
+  // `never_ran` requirement whose verdict is still `Covered`, and a node
+  // reading `NEVER RAN · COVERED` hands the reader back the word this whole
+  // section exists to take away from them. So anything but `measured` says
+  // `claimed` in front of it, in lower case, where the state word is upper.
+  place(reqs, 2, rspec, function(r){
+    var v = r.verdict ? String(r.verdict) : GL_UNK;
+    if (r.state === "measured") return v;
+    // Only where the raw verdict would be MISREAD. `MISSING · claimed Missing`
+    // says one thing twice; `NEVER RAN · claimed Covered` says two things, and
+    // the second one is the claim the first one has just taken away.
+    if (v === "Covered" || v === "Partial") return "claimed " + v;
+    return "";
+  });
+
+  function path(a, b, cls, id){
+    var pa = pos[a], pb = pos[b];
+    if (!pa || !pb) return;
+    var x1, x2;
+    if (pb.x > pa.x){ x1 = pa.x + pa.w; x2 = pb.x; }
+    else { x1 = pa.x; x2 = pb.x + pb.w; }
+    var dx = Math.max(22, Math.abs(x2 - x1) * 0.45) * (x2 >= x1 ? 1 : -1);
+    var p = svg("path");
+    p.setAttribute("class", "vz-wire " + cls);
+    p.setAttribute("d", "M" + x1 + "," + pa.y + "C" + (x1 + dx) + "," + pa.y + " " +
+      (x2 - dx) + "," + pb.y + " " + x2 + "," + pb.y);
+    p.setAttribute("data-a", a);
+    p.setAttribute("data-b", b);
+    if (id) p.setAttribute("data-void", "1");
+    wires.appendChild(p);
+  }
+  for (i = 0; i < edges.length; i++){
+    var ed = edges[i];
+    if (ed.kind === "claims") path(ed.from, ed.to, ed.voided ? "ag-wire-void" : "", !!ed.voided);
+    else if (ed.kind === "runs") path(ed.from, ed.to, "", false);
+  }
+  root.appendChild(board);
+
+  /* --- the inspector: which check claims this, and why. This is the thing a
+         screenshot of a diagram cannot do, and it is already in the data. -- */
+  var insp = el("div", "ag-insp");
+  insp.setAttribute("aria-live", "polite");
+  root.appendChild(insp);
+
+  function clear(node){ while (node.firstChild) node.removeChild(node.firstChild); }
+  function rest(){
+    clear(insp);
+    insp.appendChild(el("p", "ag-imean",
+      "Hover or focus any node above and its evidence is written here — which check " +
+      "claims it, how that check ended, and why that adds up to the state on its face. " +
+      "Tab reaches every node in order."));
+    insp.appendChild(el("p", "ag-itext",
+      "A requirement is Covered only where a check RAN and PASSED. A claim from a check " +
+      "that failed is voided by that failure; a claim from a check nothing triggered " +
+      "measured nothing at all."));
+  }
+  function evList(items, emptyText){
+    if (!items || !items.length){
+      insp.appendChild(el("p", "ag-itext ag-idim", emptyText));
+      return;
+    }
+    var ul = el("ul", "ag-iev");
+    for (var j = 0; j < items.length; j++) ul.appendChild(el("li", null, String(items[j])));
+    insp.appendChild(ul);
+  }
+  function show(d){
+    clear(insp);
+    var sp = d.kind === "requirement" ? rspec(d)
+           : d.kind === "check" ? kspec(d)
+           : (d.present ? {g:"✓", w:"PRESENT", k:"a-meas", m:"the file is on disk"}
+                        : {g:"∅", w:"ABSENT", k:"a-miss",
+                           m:"named by the configuration and not there"});
+    var hd = el("div", "ag-ihd");
+    hd.appendChild(glyph(sp));
+    hd.appendChild(el("span", "ag-iid", d.id));
+    hd.appendChild(el("span", "vz-chip ag-n " + sp.k, sp.w));
+    hd.appendChild(el("span", "vz-chip", d.kind));
+    if (d.kind === "requirement" && d.verdict)
+      hd.appendChild(el("span", "vz-chip", (d.state === "measured" ? "verdict: "
+        : "claimed verdict: ") + d.verdict));
+    insp.appendChild(hd);
+    insp.appendChild(el("p", "ag-imean", sp.m));
+
+    if (d.kind === "requirement"){
+      if (d.text) insp.appendChild(el("p", "ag-itext", String(d.text)));
+      insp.appendChild(el("p", "ag-ievh", "Evidence — why this is claimed, and by which check"));
+      evList(d.evidence, "No evidence was recorded for this requirement. Nothing here says " +
+        "why it reads as " + sp.w + ", which is itself the finding.");
+      var cl = claimedBy[d.id] || [], names = [];
+      for (i = 0; i < cl.length; i++)
+        names.push(cl[i].from + (cl[i].voided ? " (claim voided)" : ""));
+      insp.appendChild(el("p", "ag-itext ag-idim", names.length
+        ? "Claimed by: " + names.join(", ") + "."
+        : "No check claims this requirement."));
+    } else if (d.kind === "check"){
+      var lines = [];
+      lines.push("Tool: " + (d.tool || runsOf[d.id] || GL_UNK) + ".");
+      if (d.triggered === false){
+        lines.push("Not triggered in this change, so it handed over " + GL_NEVER +
+          " files and dropped " + GL_NEVER + " — an em dash, not a zero, because zero " +
+          "would claim it looked and found none.");
+      } else {
+        lines.push("Handed over " + (num(d.files_handed_over) ? d.files_handed_over : GL_UNK) +
+          " file(s); dropped " + (num(d.files_dropped) ? d.files_dropped : GL_UNK) + ".");
+      }
+      insp.appendChild(el("p", "ag-itext", lines.join(" ")));
+      var cm = claimsOf[d.id] || [], out = [];
+      for (i = 0; i < cm.length; i++)
+        out.push(cm[i].to + (cm[i].voided ? " (voided by this check’s own result)" : ""));
+      insp.appendChild(el("p", "ag-ievh", "Claims"));
+      evList(out, "This check claims no requirement. It runs, and nothing on this page " +
+        "depends on how it ends.");
+    } else {
+      insp.appendChild(el("p", "ag-itext",
+        runBy[d.id] ? "Run by " + runBy[d.id] + "." : "No check in this reading runs it."));
+    }
+  }
+  rest();
+
+  /* --- focus fades the unrelated ----------------------------------------- */
+  var wireList = wires.querySelectorAll("path");
+  var nodeList = canvas.querySelectorAll(".ag-node");
+  function hot(id){
+    var j;
+    if (!id){
+      canvas.className = "vz-canvas ag-canvas";
+      for (j = 0; j < wireList.length; j++) wireList[j].classList.remove("hot");
+      for (j = 0; j < nodeList.length; j++) nodeList[j].classList.remove("hot");
+      rest();
+      return;
+    }
+    canvas.className = "vz-canvas ag-canvas ag-on";
+    var keep = {};
+    keep[id] = 1;
+    for (j = 0; j < wireList.length; j++){
+      var a = wireList[j].getAttribute("data-a"), b = wireList[j].getAttribute("data-b");
+      var on = (a === id || b === id);
+      wireList[j].classList.toggle("hot", on);
+      if (on){ keep[a] = 1; keep[b] = 1; }
+    }
+    for (j = 0; j < nodeList.length; j++)
+      nodeList[j].classList.toggle("hot", !!keep[nodeList[j].getAttribute("data-ag")]);
+    if (byId[id]) show(byId[id]);
+  }
+  function bind(ev, fn){
+    canvas.addEventListener(ev, function(evt){
+      var t = evt.target;
+      while (t && t !== canvas && !(t.classList && t.classList.contains("ag-node"))) t = t.parentNode;
+      fn(t && t.getAttribute ? t.getAttribute("data-ag") : null);
+    }, ev === "focusin" || ev === "focusout" ? false : true);
+  }
+  bind("mouseover", function(id){ if (id) hot(id); });
+  bind("focusin", function(id){ if (id) hot(id); });
+  canvas.addEventListener("mouseleave", function(){ hot(null); });
+  canvas.addEventListener("focusout", function(evt){
+    if (!evt.relatedTarget || !canvas.contains(evt.relatedTarget)) hot(null);
+  });
+})();
 </script>
