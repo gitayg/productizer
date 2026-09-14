@@ -347,7 +347,10 @@ lying:
   `.github/workflows/` off the tracked-file list: with a workflow that names a
   tag push in its trigger block it says which one runs, with workflows that do
   not it says so, and with none it drops the claim entirely and keeps only the
-  part that is true regardless — an untagged version has no release page. Only
+  part that is true regardless — an untagged version cannot have a release
+  page. (Corrected 2026-09-14: the banner also promised that pushing the tags
+  gives each version a release page. A tag publishes nothing by itself — 59 of
+  this repo's 81 version tags had no page — so the banner no longer says it.) Only
   the trigger block counts, never a `tags:` key under a step's `with:`, which is
   an argument to an action rather than a trigger. If the file list could not be
   read, that is unknown, and an unknown earns no claim at all. The rule about

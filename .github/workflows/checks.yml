@@ -177,8 +177,8 @@ jobs:
           git --version
           python3 --version
           node --version
-          # shellcheck comes from the runner image, not from `npx --yes
-          # shellcheck`. That npm package is not the upstream project: it is a
+          # The shellcheck binary comes from the runner image, not from the npm
+          # package run with `npx --yes shellcheck`. That package is not the upstream project: it is a
           # single-maintainer wrapper that downloads a binary at run time, and
           # `--yes` resolves `latest` with no lockfile and no integrity pin. In
           # CI the payout is small — no secrets, a read-only token — but the
@@ -273,6 +273,7 @@ jobs:
           python3 evals/solver-probe.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
           bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/build-release-notes.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-cannot-run-coverage.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-changelog-row.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-classification-provenance.sh --selftest
@@ -512,3 +513,95 @@ jobs:
           plugins/productizer/skills/spec/scripts/run-checks.sh \
             --base "$base" \
             --out "$RUNNER_TEMP/checks-result.json"
+
+  # --- A TAG PUSH DRAFTS ITS RELEASE. A PERSON PUBLISHES IT. -----------------
+  #
+  # Measured 2026-09-14: 81 version tags, 22 release pages. Every tag from
+  # v4.8 onward had none, and release checklists had been saying a tag push
+  # "creates the release page" - it never did, because nothing here created
+  # one. Two rules had to be satisfied at once:
+  #   - releases go through CI, not a hand-run command on someone's machine;
+  #   - nothing reaches an audience without a person deciding (P2), which is
+  #     why references/release.md gates `gh release create` behind a checklist
+  #     and an explicit yes.
+  # A DRAFT satisfies both. It is not public: only people with write access to
+  # the repo can see it until someone presses Publish. So CI does the typing and
+  # a person owns the decision, which is the split the lifecycle uses everywhere.
+  #
+  # WHAT IT WILL NOT DO. It never publishes: after creating the release it reads
+  # the release back and fails the job if `isDraft` is anything but true. It
+  # never edits an existing release - a page someone already published or
+  # rewrote is theirs. And the notes are EVIDENCE from build-release-notes.sh
+  # (spec deltas, PRs, commits, files, the pre-publish checklist), not prose;
+  # the person publishing writes the prose from them.
+  #
+  # PERMISSIONS. The workflow's default stays `contents: read`. Only this job
+  # can write, only on a tag push, and only after `checks` passed on that tag -
+  # so a pull request never gets a token that can create a release, and a tag
+  # that fails the gate never gets a draft. `persist-credentials: false` keeps
+  # the token out of git's config; `gh` reads it from GH_TOKEN for the one call.
+  release-draft:
+    needs: checks
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The notes cover the range since the previous version tag, so the
+          # history and every tag have to be here, not a single commit.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Draft the release from the evidence, never publish it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The ref name reaches the shell through env and is quoted at every
+          # use, the same rule as every other event value in this file.
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "::error::refusing to draft a release for '$TAG': not a version tag"; exit 1 ;;
+          esac
+          gh --version | head -1
+          git fetch --force --tags origin
+          # Release tags here are annotated, and the annotation's subject line is
+          # the release title. A lightweight tag carries no title to use.
+          if [ "$(git cat-file -t "$TAG")" != "tag" ]; then
+            echo "::error::$TAG is a lightweight tag; release tags here are annotated and its message is the title"
+            exit 1
+          fi
+          # The previous version tag bounds the range. The very first tag has
+          # none, and then the notes cover everything before it.
+          since=()
+          prev=""
+          if prev="$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^")"; then
+            since=(--since "$prev")
+          else
+            prev=""
+          fi
+          notes="$RUNNER_TEMP/release-notes-${TAG}.md"
+          bash plugins/productizer/skills/spec/scripts/build-release-notes.sh . "${since[@]}" --version "${TAG#v}" > "$notes"
+          if [ ! -s "$notes" ]; then
+            echo "::error::build-release-notes.sh produced no notes for $TAG"
+            exit 1
+          fi
+          title="$(git tag -l --format='%(contents:subject)' "$TAG")"
+          [ -n "$title" ] || title="$TAG"
+          # Never touch a release that already exists. `gh release view` exits
+          # non-zero for "not found" and for any other failure alike; an auth
+          # failure would then surface at the create call below, loudly.
+          if gh release view "$TAG" > /dev/null; then
+            echo "::notice::a release for $TAG already exists and was not touched - a page someone published or edited is theirs"
+            exit 0
+          fi
+          gh release create "$TAG" --draft --verify-tag --title "$title" --notes-file "$notes"
+          is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+          if [ "$is_draft" != "true" ]; then
+            echo "::error::the release for $TAG reads isDraft=$is_draft. This job must never publish; a person does."
+            exit 1
+          fi
+          echo "drafted $TAG (range since ${prev:-the first commit}); it is visible only to people with write access until someone publishes it"

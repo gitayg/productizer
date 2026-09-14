@@ -39,7 +39,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.59.0"`.
+`plugin.json` sets `"version": "4.60.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -225,6 +225,15 @@ organisation without each person toggling it:
 5. Optionally tag the release: `claude plugin tag ./plugins/productizer`
    creates a `{name}--v{version}` git tag and checks that `plugin.json` and the
    marketplace entry agree.
+6. **A tag does not publish a release page by itself.** This repository's
+   workflow runs the checks on a pushed tag matching `v*`, and only then its
+   `release-draft` job creates a **draft** GitHub release from
+   `build-release-notes.sh`. A person edits the evidence into notes and
+   publishes it; the job never publishes and never edits an existing release.
+   Measured 2026-09-14: 59 of 81 version tags had no release page before this
+   job existed. Not verified here: whether the `{name}--v{version}` form from
+   step 5 matches `v*` — by its stated shape it would not, so a tag made that
+   way would run neither the checks nor the draft.
 
 Consumers with auto-update on pick the change up on their next session.
 Consumers without it run `claude plugin update productizer`.

@@ -67,6 +67,19 @@ images. Same shape as the production gate at Stage 6, for the same reason:
 every other artefact here is a commit someone can revert; a post is indexed and
 forwarded within minutes, and mail cannot be recalled.
 
+**In this repository, CI drafts the GitHub release and a person publishes it.**
+Measured 2026-09-14: of 81 version tags, 22 had a release page, and nothing in
+the workflow had ever created one - while several release checklists said a tag
+push did. The `release-draft` job in `.github/workflows/checks.yml` now runs on a
+version-tag push, only after `checks` passed on that tag. It assembles the notes
+with `build-release-notes.sh`, creates the release as a **draft**, and reads it
+back, failing the job if the release is anything but a draft. A draft is visible
+only to people with write access, so nothing has reached an audience yet: the
+person publishing edits the evidence into prose, runs the checklist above, and
+presses Publish. The job never edits a release that already exists. This is the
+same split as the rest of the stage, with the typing moved into CI rather than
+into a command someone runs by hand. The notes are evidence, not the post.
+
 **Screenshots come from the released build, in this session, with the version in
 the filename.** A screenshot from the previous release is a lie with a picture
 attached, and it is the most common way documentation goes silently wrong: the

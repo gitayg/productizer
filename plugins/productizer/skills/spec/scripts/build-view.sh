@@ -1826,8 +1826,9 @@ if TAG_WORKFLOWS:
     _one = len(TAG_WORKFLOWS) == 1
     _tag_effect = (' Pushing the tag also starts %s, which %s a tag push in %s trigger block.'
                    % (_names, 'names' if _one else 'name', 'its' if _one else 'their'))
-    _tag_prompt = ('Tag the untagged released versions in %s and push the tags so %s %s and each '
-                   'version gets a release page. List what you will tag before you do it.'
+    _tag_prompt = ('Tag the untagged released versions in %s and push the tags so %s %s.'
+                   ' A tag on its own publishes no release page, so check how this repo publishes releases before '
+                   'saying a version is out. List what you will tag before you do it.'
                    % (PRODUCT, ', '.join(os.path.basename(p) for p in TAG_WORKFLOWS),
                       'runs' if _one else 'run'))
 elif WORKFLOWS:
@@ -1835,8 +1836,9 @@ elif WORKFLOWS:
                    'the tag itself to build anything.'
                    % ('1 workflow file' if len(WORKFLOWS) == 1 else '%d workflow files' % len(WORKFLOWS),
                       'it does not name' if len(WORKFLOWS) == 1 else 'not one of them names'))
-    _tag_prompt = ('Tag the untagged released versions in %s and push the tags so each version gets a '
-                   'release page. Nothing here is known to build on a tag push, so do not wait on CI. '
+    _tag_prompt = ('Tag the untagged released versions in %s and push the tags. '
+                   'Nothing here is known to build on a tag push, so do not wait on CI, and a tag on its own '
+                   'publishes no release page. '
                    'List what you will tag before you do it.' % PRODUCT)
 elif FILES_READ:
     # The measured fact, and then nothing. No CI clause at all rather than a
@@ -1844,20 +1846,21 @@ elif FILES_READ:
     # correction, and the prompt they paste needs no premise beyond the tag.
     _tag_effect = (' There is no <span class="mono">.github/workflows/</span> in this repo, so pushing '
                    'a tag starts no build here.')
-    _tag_prompt = ('Tag the untagged released versions in %s and push the tags so each version gets a '
-                   'release page. List what you will tag before you do it.' % PRODUCT)
+    _tag_prompt = ('Tag the untagged released versions in %s and push the tags. '
+                   'A tag on its own publishes no release page. List what you will tag before you do it.' % PRODUCT)
 else:
     # The tracked-file list could not be read, so whether anything builds is
     # unknown. The banner says the part that is true regardless and no more.
     _tag_effect = ''
-    _tag_prompt = ('Tag the untagged released versions in %s and push the tags so each version gets a '
-                   'release page. List what you will tag before you do it.' % PRODUCT)
+    _tag_prompt = ('Tag the untagged released versions in %s and push the tags. '
+                   'A tag on its own publishes no release page. List what you will tag before you do it.' % PRODUCT)
 
 if IS_GIT and UNTAGGED and releases:
     banners.append(banner('warn', '%d version%s shipped without a tag.'
                           % (len(UNTAGGED), '' if len(UNTAGGED) == 1 else 's'),
                           'The newest untagged one is <span class="mono">%s</span>. A version in the log with '
-                          'no tag has no release page, which is where most people look.%s'
+                          'no tag cannot have a release page, which is where most people look, and a tag alone does not '
+                          'create one.%s'
                           % (esc(UNTAGGED[0]['ver']), _tag_effect),
                           _tag_prompt, key='untagged'))
 
@@ -2820,7 +2823,7 @@ else:
                tag + push + _relpush(r, _on), sha, esc(r['date']), bl))
     p_rel = ('<div class="h">Release history — newest first</div>'
              '<div class="relnote"><b>%d of these %d carry a git tag.</b> A version in the log with no tag '
-             'has no release page.</div><div class="rels">%s</div>'
+             'cannot have a release page, and a tag alone does not create one.</div><div class="rels">%s</div>'
              '<p class="provenance">Read from <span class="mono">git log</span>: a release is a commit '
              'whose subject begins with a version. The bullets are that commit\'s own message body, not a '
              'summary written for it. The <b>major / minor / patch</b> label is the bump against the '
