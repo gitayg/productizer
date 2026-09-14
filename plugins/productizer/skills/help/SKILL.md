@@ -7,36 +7,13 @@ allowed-tools: Bash Read
 
 # Productizer — what you can type
 
-!`set -e; D="${CLAUDE_PLUGIN_ROOT}/skills"; [ -d "$D" ] || D="$(git rev-parse --show-toplevel 2>/dev/null)/plugins/productizer/skills"; if [ ! -d "$D" ]; then echo "cannot find the plugin's skills directory - this list would be from memory, and memory is what it exists to avoid."; exit 0; fi; V="$(basename "$(dirname "$D")" 2>/dev/null)"; python3 - "$D" <<'PY'
-import io, os, re, sys
-d = sys.argv[1]
-rows = []
-for name in sorted(os.listdir(d)):
-    f = os.path.join(d, name, 'SKILL.md')
-    if not os.path.isfile(f):
-        continue
-    try:
-        head = io.open(f, encoding='utf-8', errors='replace').read(4000)
-    except (IOError, OSError):
-        rows.append((name, '(could not be read - present, but unreadable)', '')); continue
-    nm = re.search(r'^name:\s*(\S+)\s*$', head, re.M)
-    ds = re.search(r'^description:\s*"(.*?)"\s*$', head, re.M | re.S)
-    hint = re.search(r'^argument-hint:\s*"(.*?)"\s*$', head, re.M)
-    auto = not re.search(r'^disable-model-invocation:\s*true\s*$', head, re.M)
-    first = (ds.group(1).split('. ')[0] + '.') if ds else '(no description)'
-    rows.append(((nm.group(1) if nm else name), first, hint.group(1) if hint else '', auto))
-if not rows:
-    print('  no commands found in %s' % d)
-for r in rows:
-    nm, first, hint = r[0], r[1], r[2]
-    auto = r[3] if len(r) > 3 else False
-    print('  /productizer:%-10s %s%s' % (nm, hint, '   [auto]' if auto else ''))
-    print('      %s' % first)
-print('')
-print('  %d command(s), read from %s' % (len(rows), d))
-PY`
+!`D="${CLAUDE_PLUGIN_ROOT}"; [ -n "$D" ] && [ -d "$D" ] || D="$(git rev-parse --show-toplevel 2>/dev/null)/plugins/productizer"; S="$D/skills/help/scripts/list-commands.sh"; if [ ! -f "$S" ]; then echo "cannot find list-commands.sh under the plugin - this list would be from memory, and memory is what it exists to avoid."; exit 0; fi; rc=0; bash "$S" --plugin "$D" || rc=$?; [ "$rc" -eq 0 ] || echo "  (list-commands.sh exited $rc - 3: no skills/ or commands/ found, 4: an entry could not be read)"`
 
 ## Reading that
+
+The first column says where a row came from: `skill` is
+`skills/<name>/SKILL.md`, `command` is `commands/<name>.md`. Both are read at
+run time from their own frontmatter, and both are typed the same way.
 
 `[auto]` means Claude may invoke it on its own from what you are doing.
 Everything else you type, deliberately — those either publish something, run
@@ -62,6 +39,6 @@ command that does not exist or miss one that does. It can still be behind the
 source checkout: installing copies a snapshot, and edits there do not reach it
 until `claude plugin update productizer`.
 
-A skill whose file cannot be read is listed as unreadable rather than skipped.
+A skill or command whose file cannot be read is listed as unreadable rather than skipped.
 A command missing from a list is indistinguishable from one that was never
 installed, and only one of those is worth knowing about.

@@ -56,26 +56,45 @@
 #
 # There is no exit 1: this parser has no opinion about what it read.
 #
-# THE SHARED CONVENTION, AND WHY IT IS A FLAG. `contradiction-check.py` carries
-# the same one, spelled the same way: `--require-records`, and exit 4 for a
-# clean parse that understood nothing. 4 is not a new number - it is
-# `validate-spec.py`'s EXIT_UNMEASURED, which already answers the identical
-# question with the identical code and the sentence "a file that was not read
-# has not passed". Three tools that read requirement sentences now say
-# "understood nothing" the same way.
+# THE SHARED CONVENTION. 4 is `validate-spec.py`'s EXIT_UNMEASURED, which
+# answers the identical question with the identical code and the sentence "a
+# file that was not read has not passed". `contradiction-check.py` uses the
+# same 4 - and there it is the DEFAULT, with `--allow-empty` to opt out.
 #
-# It is opt-in rather than the default because a parsed-nothing is only WRONG
-# when the caller expected something. This parser is pointed at fixtures and at
-# historical revisions where an empty parse is the expected answer, and making
-# 4 the default would turn those into refusals. Measured before choosing: all
-# 21 committed revisions of this repository's own spec.md parse non-empty, but
-# fixtures that callers do parse (`fixtures/nothing-merged/intent.md`,
-# `fixtures/unmeasured-report/runner/spec.md`) parse to zero records legitimately.
+# WHY IT IS NOT THE DEFAULT HERE, MEASURED RATHER THAN ARGUED. This file's exit
+# 0 on zero records is a PARSER's answer, never a check's verdict, and every
+# caller turns it into a refusal of its own. Measured over a git repository
+# whose spec was a spec-kit file, and again with an empty spec - all six exit
+# 2 with their own sentence, and none reads the 0 as a pass:
 #
-# A CALLER THAT MEANT "A SPEC" SHOULD PASS THE FLAG. Reading a bare exit 0 as
-# a pass over a file whose format this parser did not recognise - a spec-kit
-# spec, say - is a green over a file nothing understood, which is the shape
-# R15 and R26 exist to block.
+#   check-superseded-text.sh       "holds no requirement definitions"
+#   check-pending-ruling-scope.sh  "holds no requirement definitions"
+#   check-changelog-row.sh         "holds no requirement definitions"
+#   check-spec-integrity.sh        "holds no requirement definitions"
+#   check-suspect-links.sh         "holds no requirement definitions"
+#   spec-doctor.sh                 "exited 0 and returned no requirement rows"
+#
+# Flipping the default was then tried in a scratch clone. It broke four
+# self-test cases in three of those callers - check-superseded-text.sh
+# `no-requirements`, check-spec-integrity.sh `no-requirements`,
+# check-suspect-links.sh `no-requirements-now` and `no-requirements-at-base` -
+# each still exiting 2, but through "the parser refused" instead of the
+# sentence its contract declares. Passing `--require-records` from those
+# callers has the same effect, so it is not a cheaper route. The callers also
+# parse HISTORICAL revisions (every version git can reach, or a base commit),
+# where a revision that predates any requirement is an expected zero. Driven
+# in a two-commit repository whose first commit held an empty `## Requirements`
+# and whose second added R1: `check-superseded-text.sh` exits 0 with PASS
+# today, and under a refusing default it exits 4 - the parser's code, escaping
+# its history loop, which pipes the parser under `set -o pipefail` with no
+# `||`. None of the 23 revisions of this repository's own spec parse empty, so
+# no run here would have shown it.
+#
+# So the rule is: 0 with no records means "read, found none", and the CALLER
+# owns refusing it. A caller that cannot own that - a new one, or one run by
+# hand - passes `--require-records`. A caller that moves to the flag must
+# read 4 as its own "no requirement definitions" refusal, not as a generic
+# parser failure, and must not pass it on historical revisions.
 set -euo pipefail
 
 # 1.1 added --require-records and the self-test that drives it. The record

@@ -117,6 +117,18 @@ checks:
   # which files it felt like opening and still exit 0; per-file mode makes the
   # runner watch each file be accepted or refused, so "it only looked at one of
   # them" becomes visible instead of green. It costs one process per file.
+  #
+  # EXIT 1 IS NOT "LEAKS FOUND". Read from gitleaks' own source at v8.30.1
+  # (`cmd/root.go`): a scan that errored exits 1 even with no findings, a
+  # finding exits whatever `--exit-code` says (default 1), and an unknown flag
+  # exits 126. With the default, a file gitleaks failed to read and a file
+  # holding a key are the same exit code - and `examined_when_exit_in: [0, 1]`
+  # counted the unread one as examined. `--exit-code 3` separates them: 3 is a
+  # leak in a file that was read, 1 is a scan that did not complete.
+  #
+  # `dir`, not `detect --no-git --source`. v8.19.0 deprecated `detect`; its
+  # replacement for scanning files without git history is `dir` (aliases
+  # `file`, `directory`), which takes the path as a positional argument.
   - id: secret-scan
     why: a secret reaching the remote must be rotated; blocking the merge afterwards fixes nothing
     when:
@@ -125,15 +137,15 @@ checks:
     requires: [gitleaks]
     version_command: [gitleaks, version]
     mode: per_file
-    command: [gitleaks, detect, --no-git, --no-banner, --redact, --source, "{file}"]
+    command: [gitleaks, dir, --no-banner, --redact, --exit-code, "3", "{file}"]
     timeout_seconds: 300
     exit_codes:
       pass: [0]
-      fail: [1]        # leaks found
-      refused: [2]     # gitleaks could not run
+      fail: [3]           # leaks found, in a file that was read
+      refused: [1, 126]   # the scan errored or was partial; an unknown flag
     coverage:
       from: per_file_exit
-      examined_when_exit_in: [0, 1]
+      examined_when_exit_in: [0, 3]
       must_cover: all_triggering
       min_covered: 1
 
@@ -218,11 +230,38 @@ checks:
       # The audit's own count of what it resolved. A registry outage that
       # produces an empty tree exits 0 and looks identical to a clean audit —
       # this number is what tells them apart.
+      #
+      # Two shapes. `totalDependencies` is the old report; npm 10.9.4 prints
+      # `"metadata": {"dependencies": {..., "total": N}}` instead and has no
+      # `totalDependencies` at all - measured on a clean one-dependency lockfile,
+      # where the old pattern matched nothing and every clean audit was hollow.
       from: stdout_count
-      pattern: '"totalDependencies"\s*:\s*([0-9]+)'
+      pattern: '(?:"totalDependencies"\s*:\s*|"dependencies"\s*:\s*\{[^{}]*"total"\s*:\s*)([0-9]+)'
       min_covered: 1
 
   # --- 4 · SAST, baseline -------------------------------------------------
+  #
+  # THREE FLAGS EVERY SEMGREP CHECK BELOW CARRIES, each measured on semgrep
+  # 1.171.0:
+  #
+  #   `--error`        without it semgrep exits 0 WITH findings. A file holding
+  #                    `eval(input())` under p/default gave one finding and exit
+  #                    0; `--error` made it exit 1. Without the flag `fail: [1]`
+  #                    names a code semgrep never returns for a finding.
+  #   `--metrics=off`  semgrep's own help: under the default `auto`, "metrics
+  #                    are sent whenever the --config value pulls from the
+  #                    Semgrep server", which every `p/` ruleset does.
+  #   `--time`         in `rules_command` only. `--dump-config`, which this
+  #                    template used to name, is not an option: `unknown option
+  #                    '--dump-config'`, exit 2, so the rule count read 0 on
+  #                    every run and the check was hollow whatever it scanned.
+  #                    `--time` lists every rule that loaded for its target, and
+  #                    `rules_pattern` matched exactly those ids - 342 of 342 over
+  #                    one Python file. The list is PER LANGUAGE of the target,
+  #                    so point it at one committed file in your main language,
+  #                    and set the floor from what you measure. Left unedited the
+  #                    target does not exist, semgrep exits 2, and the check
+  #                    refuses - which is the safe way for it to be wrong.
   - id: sast
     why: the ordinary injection and path-traversal classes, on every change that touches code
     when:
@@ -233,9 +272,9 @@ checks:
         - "**/*.go"
     severity: block
     requires: [semgrep]
-    version_command: [semgrep, --version]
+    version_command: [semgrep, --version, --disable-version-check]
     mode: batch
-    command: [semgrep, --config, p/default, --json, --quiet, "{files}"]
+    command: [semgrep, --config, p/default, --json, --quiet, --metrics=off, --error, "{files}"]
     timeout_seconds: 600
     exit_codes:
       pass: [0]
@@ -253,8 +292,8 @@ checks:
       # A ruleset that failed to download is an empty ruleset, and an empty
       # ruleset always passes. Count the rules that actually loaded.
       min_rules: 50
-      rules_command: [semgrep, --config, p/default, --dump-config, --json]
-      rules_pattern: '"id"\s*:\s*"([^"]+)"'
+      rules_command: [semgrep, --config, p/default, --json, --time, --quiet, --metrics=off, path/to/one/committed/file.py]
+      rules_pattern: '"([a-z0-9_-]+(?:\.[A-Za-z0-9_-]+){3,})"'
 
   # --- 5 · SAST, authentication ------------------------------------------
   #
@@ -269,9 +308,9 @@ checks:
       tags: [auth, authn, authz, session, crypto, secrets]
     severity: block
     requires: [semgrep]
-    version_command: [semgrep, --version]
+    version_command: [semgrep, --version, --disable-version-check]
     mode: batch
-    command: [semgrep, --config, p/jwt, --config, p/secrets, --json, --quiet, "{files}"]
+    command: [semgrep, --config, p/jwt, --config, p/secrets, --json, --quiet, --metrics=off, --error, "{files}"]
     timeout_seconds: 900
     exit_codes:
       pass: [0]
@@ -283,8 +322,9 @@ checks:
       must_cover: all_triggering
       min_covered: 1
       min_rules: 10
-      rules_command: [semgrep, --config, p/jwt, --config, p/secrets, --dump-config, --json]
-      rules_pattern: '"id"\s*:\s*"([^"]+)"'
+      # Measured over one Python file: p/jwt loaded 3 rules and p/secrets 38.
+      rules_command: [semgrep, --config, p/jwt, --config, p/secrets, --json, --time, --quiet, --metrics=off, path/to/one/committed/file.py]
+      rules_pattern: '"([a-z0-9_-]+(?:\.[A-Za-z0-9_-]+){3,})"'
 
   # --- 6 · in-house script ------------------------------------------------
   #
@@ -469,9 +509,9 @@ checks:
         - "42001-6.1.3"   # ISO/IEC 42001 — AI risk treatment
     severity: block
     requires: [semgrep]
-    version_command: [semgrep, --version]
+    version_command: [semgrep, --version, --disable-version-check]
     mode: batch
-    command: [semgrep, --config, p/secure-defaults, --json, --quiet, "{files}"]
+    command: [semgrep, --config, p/secure-defaults, --json, --quiet, --metrics=off, --error, "{files}"]
     timeout_seconds: 900
     exit_codes:
       pass: [0]
@@ -482,9 +522,11 @@ checks:
       pattern: '"([^"]+\.(py|js|ts|go))"'
       must_cover: all_triggering
       min_covered: 1
-      min_rules: 10
-      rules_command: [semgrep, --config, p/secure-defaults, --dump-config, --json]
-      rules_pattern: '"id"\s*:\s*"([^"]+)"'
+      # Was 10. p/secure-defaults loaded ONE rule over a Python file, so a floor
+      # of ten refused every Python run whatever it scanned. Measure yours.
+      min_rules: 1
+      rules_command: [semgrep, --config, p/secure-defaults, --json, --time, --quiet, --metrics=off, path/to/one/committed/file.py]
+      rules_pattern: '"([a-z0-9_-]+(?:\.[A-Za-z0-9_-]+){3,})"'
       # THE CLAIM IS NOT THE EVIDENCE. Naming the requirement the control is
       # tagged on ties this check's result to that requirement in the report;
       # if the check is disabled, its tool is missing, or it came back hollow,

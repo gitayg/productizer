@@ -17,7 +17,7 @@ see *this* repository. This command is pointed at the case it cannot see.
 
 ## The report
 
-!`set -e; D="${CLAUDE_PLUGIN_ROOT}"; [ -n "$D" ] && [ -d "$D" ] || D="$(git rev-parse --show-toplevel 2>/dev/null)/plugins/productizer"; S="$D/skills/spec/scripts/upgrade-drift.sh"; if [ ! -x "$S" ]; then echo "cannot find upgrade-drift.sh under the installed plugin. Nothing was measured, and an unmeasured repo is not an up-to-date one."; exit 0; fi; bash "$S" --plugin "$D" || true`
+!`set -e; D="${CLAUDE_PLUGIN_ROOT}"; [ -n "$D" ] && [ -d "$D" ] || D="$(git rev-parse --show-toplevel 2>/dev/null)/plugins/productizer"; S="$D/skills/spec/scripts/upgrade-drift.sh"; if [ ! -x "$S" ]; then echo "cannot find upgrade-drift.sh under the installed plugin. Nothing was measured, and an unmeasured repo is not an up-to-date one."; exit 0; fi; rc=0; bash "$S" --plugin "$D" || rc=$?; echo; echo "upgrade-drift.sh exit code: $rc (read it against the table under Exit codes; 3 outranks 1)"`
 
 ## What you do with that
 

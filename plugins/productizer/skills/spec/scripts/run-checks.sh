@@ -28,7 +28,10 @@
 #                    for being one: a line that is not there AND could never
 #                    have been a path - whitespace in it, a leading `#`, a
 #                    shell metacharacter - refuses the run and is quoted back.
-#   --base REF       derive the changed paths from git diff against REF
+#   --base REF       derive the changed paths from git diff against REF.
+#                    The result records `change.base_ref` (REF as typed) and
+#                    `change.base` (the full id of the merge base the diff was
+#                    taken from). Under --changed both are null.
 #   --tags LIST      comma-separated requirement tags carried by this change
 #   --root DIR       repo root the checks run in, and what every relative path
 #                    inside the config resolves against. Default: the git work
@@ -257,12 +260,13 @@ done
 # ---------------------------------------------------------------------------
 # --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
 #
-# Eleven cases: six of them one per way the contract at the top of this file
-# can be reached, and five for the change set the runner is handed - the one
-# shape that must be refused, and four for a path in it that is not in the
-# tree. Eight assertions read the RESULT FILE rather than the exit code,
-# because the last three cases are about a mechanism they share an exit code
-# with: two of them exit 3, and so does `refused`.
+# Twelve cases: six of them one per way the contract at the top of this file
+# can be reached, and six for the change set the runner is handed - the one
+# shape that must be refused, and five for a path in it that is not in the
+# tree. Eighteen assertions read the RESULT FILE rather than the exit code,
+# because the last four cases are about a mechanism they share an exit code
+# with: two of them exit 3, and so does `refused`; two exit 0, and so does
+# `clean`.
 # Each is driven through
 # THIS script, so the argument handling, the change-set check, the config
 # parser, the executor and the on_exit rewriting are all on the path. No case
@@ -284,6 +288,10 @@ done
 #   deleted-in-scope
 #                 the same, with the absent path INSIDE a per_file
 #                 check's scope, so a tool would have been handed it   -> 0
+#   deleted-under-base
+#                 the same scope in a real git repository built here,
+#                 a path committed then deleted, run under --base: the
+#                 drop is labelled `deleted` by git's D list           -> 0
 #   all-scope-gone
 #                 every path in the one check's scope is gone: no
 #                 scan at all, which is not a pass                     -> 3
@@ -294,8 +302,9 @@ done
 # IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
 # writes over `policy.output`, so a self-test that did it would be slower than
 # the thing it tests and would rewrite a committed file every time anyone
-# probed it. The corpus is four files and three configs, built under mktemp,
-# and the only tool any of them names is grep.
+# probed it. The corpus is a handful of files, five configs and one two-commit
+# git repository, all built under mktemp, and the only tool any config names is
+# grep (or one that is deliberately not installed).
 #
 # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If a config whose one check passes
 # does not exit 0, every case below would be red for that reason rather than
@@ -570,6 +579,47 @@ SELFTEST_CFG_GONE_NO_TOOL
     self_unmeasured "a directory this self-test made unwritable can still be written to - running as root will do that - so the crash after the config was accepted was never reached. Unmeasured, not a pass"
   fi
 
+  # A REAL GIT REPOSITORY, for the one case that runs under --base. Commit 1
+  # holds `gone.txt`; commit 2 deletes it and adds `kept.txt`. Against HEAD~1
+  # the diff is one addition and one deletion, both inside `fixture/scope/*.txt`.
+  # The fixture's own git commands run with the user's and the system's git
+  # config switched off, so a signing requirement or a hook on this machine
+  # cannot make the corpus different from the one written here; the RUNNER is
+  # not isolated that way, because it is the thing under test.
+  command -v git >/dev/null 2>&1 || self_unmeasured "git is not on PATH, so the --base case that drives the deleted label cannot be built"  # stderr-ok: a presence probe whose EXIT STATUS is the whole answer, and the absence is reported in words on this same line
+  fixture_git() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      git -C "$SB/repo" -c user.name=selftest -c user.email=selftest@example.invalid \
+      -c commit.gpgsign=false -c init.defaultBranch=main "$@" >> "$SB/repo-build.log" 2>&1
+  }
+  # THE TWO FILES MUST NOT LOOK ALIKE TO GIT. Measured: with identical content,
+  # git's default rename detection reports commit 2 as `gone.txt -> kept.txt`,
+  # `--name-only` lists only `kept.txt`, `--diff-filter=D` lists nothing, and
+  # the case silently stops being about a deletion. So `gone.txt` holds text
+  # that shares no line with `kept.txt`, and `files_in_scope 2` below turns a
+  # rename collapse into a finding rather than a pass.
+  mkdir -p "$SB/repo/fixture/scope"
+  { fixture_git init -q &&
+    printf 'this file is committed once and deleted in the next commit\nit shares no line with the file that survives\n' > "$SB/repo/fixture/scope/gone.txt" &&
+    fixture_git add fixture/scope/gone.txt &&
+    fixture_git commit -q -m one &&
+    printf 'RUN-CHECKS-SELFTEST-NEEDLE\n' > "$SB/repo/fixture/scope/kept.txt" &&
+    fixture_git add fixture/scope/kept.txt &&
+    fixture_git rm -q fixture/scope/gone.txt &&
+    fixture_git commit -q -m two; } ||
+    self_unmeasured "the fixture git repository could not be built, so the --base case was never driven. Unmeasured, not a pass"
+  GIT_BASE_REF="HEAD~1"
+  GIT_BASE_SHA="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo" rev-parse --verify "$GIT_BASE_REF^{commit}")" ||
+    self_unmeasured "the fixture repository has no $GIT_BASE_REF, so there is no base to diff against. Unmeasured, not a pass"
+  # PREMISE, read off the TREES and not off `--diff-filter=D`, which is the
+  # query under test: the path is in the base commit, not in HEAD, and not on
+  # disk. Any one of those false and the case stops being about a deletion.
+  if GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo" cat-file -e "$GIT_BASE_REF:fixture/scope/gone.txt" >> "$SB/repo-build.log" 2>&1 &&
+     ! GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo" cat-file -e "HEAD:fixture/scope/gone.txt" >> "$SB/repo-build.log" 2>&1 &&
+     [ ! -e "$SB/repo/fixture/scope/gone.txt" ]; then :; else
+    self_unmeasured "the fixture repository does not hold gone.txt at the base and lack it at HEAD, so nothing was deleted in the range. Unmeasured, not a pass"
+  fi
+
   SELF_CASES=0
   SELF_FAILED=0
   # Assertions read off a RESULT FILE rather than off an exit code. Counted
@@ -643,6 +693,41 @@ SELFTEST_ASSERT
     fi
   }
 
+  # The same, for a key in the result's `change` object rather than on a check
+  # row. Same rules: two parsed JSON values compared with `==`, nothing
+  # evaluated. A missing key is a finding and never read as null, because
+  # "the runner did not write it" and "the runner wrote null" are the two
+  # things `change.base` exists to tell apart.
+  self_assert_change() {
+    _file="$1"; _key="$2"; _want="$3"; _what="$4"
+    SELF_ASSERTS=$((SELF_ASSERTS + 1))
+    _got="$(python3 - "$_file" "$_key" "$_want" <<'SELFTEST_ASSERT_CHANGE'
+import json, sys
+path, key, want = sys.argv[1:4]
+try:
+    doc = json.load(open(path))
+except (OSError, ValueError) as exc:
+    print("the result file could not be read: %s" % exc)
+    raise SystemExit(0)
+change = doc.get("change")
+if not isinstance(change, dict):
+    print("the result holds no `change` object")
+    raise SystemExit(0)
+if key not in change:
+    print("`change` has no `%s` key; it holds %s" % (key, ", ".join(sorted(change))))
+    raise SystemExit(0)
+print("held" if change[key] == json.loads(want)
+      else "change.%s is %s, not %s" % (key, json.dumps(change[key]), want))
+SELFTEST_ASSERT_CHANGE
+)"
+    if [ "$_got" = "held" ]; then
+      printf '  held:    assert %-20s %s\n' "change.$_key" "$_what"
+    else
+      printf '  FINDING: assert %-20s %s - %s\n' "change.$_key" "$_what" "$_got"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
   SELF_RC=0
   bash "$0" --config "$SB/checks-pass.yaml" --root "$SB" \
     --changed "$SB/changed-clean.txt" --out "$SB/clean.json" \
@@ -707,6 +792,37 @@ SELFTEST_ASSERT
     "the dropped path is NAMED, and labelled absent rather than deleted, because --changed has no second source that could corroborate a deletion"
   self_assert "$SB/scope.json" files_dropped_deleted '[]' \
     "nothing is called deleted on a run that cannot know that it was"
+  self_assert_change "$SB/scope.json" base 'null' \
+    "a --changed run records no base: the list was diffed against nothing this runner can name, and HEAD would be invented"
+  self_assert_change "$SB/scope.json" base_ref 'null' \
+    "and no ref either"
+
+  # THE `deleted` LABEL, DRIVEN. The same scope and the same per_file check,
+  # but in a real git repository and under --base, which is the only mode with
+  # a second source. The in-scope path was COMMITTED and then DELETED in a
+  # later commit, so `git diff --diff-filter=D` against the first commit names
+  # it - and the drop must be labelled `deleted`, with `dropped_source` naming
+  # git, where the --changed case above labels the same shape `absent`.
+  self_drive deleted-under-base 0 \
+    "a path committed and then deleted in a real repository, run under --base: dropped before argv, and corroborated by git as deleted rather than merely absent" \
+    --config "$SB/checks-scope.yaml" --root "$SB/repo" \
+    --base "$GIT_BASE_REF" --out "$SB/git-deleted.json"
+  self_assert "$SB/git-deleted.json" status '"pass"' \
+    "the check RAN over the surviving file"
+  self_assert "$SB/git-deleted.json" files_in_scope 2 \
+    "git's diff named both paths - a rename collapse would have made this 1 and hidden the deletion"
+  self_assert "$SB/git-deleted.json" files_handed_over 1 \
+    "exactly one path reached a command line"
+  self_assert "$SB/git-deleted.json" files_dropped_deleted '["fixture/scope/gone.txt"]' \
+    "the dropped path is labelled DELETED, because git named it removed in the range"
+  self_assert "$SB/git-deleted.json" files_dropped_absent '[]' \
+    "and it is not also called absent"
+  self_assert "$SB/git-deleted.json" dropped_source "\"git diff --diff-filter=D against $GIT_BASE_REF\"" \
+    "the label says git is where it came from, and against which ref"
+  self_assert_change "$SB/git-deleted.json" base "\"$GIT_BASE_SHA\"" \
+    "change.base is the full commit id the diff was taken from, read back from the fixture repository by rev-parse"
+  self_assert_change "$SB/git-deleted.json" base_ref "\"$GIT_BASE_REF\"" \
+    "change.base_ref is the ref exactly as typed"
 
   # EVERY path in scope gone. Without the guard the drop leaves an empty list,
   # per_file iterates zero times, and the executor's `worst` stays at its
@@ -738,9 +854,10 @@ SELFTEST_ASSERT
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '  exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
-  printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The last three cases are the exception - eight assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, and the code alone cannot tell them apart.\n'
+  printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The last four cases are the exception - eighteen assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope` and `deleted-under-base` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` case alone proves only that an absent path was ACCEPTED, because the path it names falls outside the one check scope and no tool was asked to open it. `deleted-in-scope` puts an absent path INSIDE a per_file check scope, where the executor would have substituted it into argv, and five assertions read off the result file: the check ran, the scope is still 2, one path was handed over, the dropped one is named, and it is labelled absent and not deleted.\n'
-  printf '  NOT ASSERTED: the `deleted` LABEL, and the git query that produces it. Both in-scope cases run under --changed, which has no second source, so every drop in them is labelled `absent`. The --base path that asks git --diff-filter=D is exercised only by a real run against a repository, measured by hand on this one, and no case here drives it.\n'
+  printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` LABEL, and the git query that produces it. `deleted-under-base` builds a two-commit git repository, deletes an in-scope path in the second commit and runs under --base HEAD~1; assertions read off the result file that git named both paths, one was handed over, the drop is labelled deleted and not absent, dropped_source names git and the ref, and change.base / change.base_ref record the commit and the ref. The --changed case asserts both are null.\n'
+  printf '  NOT ASSERTED: a --base whose ref is NOT an ancestor of HEAD, where change.base (the merge base) and `git rev-parse <ref>` differ; and a deletion git reports as a RENAME, where --name-only and --diff-filter=D both omit the old path, so it is neither handed over nor dropped nor labelled.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
     exit 1
@@ -850,10 +967,26 @@ if [ -n "$CHANGED" ]; then
   # both modes; only the LABEL on the drop differs, and it says which it is.
   : > "$WORK/deleted.txt"
   DELETED_SOURCE="none: --changed hands over a list, and nothing here can say why a path in it is absent"
+  # NO BASE, AND NONE IS INVENTED. `change.base` and `change.base_ref` are
+  # written null for this mode: a caller-supplied list was diffed against
+  # nothing this runner can name, and recording HEAD here would be a
+  # measurement nobody took.
+  BASE_SHA=""
+  BASE_REF=""
 elif [ -n "$BASE" ]; then
   command -v git >/dev/null 2>&1 || die_usage "--base needs git on PATH"
   merge_base="$(cd "$ROOT" && git merge-base "$BASE" HEAD 2>/dev/null)" ||
     die_usage "cannot resolve a merge base against $BASE. A wrong base makes every result below confidently wrong at once."
+  # WHAT THE DIFF WAS COMPUTED AGAINST, recorded as two different facts.
+  # `base_ref` is the ref exactly as typed. `base` is the commit the diff below
+  # is actually taken from - the MERGE BASE, not `git rev-parse $BASE`. The two
+  # are the same commit whenever REF is an ancestor of HEAD (HEAD~1, a
+  # root commit, a branch not moved since); they differ when REF has moved on
+  # past the fork point, and then `rev-parse` would name a commit this diff was
+  # never taken against. `--verify` makes it a full 40-hex id or a refusal.
+  BASE_SHA="$(cd "$ROOT" && git rev-parse --verify "${merge_base}^{commit}")" ||
+    die_usage "the merge base against $BASE did not resolve to a commit. A wrong base makes every result below confidently wrong at once."
+  BASE_REF="$BASE"
   (cd "$ROOT" && git diff --name-only "$merge_base" HEAD) > "$WORK/changed.txt"
   if [ ! -s "$WORK/changed.txt" ]; then
     die_usage "the diff against $BASE is empty. An empty diff is far more often a base problem than a change that did nothing; resolve the base before believing a green run."
@@ -969,7 +1102,7 @@ done < "$WORK/changed.txt"
 cat > "$WORK/plan.py" <<'PY'
 import json, os, re, sys
 
-CONFIG, WORK, CHANGED, TAGS, ROOT, ROOT_SOURCE, CONFIG_SOURCE, DELETED, DELETED_SOURCE = sys.argv[1:10]
+CONFIG, WORK, CHANGED, TAGS, ROOT, ROOT_SOURCE, CONFIG_SOURCE, DELETED, DELETED_SOURCE, BASE_SHA, BASE_REF = sys.argv[1:12]
 
 def bad(msg):
     sys.stderr.write("run-checks: %s: %s\n" % (os.path.basename(CONFIG), msg))
@@ -1909,6 +2042,9 @@ with open(os.path.join(WORK, "plan.json"), "w") as fh:
                # file says whether the `absent` label meant "git looked and did
                # not name it" or "nothing looked at all".
                "deleted_source": DELETED_SOURCE,
+               # Empty string on the shell side means "this mode has no base";
+               # it becomes null here and never the empty string on disk.
+               "base": BASE_SHA or None, "base_ref": BASE_REF or None,
                "local_overrides_ignored": ignored_local,
                "waivers": {"declared": WAIVER_DIR is not None, "dir": WAIVER_DIR,
                            "today": WAIVER_TODAY, "entries": waivers},
@@ -1977,7 +2113,7 @@ for c in plan:
 sys.stdout.write("\n".join(str(c["index"]) for c in plan if c["triggered"]) + "\n")
 PY
 
-TRIGGERED="$(python3 "$WORK/plan.py" "$CONFIG_ABS" "$WORK" "$WORK/changed.txt" "$TAGS" "$ROOT" "$ROOT_SOURCE" "$CONFIG_SOURCE" "$WORK/deleted.txt" "$DELETED_SOURCE")" || {
+TRIGGERED="$(python3 "$WORK/plan.py" "$CONFIG_ABS" "$WORK" "$WORK/changed.txt" "$TAGS" "$ROOT" "$ROOT_SOURCE" "$CONFIG_SOURCE" "$WORK/deleted.txt" "$DELETED_SOURCE" "$BASE_SHA" "$BASE_REF")" || {
   rc=$?
   cleanup
   exit "$rc"
@@ -2610,13 +2746,24 @@ def _rel(p, root):
     r = root.rstrip("/") + "/"
     return p[len(r):] if p.startswith(r) else os.path.basename(p)
 
+# WHY THE SCHEMA ID STAYS `/1` WITH `change.base` AND `change.base_ref` ADDED.
+# The change is additive: no field is renamed, removed or re-typed, and every
+# reader measured reads `change` by key with a default (`build-view.sh` already
+# reads `change.get('base')` and gets null; `pr-spec-comment.sh` reads only
+# `files`). A bump would break the one reader that pins the id exactly -
+# `emit-attestation.sh` refuses anything but `/1` - to announce two keys no
+# reader has to understand. `/2` is for the day a field a reader relies on
+# changes meaning. A reader that must know whether a null base means "no base
+# in this mode" or "an older runner that never recorded one" tells them apart
+# by the KEY: present-and-null is the former, absent is the latter.
 doc = {
     "schema": "productizer.checks.result/1",
     "config": _rel(plan["config"], plan["root"]),
     "root": ".",
     "config_source": plan["config_source"],
     "root_source": plan["root_source"],
-    "change": {"files": plan["files"], "file_count": len(plan["files"]), "tags": plan["tags"]},
+    "change": {"files": plan["files"], "file_count": len(plan["files"]), "tags": plan["tags"],
+               "base": plan["base"], "base_ref": plan["base_ref"]},
     "verdict": verdict,
     "exit_code": code,
     "counts": {"declared": len(plan["checks"]), "triggered": triggered,

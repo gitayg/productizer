@@ -1884,7 +1884,7 @@ checks:
             documented: <codes>`, both halves bare integer lists, the reached half computed
             from the cases as they ran. Three figures are kept apart and never added: how many
             DECLARE, how many of those drove every code they document, and how many were NOT
-            ASKED. Measured 2026-09-07: 34 of 34 declare, 34 of 34 complete, 0 unmeasured.
+            ASKED. Measured 2026-09-14: 35 of 35 declare, 35 of 35 complete, 0 unmeasured.
             (Superseded: on 2026-09-06 this read 3 of 34 declaring and 31 unmeasured - 11
             emitting nothing, 20 emitting a prose codes line with no `documented:` half.) No exit code
             rests on any of them: a self-test never asked which codes it drove has not been
@@ -1905,7 +1905,7 @@ checks:
             falsified: dropping the dispatch-shape rule makes `evals/solver-probe.py` read as
             carrying a self-test on the strength of a line that invokes somebody else's, and
             dropping the rejection override makes a tool that refuses the flag count as covered.
-            Measured on this repo 2026-09-06: 34 of 34 repository check tools carry one that
+            Measured on this repo 2026-09-14: 35 of 35 repository check tools carry one that
             answers. The R39.b reader was falsified twice - ignoring a documented code that
             was never driven, and accepting a prose codes line as a declaration - and each
             break turns a green corpus red.
@@ -1919,7 +1919,7 @@ checks:
             invoked from anywhere else - a Makefile, a hook, a person - is invisible. It reads
             ONE checks.yaml and ONE workflow. And the obligation is vacuous for a tool with no
             self-test to run: that shortfall is R39's, counted there and not here. Measured
-            2026-09-06 that set is EMPTY - R39 reads 34 of 34 - so there is nothing this
+            2026-09-14 that set is EMPTY - R39 reads 35 of 35 - so there is nothing this
             verdict is currently silent about. It stays silent about it by construction, not
             because the number happens to be zero today. (Superseded 2026-09-06: this sentence
             named 28 tools, a figure that was hardcoded and went stale.)
@@ -2008,3 +2008,282 @@ checks:
       - The unit is characters, a PROXY for a token budget calibrated at 3.79-4.31 bytes per token on candidate runs, and no factor is applied. A spec that starts quoting interfaces in fenced blocks moves its real retrieval cost by up to 82% at an unchanged character count; that is why `mix` is printed, and `mix` is not banded.
       - The proxy models retrieval as substring search then read-in-file-order. An agent that greps differently, or reads a section rather than a line, costs something this does not measure.
       - The band is a percentage around a recorded baseline. It cannot tell a budget that grew because the spec grew from one that grew because retrieval got worse; both are red, and which it was is read off the table by hand.
+
+  # === THE SIX CHECKS THE TEMPLATE SHIPS AND THIS REPO HAD NEVER DECLARED ===
+  #
+  # B51. `/productizer:upgrade` reported that the scaffolded template declares
+  # secret-scan, dependency-audit, sast, sast-auth, pii-log-scan and
+  # secure-coding-controls, and this file named none of them. An undeclared
+  # check does not run and never appears in a result, so the suite was
+  # silent about whether it had a secret scanner at all.
+  #
+  # Each is now DECLARED, and each one's state is a decision written down
+  # beside it. Two states, both recorded by id in the result and neither a pass:
+  #
+  #   `when.paths` that matches nothing today -> `not_triggered`. The
+  #       self-expiring n/a, the same shape as `jira-unbound`: the premise is
+  #       re-read from the change on every run, and the check starts running
+  #       the day the premise stops holding. Nobody has to remember it.
+  #   `enabled: false` -> `disabled`. For a check that CANNOT run here, or can
+  #       never be triggered here. It is reported by name as disabled, it
+  #       covers nothing, and it is not counted as passing. The reason is the
+  #       `why` and the comment above it, so the argument is in review.
+  #
+  # One difference measured in a scratch run: the terminal summary prints a
+  # `DISABLED` line per disabled check but prints NO line for a `not_triggered`
+  # one - it appears only in checks-result.json and in the `N declared, M
+  # triggered` header.
+  #
+  # `--disable-version-check` on every semgrep `version_command`: without it the
+  # line recorded as the tool's version was semgrep's update notice, "A new
+  # version of Semgrep is available", measured in the same scratch run.
+  #
+  # Measured 2026-09-13 on this machine: `command -v` finds semgrep 1.171.0 and
+  # npm 10.9.4, and does NOT find gitleaks. `git ls-files` finds no root
+  # package manifest and no `check-pii-logging.sh` anywhere in the tree.
+
+  # --- secret scan: gitleaks, DISABLED, and blocked rather than n/a ----------
+  #
+  # This one is applicable and is not running, and that is said plainly rather
+  # than dressed as an n/a. The only blocker is that gitleaks is not installed
+  # on the maintainer's machine: a declared, enabled check whose tool is absent
+  # reads `missing_tool` and refuses the whole local suite, and installing a
+  # binary on someone's machine is that person's decision, not a config edit.
+  #
+  # WHAT RUNS INSTEAD, AND HOW MUCH LESS IT IS. `hygiene` carries thirteen
+  # credential patterns. Five fake credentials were planted in a scratch
+  # directory - an AWS key id and its secret key in Markdown, a GitHub token in
+  # a shell script, a Slack webhook in JSON, a quoted password in YAML, a GitLab
+  # token in text - and `hygiene` exited 1 naming TWO of the five: the AWS key
+  # id and the GitHub token. The secret key, the webhook, the password and the
+  # GitLab token passed it clean. `semgrep --config p/secrets`, which runs here,
+  # was measured over the same five and found ONE. So semgrep is not the
+  # substitute, and the gap is real and sized.
+  #
+  # TO ENABLE: install gitleaks here and in the workflow, pinned, then flip
+  # `enabled` and falsify it against the same five before believing it. The
+  # argv, the exit codes and the coverage below are the template's as corrected
+  # on 2026-09-13 against gitleaks' own source at v8.30.1: exit 1 is "leaks OR
+  # error", so leaks are moved to exit 3 with `--exit-code` and exit 1 becomes
+  # refused. `detect --no-git` is deprecated there in favour of `dir`.
+  - id: secret-scan
+    enabled: false
+    why: a credential pushed to a public repo installed by strangers must be rotated, and hygiene's thirteen credential patterns caught two of five planted fakes; DISABLED only because gitleaks is not installed on this machine, which is a blocker to clear and not an n/a
+    when:
+      always: true
+    severity: block
+    requires: [gitleaks]
+    version_command: [gitleaks, version]
+    mode: per_file
+    command: [gitleaks, dir, --no-banner, --redact, --exit-code, "3", "{file}"]
+    timeout_seconds: 900
+    exit_codes:
+      pass: [0]
+      fail: [3]
+      refused: [1, 126]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 3]
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - Disabled. It covers nothing and claims nothing until gitleaks is installed here and in CI and the check has been seen failing on a planted credential.
+      - The corrected argv and exit codes were read from gitleaks' source at v8.30.1, not executed; nothing here has run gitleaks.
+
+  # --- dependency audit: declared, and not triggered while there is nothing to audit
+  #
+  # There is no package manifest at this repository's root: what ships is shell,
+  # Python and Markdown, and the one `package.json` in the tree is a survey
+  # fixture under `fixtures/unmeasured-report/`. `npm audit` with no lockfile
+  # exits 1 with ENOLOCK - measured - so running it every commit would be a
+  # red suite about a dependency tree that does not exist.
+  #
+  # So the trigger IS the premise. The globs are root-anchored on purpose: this
+  # runner's `*` does not cross `/`, so a fixture manifest cannot trigger an
+  # audit of the root, and a real root manifest or lockfile arriving in a
+  # change starts the check on that change with no edit here. The template's
+  # `tags` are dropped because nothing in this repository passes `--tags`.
+  #
+  # The coverage pattern is the corrected template one. The template read
+  # `totalDependencies`, which npm 10.9.4's `--json` does not print - measured on
+  # a clean one-dependency lockfile, zero matches - so every clean audit would
+  # have come back hollow.
+  - id: dependency-audit
+    why: an advisory against a pinned dependency lands without anyone editing a file, and the moment this repo gains a root manifest there is a tree to audit; until then there is none, and the trigger says so on every run
+    when:
+      paths:
+        - "package.json"
+        - "package-lock.json"
+    severity: block
+    requires: [npm]
+    version_command: [npm, --version]
+    mode: batch
+    command: [npm, audit, --audit-level=high, --json]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]
+    coverage:
+      from: stdout_count
+      pattern: '(?:"totalDependencies"\s*:\s*|"dependencies"\s*:\s*\{[^{}]*"total"\s*:\s*)([0-9]+)'
+      min_covered: 1
+    limitations:
+      - Not triggered today. It says nothing about dependencies this repo pulls in outside a manifest - the pinned PyYAML and Claude Code CLI installs in the workflow are not audited by anything.
+      - npm exits 1 for an advisory at or above the floor AND for ENOLOCK, so a manifest committed without a lockfile fails as if it were vulnerable. That fails closed, and the output says which.
+
+  # --- SAST, baseline: semgrep p/default, RUNNING ---------------------------
+  #
+  # The one semgrep check this repository can honestly run. Measured over all
+  # 19 tracked .py and .js files: 494 rules loaded, 0 findings, exit 0. The
+  # workflow installs the same pinned semgrep in an isolated venv.
+  #
+  # THREE CORRECTIONS TO THE TEMPLATE, EACH MEASURED ON SEMGREP 1.171.0:
+  #   1. `--error`. Without it semgrep exits 0 WITH findings: a scratch file
+  #      holding `eval(input())` produced one finding and exit 0, and exit 1
+  #      only once `--error` was added. The template's `fail: [1]` was a code
+  #      semgrep never returned for a finding.
+  #   2. `--dump-config` does not exist: `unknown option '--dump-config'`,
+  #      exit 2. The template's rule count therefore read 0 on every run and
+  #      the check was hollow whatever it scanned. Rules are counted instead
+  #      from `--time`, whose JSON names every rule that loaded for a target;
+  #      over contradiction-check.py the pattern below matched exactly the 342
+  #      ids semgrep listed, no more and no fewer. No `--error` there, so a
+  #      finding in that file cannot zero the count.
+  #   3. `--metrics=off`. semgrep's own help: with the default `auto`, "metrics
+  #      are sent whenever the --config value pulls from the Semgrep server",
+  #      which every `p/` ruleset does. This suite runs on contributors'
+  #      machines.
+  #
+  # THE RULESET IS NOT PINNED, and that is accepted with eyes open. `p/default`
+  # is fetched from the registry at run time, so its content can change between
+  # two runs of an unchanged commit - which the workflow refuses for the
+  # manifest validator. The difference is the direction: a registry that adds a
+  # rule turns an unchanged commit red on a real finding, which is the same
+  # property `dependency-audit`'s `why` names for advisories.
+  - id: sast
+    why: the ordinary injection and unsafe-evaluation classes in the Python and JavaScript this plugin ships and runs on other people's machines
+    when:
+      paths:
+        - "**/*.py"
+        - "**/*.js"
+        - "**/*.ts"
+        - "**/*.go"
+    severity: block
+    requires: [semgrep]
+    version_command: [semgrep, --version, --disable-version-check]
+    mode: batch
+    command: [semgrep, --config, p/default, --json, --quiet, --metrics=off, --error, "{files}"]
+    timeout_seconds: 600
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2, 4, 7]
+    coverage:
+      from: stdout_paths
+      pattern: '"([^"]+\.(py|js|ts|go))"'
+      must_cover: all_triggering
+      min_covered: 1
+      min_rules: 50
+      rules_command: [semgrep, --config, p/default, --json, --time, --quiet, --metrics=off, plugins/productizer/skills/spec/scripts/contradiction-check.py]
+      rules_pattern: '"([a-z0-9_-]+(?:\.[A-Za-z0-9_-]+){3,})"'
+    limitations:
+      - The rule floor is counted over one Python file, so it proves the Python rules loaded. A registry response that dropped only the JavaScript rules would pass the floor.
+      - The ruleset is fetched from the registry on every run and is not content-pinned, so the same commit can be green on one day and red on the next.
+      - It sees only .py, .js, .ts and .go. The 72 shell scripts, which are most of what this plugin executes, are `shell-lint`'s and `stderr-suppression`'s, not this check's.
+
+  # --- SAST on authentication, and the control-framework scan: DISABLED -----
+  #
+  # Both trigger ONLY on requirement tags, and a tag reaches this runner only
+  # through `--tags`. Measured: nothing in this repository passes `--tags` to
+  # run-checks.sh - not the workflow, not a script, not a hook - so as enabled
+  # checks they would be `not_triggered` on every run forever. That would look
+  # like a scoped check waiting for its change when it is a check that cannot
+  # fire, which is the silence B51 was about. `disabled` says what is true.
+  #
+  # Their argv carries the same `--error` and `--metrics=off` correction as
+  # `sast`, so enabling one is a trigger decision and not a hidden bug. They
+  # keep no rule floor: `--dump-config` does not exist, and the replacement
+  # enumerates rules per target language - `p/secure-defaults` loaded ONE rule
+  # for a Python target, against the template's floor of ten.
+  - id: sast-auth
+    enabled: false
+    why: DISABLED because it triggers only on requirement tags and nothing in this repository passes --tags, so enabled it would be not_triggered on every run and read as a scoped check rather than one that cannot fire
+    when:
+      tags: [auth, authn, authz, session, crypto, secrets]
+    severity: block
+    requires: [semgrep]
+    version_command: [semgrep, --version, --disable-version-check]
+    mode: batch
+    command: [semgrep, --config, p/jwt, --config, p/secrets, --json, --quiet, --metrics=off, --error, "{files}"]
+    timeout_seconds: 900
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2, 4, 7]
+    coverage:
+      from: stdout_paths
+      pattern: '"([^"]+\.(py|js|ts|go))"'
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - Disabled. It covers nothing. Enabling it needs a caller that derives tags from the spec and passes them, which does not exist.
+
+  - id: secure-coding-controls
+    enabled: false
+    why: DISABLED because it triggers only on ISO control-id tags, spec.md carries none of them - tagging is backlog item B20 - and nothing in this repository passes --tags; enabled it could never fire
+    when:
+      tags:
+        - "A.8.28"
+        - "A.8.26"
+        - "42001-6.1.3"
+    severity: block
+    requires: [semgrep]
+    version_command: [semgrep, --version, --disable-version-check]
+    mode: batch
+    command: [semgrep, --config, p/secure-defaults, --json, --quiet, --metrics=off, --error, "{files}"]
+    timeout_seconds: 900
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2, 4, 7]
+    coverage:
+      from: stdout_paths
+      pattern: '"([^"]+\.(py|js|ts|go))"'
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - Disabled. It covers nothing, and this repository makes no control-framework claim for it to evidence.
+
+  # --- PII in logs: DISABLED, the tool is the template's example ------------
+  #
+  # The template's entry names `./scripts/check-pii-logging.sh` as a worked
+  # example of an in-house rule. That script exists nowhere in this tree - not
+  # under `scripts/`, not shipped under the plugin - so enabled it reads
+  # `missing_tool` and refuses the suite. Nor is there a subject for it: this
+  # plugin runs no service and writes no log line about a person. Writing a
+  # scanner to declare it would be a check built to have a check.
+  - id: pii-log-scan
+    enabled: false
+    why: DISABLED because its tool is the template's worked example and exists nowhere in this tree, and this plugin runs no service and logs nothing about a person
+    when:
+      paths:
+        - "**/*.py"
+        - "**/*.js"
+        - "**/*.ts"
+    severity: advise
+    requires: [./scripts/check-pii-logging.sh]
+    version_command: [./scripts/check-pii-logging.sh, --version]
+    mode: per_file
+    command: [./scripts/check-pii-logging.sh, "{file}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - Disabled. It covers nothing.

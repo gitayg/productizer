@@ -36,7 +36,9 @@
 # repo-root's own checks-result.json). It exists because that graph is the one
 # part of this script with a frozen external contract - another renderer reads
 # it - and a contract that can only be inspected by grepping a 900KB HTML file
-# is a contract nobody checks. It is also what --selftest drives.
+# is a contract nobody checks. It is also what --selftest drives. Its
+# `delta.spec` block reads the git history of repo-root, not FILE: when FILE
+# records a base, the spec at that commit is compared with the working tree.
 #
 # --selftest drives the cases below as subprocesses of this script and prints
 # the R39.b declaration. R39: one case per exit code this tool can return.
@@ -113,7 +115,7 @@ while [ $# -gt 0 ]; do
     --selftest|--self-test) MODE=selftest; shift ;;
     # The graph assertion suite. Driven by --selftest as one of its cases and
     # separately runnable, because when it goes red the first question is which
-    # of A1..A9 went red and that answer is on its own stdout.
+    # of A1..A14 went red and that answer is on its own stdout.
     --arch-selftest) MODE=archtest; shift ;;
     --out) OUT="${2:-}"; [ -n "$OUT" ] || { echo "build-view: --out needs a file" >&2; exit 2; }; shift 2 ;;
     --out=*) OUT="${1#--out=}"; shift ;;
@@ -156,7 +158,7 @@ ROOT="$(cd "$ROOT" && pwd)"
 #
 # The graph assertions are one case here rather than seven, because they are
 # assertions about a data structure and belong in the language that builds it;
-# `--arch-selftest` is that suite and it names its own cases A1..A9. What this
+# `--arch-selftest` is that suite and it names its own cases A1..A14. What this
 # layer adds is the part that suite cannot reach from inside one process: the
 # exit codes.
 if [ "$MODE" = selftest ]; then
@@ -278,7 +280,7 @@ python3 - "$ROOT" "$TMP" "$TEMPLATE" "$OUT" "$STALE_AFTER" "$REGEN_CMD" "$HERE" 
          "$MODE" "$ARCH_FILE" "$SKILL" <<'PYEOF'
 # -*- coding: utf-8 -*-
 """Render the lifecycle dashboard. Reads only; writes one HTML file."""
-import io, json, os, re, subprocess, sys, time
+import io, json, os, re, shutil, subprocess, sys, tempfile, time
 
 ROOT, TMP, TEMPLATE, OUT, STALE_AFTER, REGEN_CMD, SCRIPTS = sys.argv[1:8]
 MODE, ARCH_FILE, SKILL_HOME = sys.argv[8:11]
@@ -895,7 +897,214 @@ def vz_arch_req_state(unit):
     return 'never_ran'
 
 
-def vz_arch_build(res_obj, state, src, mtime):
+# --------------------------------------------------------------------------
+# delta.spec - what this change did to the SPEC, between the result's base and
+# the working tree
+# --------------------------------------------------------------------------
+# Measured by running this repository's own tools twice: `validate-spec.py
+# --list-files` says which files ARE the spec, and `spec-requirements.sh` reads
+# every requirement out of them - once over the working tree, once over the
+# base commit unpacked into a scratch directory. The two record sets are then
+# compared by id. Nothing here re-implements either tool; a second parser
+# would be the day this page calls R14 edited and the retention check calls it
+# unchanged.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO: say how a requirement's COVERAGE moved.
+# The result carries one check run, at HEAD. A coverage state "at base" would
+# need a second run at base, and a before/after drawn from one run is a
+# measurement nobody took. So the delta is the spec's text and status only.
+#
+# The five change words. `superseded` and `withdrawn` are their own words and
+# not `changed`: a requirement that stopped being an obligation leads to
+# different work - delete the behaviour - than one whose sentence moved.
+VZ_DELTA_CHANGES = ('new', 'changed', 'superseded', 'withdrawn', 'removed')
+VZ_SHA_RE = re.compile(r'^[0-9a-f]{40}$')
+
+
+def vz_run(argv, cwd=None, feed=None):
+    """(rc, stdout bytes, stderr text). rc None when argv[0] could not start."""
+    try:
+        proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        return None, b'', '%s could not be executed (%s)' % (
+            os.path.basename(argv[0]), exc.__class__.__name__)
+    out, err = proc.communicate(feed)
+    return proc.returncode, out, err.decode('utf-8', 'replace')
+
+
+def vz_delta_said(err, scratch):
+    """The first line a tool said, fit to publish: no scratch path, no home."""
+    line = next((l.strip() for l in (err or '').splitlines() if l.strip()), '')
+    for p in sorted(set([scratch, os.path.realpath(scratch)]), key=len, reverse=True):
+        line = line.replace(p, '<base>')
+    line = vz_arch_pub(line)
+    return line[:300] + ('...' if len(line) > 300 else '')
+
+
+def vz_delta_records(tree, scratch):
+    """Every requirement record in the spec of one work tree, or a refusal.
+
+    Returns ({id: [(status, target, text, file)]}, [files], None) or
+    (None, None, sentence)."""
+    rc, out, err = vz_run([sys.executable or 'python3',
+                           os.path.join(SCRIPTS, 'validate-spec.py'),
+                           '--repo', tree, '--list-files'])
+    if rc != 0:
+        # validate-spec.py writes its refusal to STDOUT, as a diagnostic line,
+        # and leaves stderr empty - measured. Either stream, whichever spoke.
+        return None, None, ('validate-spec.py --list-files exited %s: %s'
+                            % (rc, vz_delta_said(err, scratch)
+                               or vz_delta_said(out.decode('utf-8', 'replace'), scratch)
+                               or 'it said nothing'))
+    files = [l for l in out.decode('utf-8', 'replace').splitlines() if l.strip()]
+    if not files:
+        return None, None, 'validate-spec.py --list-files named no spec file'
+    recs, shown = {}, []
+    for f in files:
+        name = os.path.relpath(os.path.join(tree, f), tree)
+        shown.append(name)
+        rc, out, err = vz_run(['bash', os.path.join(SCRIPTS, 'spec-requirements.sh'),
+                               '--require-records', os.path.join(tree, f)])
+        if rc != 0:
+            return None, None, ('spec-requirements.sh exited %s on %s: %s'
+                                % (rc, name, vz_delta_said(err, scratch)
+                                   or 'it said nothing'))
+        for line in out.decode('utf-8', 'replace').splitlines():
+            cols = line.split('\t')
+            if len(cols) != 5:
+                return None, None, ('spec-requirements.sh emitted a record that is not '
+                                    'five columns in %s' % name)
+            recs.setdefault(cols[0], []).append((cols[2], cols[3], cols[4], name))
+    return recs, shown, None
+
+
+def vz_delta_idkey(rid):
+    m = re.match(r'^([A-Za-z]*)([0-9]+)$', rid)
+    return (m.group(1), int(m.group(2)), '') if m else (rid, -1, rid)
+
+
+def vz_delta_compare(base, head):
+    """Rows for every id whose record moved, plus the count that did not."""
+    rows, same = [], 0
+    for rid in sorted(set(base) | set(head), key=vz_delta_idkey):
+        b, h = base.get(rid), head.get(rid)
+        if b == h or (b and h and [r[:3] for r in b] == [r[:3] for r in h]):
+            same += 1
+            continue
+        b0, h0 = (b or [None])[0], (h or [None])[0]
+        if b is None:
+            change = 'new'
+        elif h is None:
+            change = 'removed'
+        elif len(b) == 1 and len(h) == 1 and b0[0] != h0[0] and h0[0] in ('superseded', 'withdrawn'):
+            change = h0[0]
+        else:
+            change = 'changed'
+        rows.append({
+            'id': vz_arch_pub(rid), 'change': change,
+            'from_status': b0[0] if b0 else None, 'to_status': h0[0] if h0 else None,
+            # A superseded requirement whose pointer moved (R23 to R33, say)
+            # has neither its status nor its sentence changed, and is still a
+            # change - so both ends of the pointer are carried.
+            'from_target': b0[1] if b0 and b0[1] != '-' else None,
+            'to_target': h0[1] if h0 and h0[1] != '-' else None,
+            'text_changed': bool(b0 and h0 and b0[2] != h0[2]),
+            'from_text': vz_arch_pub(b0[2]) if b0 else None,
+            'to_text': vz_arch_pub(h0[2]) if h0 else None,
+            'file': vz_arch_pub((h0 or b0)[3])})
+    return rows, same
+
+
+def vz_arch_spec_delta(root, change):
+    """The `delta.spec` block. Every list is null, never empty, unless read."""
+    base = change.get('base')
+    block = {'state': None, 'base': None, 'base_ref': None, 'reason': None,
+             'files_base': None, 'files_head': None, 'unchanged': None,
+             'rows': None}
+    for k in VZ_DELTA_CHANGES:
+        block[k] = None
+    ref = change.get('base_ref')
+    block['base_ref'] = vz_arch_pub(ref) if isinstance(ref, str) else None
+    if base is None:
+        block['state'] = 'no_base'
+        block['reason'] = ('the result records no base, so what this change did to the '
+                           'spec was not measured')
+        return block
+    if not isinstance(base, str) or not VZ_SHA_RE.match(base):
+        block['state'] = 'base_unreadable'
+        block['reason'] = 'the result names a base that is not a 40-hex commit sha'
+        return block
+    block['base'] = base
+    rc, _o, _e = vz_run(['git', '-C', root, 'cat-file', '-e', base + '^{commit}'])
+    if rc != 0:
+        block['state'] = 'base_unreadable'
+        block['reason'] = ('the base %s is not a commit this clone has (git cat-file '
+                           'exited %s)' % (base[:12], rc))
+        return block
+    scratch = tempfile.mkdtemp(prefix='build-view-base.')
+    try:
+        rc, tar, err = vz_run(['git', '-C', root, 'archive', '--format=tar', base])
+        if rc == 0:
+            rc, _o, err = vz_run(['tar', '-x', '-f', '-', '-C', scratch], feed=tar)
+        if rc != 0:
+            block['state'] = 'base_unreadable'
+            block['reason'] = ('the base tree could not be unpacked: %s'
+                               % vz_delta_said(err, scratch))
+            return block
+        brecs, bfiles, bwhy = vz_delta_records(scratch, scratch)
+        if bwhy:
+            block['state'] = 'base_unreadable'
+            block['reason'] = 'the spec at the base could not be read - ' + bwhy
+            return block
+        hrecs, hfiles, hwhy = vz_delta_records(root, scratch)
+        if hwhy:
+            block['state'] = 'unreadable'
+            block['reason'] = 'the spec in the working tree could not be read - ' + hwhy
+            return block
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    rows, same = vz_delta_compare(brecs, hrecs)
+    block.update({'state': 'read', 'files_base': bfiles, 'files_head': hfiles,
+                  'unchanged': same, 'rows': rows})
+    for k in VZ_DELTA_CHANGES:
+        block[k] = [r['id'] for r in rows if r['change'] == k]
+    return block
+
+
+def vz_delta_fixture_repo(fixdir, dst):
+    """Build the delta fixture's repository in dst; return its base sha or None.
+
+    base-spec.md is committed as the spec, then spec.md is written over it
+    uncommitted - the working tree the delta reads as head. Everything a commit
+    sha depends on is pinned, so the sha is a constant `result.json` can name.
+    The user's own git configuration is shut out: a signing or hook setting
+    there would change the sha or refuse the commit."""
+    env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1',
+               GIT_AUTHOR_NAME='fixture', GIT_AUTHOR_EMAIL='fixture@example.invalid',
+               GIT_COMMITTER_NAME='fixture', GIT_COMMITTER_EMAIL='fixture@example.invalid',
+               GIT_AUTHOR_DATE='2000-01-01T00:00:00Z',
+               GIT_COMMITTER_DATE='2000-01-01T00:00:00Z')
+    spec = os.path.join(dst, '.claude', 'productizer', 'spec.md')
+    os.makedirs(os.path.dirname(spec))
+    shutil.copyfile(os.path.join(fixdir, 'base-spec.md'), spec)
+    for argv in (['init', '-q'], ['add', '.claude/productizer/spec.md'],
+                 ['-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify',
+                  '-m', 'the base of the delta fixture']):
+        proc = subprocess.Popen(['git', '-C', dst] + argv, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        _o, err = proc.communicate()
+        if proc.returncode != 0:
+            sys.stderr.write('build-view: building the delta fixture repository, git %s '
+                             'exited %s: %s\n' % (argv[-1], proc.returncode,
+                                                  err.decode('utf-8', 'replace').strip()))
+            return None
+    shutil.copyfile(os.path.join(fixdir, 'spec.md'), spec)
+    rc, out, _e = vz_run(['git', '-C', dst, 'rev-parse', 'HEAD'])
+    return out.decode('ascii', 'replace').strip() if rc == 0 else None
+
+
+def vz_arch_build(res_obj, state, src, mtime, root=None):
     """The frozen VZ_ARCH contract. Another renderer reads this shape."""
     # Absent or unparseable: the shape is kept so a renderer can index it, and
     # every value in it is null. NOT ZERO. A zero here would say this
@@ -908,9 +1117,9 @@ def vz_arch_build(res_obj, state, src, mtime):
         'measured_utc': None,
         'nodes': [],
         'edges': [],
-        'delta': {'changed_files': None, 'base': None,
+        'delta': {'changed_files': None, 'base': None, 'base_ref': None,
                   'checks_triggered': None, 'checks_not_triggered': None,
-                  'requirements_touched': None},
+                  'requirements_touched': None, 'spec': None},
         'counts': {'checks': None, 'tools': None, 'requirements': None,
                    'by_state': dict((s, None) for s in VZ_ARCH_STATES)},
     }
@@ -975,6 +1184,12 @@ def vz_arch_build(res_obj, state, src, mtime):
             # that the runner offered files and the tool took none.
             'files_handed_over': (c.get('files_handed_over')
                                   if c.get('file_list_consumed') else None),
+            # Carried so the page can tell WHY the count is null. False: the
+            # check takes no file list, so "handed over" does not apply - n/a.
+            # None: the result does not say (an older runner) - that is ?.
+            # Both were rendered `? handed` until 2026-09-14, which told the
+            # reader 29 of 32 counts were unreadable when they do not exist.
+            'file_list_consumed': c.get('file_list_consumed'),
             'files_dropped': dropped})
 
     # A claim may name a check the result did not record - the runner writes
@@ -1022,11 +1237,15 @@ def vz_arch_build(res_obj, state, src, mtime):
         'changed_files': (change.get('file_count')
                           if change.get('file_count') is not None
                           else (len(files) if files is not None else None)),
-        # `productizer.checks.result/1` does not record the base it diffed
-        # against - measured, not assumed: `change` has three keys and they are
-        # files, file_count and tags. Null is what "the file does not say" looks
-        # like; a ref invented here would be a ref nobody diffed against.
-        'base': change.get('base'),
+        # The base the runner diffed against, as it recorded it: a 40-hex sha,
+        # or null under `--changed` and in every result written before the
+        # field existed. Read defensively - a value that is not a sha is not
+        # passed on as one. Null is what "the file does not say" looks like; a
+        # ref invented here would be a ref nobody diffed against.
+        'base': (change.get('base') if isinstance(change.get('base'), str)
+                 and VZ_SHA_RE.match(change.get('base')) else None),
+        'base_ref': (vz_arch_pub(change.get('base_ref'))
+                     if isinstance(change.get('base_ref'), str) else None),
         'checks_triggered': [c['id'] for c in check_nodes if c['triggered'] is True],
         # A check whose `triggered` is neither true nor false is in neither
         # list. The two lists are not a partition and are not drawn as one.
@@ -1036,7 +1255,8 @@ def vz_arch_build(res_obj, state, src, mtime):
         # result says that, and deriving it from filenames would be the
         # inference the top of this section refuses. What it means is exactly:
         # a check that triggered claims it.
-        'requirements_touched': touched}
+        'requirements_touched': touched,
+        'spec': vz_arch_spec_delta(root or ROOT, change)}
 
     graph['counts'] = {'checks': len(check_nodes), 'tools': len(tool_order),
                        'requirements': len(req_nodes), 'by_state': by_state}
@@ -1084,23 +1304,24 @@ if MODE == 'arch':
     sys.exit(0)
 
 if MODE == 'archtest':
-    # A1..A9. Every case names the state or the property it drives, so a red
+    # A1..A14. Every case names the state or the property it drives, so a red
     # line says which branch broke rather than that something did.
     _fixdir = os.path.join(SKILL_HOME, 'fixtures', 'arch-graph')
     _fix = os.path.join(_fixdir, 'five-states.json')
     _g = vz_arch_build(*vz_arch_read(_fix, vz_arch_shown(_fix)))
     _st = dict((n['id'], n.get('state')) for n in _g['nodes']
                if n['kind'] == 'requirement')
-    _failed = []
+    _failed, _driven = [], []
 
     def _a(name, ok, said):
+        _driven.append(name)
         sys.stdout.write('  %s %s %s\n' % (name, 'held' if ok else 'FAILED', said))
         if not ok:
             _failed.append(name)
 
     if _g['state'] != 'read':
         sys.stderr.write('build-view: the fixture at %s could not be read, so no case '
-                         'was driven and none of A1..A9 means anything.\n'
+                         'was driven and none of A1..A14 means anything.\n'
                          % vz_arch_shown(_fix))
         sys.exit(2)
 
@@ -1148,13 +1369,91 @@ if MODE == 'archtest':
        'no absolute path in the graph for the fixture or for this tree, which gets '
        'published (%d leak(s))' % len(_leak))
 
-    sys.stdout.write('  cases driven: 9. Cases that did not hold: %d\n' % len(_failed))
+    # A10..A13 - delta.spec. Driven over a git repository built here from two
+    # committed spec files, so the cases do not depend on this clone's history
+    # (an installed copy has none) and the base sha is the same on every
+    # machine: the identity, the dates and the tree are all pinned.
+    _dd = os.path.join(_fixdir, 'delta')
+    _dres = os.path.join(_dd, 'result.json')
+    _drepo = tempfile.mkdtemp(prefix='build-view-delta.')
+    try:
+        _dsha = vz_delta_fixture_repo(_dd, _drepo)
+        _dg = vz_arch_build(*vz_arch_read(_dres, vz_arch_shown(_dres)), root=_drepo)
+        _ds = _dg['delta']['spec'] or {}
+        _dwant = {'new': ['R4'], 'changed': ['R2', 'R10'], 'superseded': ['R6'],
+                  'withdrawn': ['R7'], 'removed': ['R8']}
+        _dgot = dict((k, _ds.get(k)) for k in _dwant)
+        _a('A10', (_dsha is not None and _dsha == _dg['delta']['base']
+                   and _ds.get('state') == 'read' and _dgot == _dwant
+                   and _ds.get('unchanged') == 4),
+           'the delta fixture reads NEW R4, CHANGED R2 and R10 (a moved pointer), '
+           'SUPERSEDED R6, WITHDRAWN R7, REMOVED R8, and R1 R3 R5 R9 unchanged - R3 '
+           'only re-wrapped (base %s, fixture names %s, state %r, got %r, unchanged %r)'
+           % ((_dsha or '?')[:12], (_dg['delta']['base'] or '?')[:12],
+              _ds.get('state'), _dgot, _ds.get('unchanged')))
+        _nob = _g['delta']['spec'] or {}
+        _a('A11', (_nob.get('state') == 'no_base' and _nob.get('reason')
+                   and all(_nob.get(k) is None for k in
+                           VZ_DELTA_CHANGES + ('rows', 'unchanged', 'files_base'))),
+           'a result with no base renders ? - state no_base and every list null, '
+           'NOT an empty delta (state %r)' % _nob.get('state'))
+        _bad = []
+        for _b in ('0' * 40, 'main', 12):
+            _o = json.loads(open(_dres).read())
+            _o['change']['base'] = _b
+            _bs = vz_arch_build(_o, 'read', 'result.json', None, root=_drepo)
+            _bad.append((_bs['delta']['spec']['state'],
+                         _bs['delta']['spec']['new'], _bs['delta']['base']))
+        # The sha this clone lacks is still passed on as `delta.base`: it is
+        # what the runner recorded and diffed against. Only the spec half, which
+        # needs the commit HERE, is unreadable. A ref name or a number is not a
+        # sha, so it is not passed on as one.
+        _a('A12', _bad == [('base_unreadable', None, '0' * 40),
+                           ('base_unreadable', None, None),
+                           ('base_unreadable', None, None)],
+           'a base that is a sha this clone lacks, a ref name, and a number each read '
+           'base_unreadable with no list, and only the well-formed sha is passed on '
+           'as the base (%r)' % (_bad,))
+        # A base with NO spec in it, so validate-spec.py refuses and says so on
+        # stderr - naming the scratch directory the base was unpacked into. That
+        # sentence is published, so it is the one that has to come back clean.
+        _rc, _et, _e = vz_run(['git', '-C', _drepo, 'hash-object', '-t', 'tree', '-w',
+                               '--stdin'], feed=b'')
+        _env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        _proc = subprocess.Popen(['git', '-C', _drepo, 'commit-tree',
+                                  _et.decode('ascii').strip(), '-m', 'no spec here'],
+                                 env=dict(_env, GIT_AUTHOR_NAME='f', GIT_AUTHOR_EMAIL='f@example.invalid',
+                                          GIT_COMMITTER_NAME='f', GIT_COMMITTER_EMAIL='f@example.invalid'),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        _empty = _proc.communicate()[0].decode('ascii').strip()
+        _o = json.loads(open(_dres).read())
+        _o['change']['base'] = _empty
+        _es = vz_arch_build(_o, 'read', 'result.json', None, root=_drepo)['delta']['spec']
+        _dblob = json.dumps([_dg, _es], ensure_ascii=False)
+        _a('A13', (_es['state'] == 'base_unreadable' and '<base>' in (_es['reason'] or '')
+                   and _drepo not in _dblob and os.path.realpath(_drepo) not in _dblob
+                   and 'build-view-base.' not in _dblob and '/Users/' not in _dblob
+                   and '/private/' not in _dblob and '/var/folders/' not in _dblob),
+           'a base with no spec reads base_unreadable, and the refusal it publishes names '
+           '<base> and no scratch directory or absolute path (state %r)' % _es['state'])
+    finally:
+        shutil.rmtree(_drepo, ignore_errors=True)
+    # A split spec: a requirement that moved from one declared part to another
+    # with its status, pointer and sentence intact has not changed. The fixture
+    # repository is one file, so this is driven on the comparison directly.
+    _mv, _mvsame = vz_delta_compare({'R1': [('active', '-', 'The x shall y.', 'a.md')]},
+                                    {'R1': [('active', '-', 'The x shall y.', 'b.md')]})
+    _a('A14', _mv == [] and _mvsame == 1,
+       'a requirement that only moved between two spec files is unchanged, not CHANGED '
+       '(rows %r, unchanged %r)' % (_mv, _mvsame))
+
+    sys.stdout.write('  cases driven: %d. Cases that did not hold: %d\n' % (len(_driven), len(_failed)))
     if _failed:
         sys.stderr.write('FAIL: %s did not hold.\n' % ', '.join(_failed))
         sys.exit(2)
     sys.stdout.write(
         '  NOT ASSERTED: that this repository ever reaches never_ran, void or missing. '
-        'It does not today, which is why the fixture exists; A1..A9 are statements '
+        'It does not today, which is why the fixture exists; A1..A14 are statements '
         'about the deriver, not about this tree.\n')
     sys.exit(0)
 

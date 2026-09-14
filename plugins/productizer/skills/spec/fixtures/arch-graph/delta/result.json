@@ -1,0 +1,380 @@
+{
+  "schema": "productizer.checks.result/1",
+  "config": "fixtures/arch-graph/delta/checks.yaml",
+  "root": ".",
+  "config_source": "a fixture, not a repository - see ../README.md",
+  "root_source": "a fixture, not a repository - see ../README.md",
+  "change": {
+    "files": [
+      "fixture/one.md",
+      "fixture/two.md"
+    ],
+    "file_count": 2,
+    "tags": [],
+    "base": "022fb0cd90adce89e6759dbc159a67f5f5965766",
+    "base_ref": "fixture-base"
+  },
+  "verdict": "FAIL",
+  "exit_code": 1,
+  "counts": {
+    "declared": 6,
+    "triggered": 5,
+    "passed": 4,
+    "blocking_failures": 1,
+    "waived": 0,
+    "advisory_failures": 0,
+    "disabled": 0,
+    "not_triggered": 1,
+    "spec_units_unsatisfied": 2
+  },
+  "spec_coverage": {
+    "mode": "claims",
+    "spec": ".claude/productizer/spec.md",
+    "status": "measured",
+    "detail": "a fixture spec with five requirements, one per overlay state",
+    "enforced": true,
+    "units_total": 5,
+    "counts": {
+      "Covered": 2,
+      "Partial": 0,
+      "Missing": 2,
+      "n/a": 1
+    },
+    "satisfied": false,
+    "units": [
+      {
+        "id": "R1",
+        "text": "The fixture shall hold one requirement that does not move between base and head.",
+        "verdict": "Covered",
+        "note": null,
+        "exercised": true,
+        "claims": [
+          {
+            "check": "alpha",
+            "claimed": "Covered",
+            "reason": null,
+            "evidence": "alpha ran, passed, and its claim on R1 stands. This is the only state the live result file of this repository reaches for a Covered requirement.",
+            "check_status": "pass",
+            "voided": null
+          }
+        ]
+      },
+      {
+        "id": "R2",
+        "text": "The fixture shall hold one requirement whose sentence was rewritten at head.",
+        "verdict": "Missing",
+        "note": "bravo claimed Covered but the check came back fail, so it measured nothing here",
+        "exercised": false,
+        "claims": [
+          {
+            "check": "bravo",
+            "claimed": "Covered",
+            "reason": null,
+            "evidence": "bravo claimed to cover R2 and then failed. A failing check measured nothing, so the claim is voided and R2 falls back to Missing.",
+            "check_status": "fail",
+            "voided": "the check came back fail, so it measured nothing here"
+          }
+        ]
+      },
+      {
+        "id": "R3",
+        "text": "The fixture shall hold one requirement that is only re-wrapped, which is not an edit.",
+        "verdict": "Covered",
+        "note": null,
+        "exercised": false,
+        "claims": [
+          {
+            "check": "charlie",
+            "claimed": "Covered",
+            "reason": null,
+            "evidence": "charlie names R3 and did not run in this change. Nothing voided the claim, so the verdict still reads Covered - and no passing check stands behind it.",
+            "check_status": "not_triggered",
+            "voided": null
+          }
+        ]
+      },
+      {
+        "id": "R4",
+        "text": "The fixture shall hold one requirement that head adds.",
+        "verdict": "n/a",
+        "note": "delta: the guard this requirement hangs off is shut in this configuration, so there is no obligation to meet",
+        "exercised": true,
+        "claims": [
+          {
+            "check": "delta",
+            "claimed": "n/a",
+            "reason": "the guard this requirement hangs off is shut in this configuration, so there is no obligation to meet",
+            "evidence": "delta ran and reported that the trigger for R4 is not present here. Unreachable is not unmet.",
+            "check_status": "pass",
+            "voided": null
+          }
+        ]
+      },
+      {
+        "id": "R5",
+        "text": "The fixture shall hold one more requirement that does not move.",
+        "verdict": "Missing",
+        "note": "no check in this config names this requirement",
+        "exercised": false,
+        "claims": []
+      }
+    ]
+  },
+  "waivers": {
+    "declared": 0,
+    "applied": 0,
+    "rows": []
+  },
+  "local_overrides_ignored": [],
+  "checks": [
+    {
+      "id": "alpha",
+      "why": "the fixture needs one check that ran, passed, and left a claim standing",
+      "severity": "block",
+      "blocking": true,
+      "mode": "batch",
+      "command": [
+        "./scripts/check-alpha.sh",
+        "{files}"
+      ],
+      "trigger_scope": "always",
+      "triggered": true,
+      "triggered_by": [
+        "always"
+      ],
+      "files_in_scope": 6,
+      "enabled": true,
+      "files_handed_over": 4,
+      "files_dropped_deleted": [
+        "fixture/deleted-before-the-run.md"
+      ],
+      "files_dropped_absent": [
+        "fixture/never-existed.md"
+      ],
+      "file_list_consumed": true,
+      "dropped_source": "the runner dropped what it could not hand over",
+      "tool": {
+        "command": [
+          "./scripts/check-alpha.sh",
+          "--version"
+        ],
+        "version": "check-alpha 1.0",
+        "exit_code": 0
+      },
+      "exit_code": 0,
+      "duration_seconds": 0.1,
+      "coverage": {
+        "from": "stdout_paths",
+        "observed": {
+          "covered": 4,
+          "files_in_scope": 4
+        },
+        "satisfied": true
+      },
+      "timed_out": false,
+      "output_tail": "alpha: 4 file(s) examined",
+      "status": "pass"
+    },
+    {
+      "id": "bravo",
+      "why": "the fixture needs one check that ran and failed, so that a claim can be voided by its own author",
+      "severity": "block",
+      "blocking": true,
+      "mode": "once",
+      "command": [
+        "./scripts/check-bravo.sh"
+      ],
+      "trigger_scope": "always",
+      "triggered": true,
+      "triggered_by": [
+        "always"
+      ],
+      "files_in_scope": 6,
+      "enabled": true,
+      "files_handed_over": 4,
+      "files_dropped_deleted": [],
+      "files_dropped_absent": [],
+      "file_list_consumed": false,
+      "dropped_source": "the runner dropped what it could not hand over",
+      "tool": {
+        "command": [
+          "./scripts/check-bravo.sh",
+          "--version"
+        ],
+        "version": "check-bravo 1.0",
+        "exit_code": 0
+      },
+      "exit_code": 1,
+      "duration_seconds": 0.1,
+      "coverage": {
+        "from": null,
+        "observed": null,
+        "satisfied": null
+      },
+      "timed_out": false,
+      "output_tail": "bravo: 1 finding",
+      "status": "fail"
+    },
+    {
+      "id": "charlie",
+      "why": "the fixture needs one check that never ran, so that a live claim can stand with no passing run behind it",
+      "severity": "advise",
+      "blocking": false,
+      "mode": "once",
+      "command": [
+        "./scripts/check-charlie.sh"
+      ],
+      "trigger_scope": "scoped",
+      "triggered": false,
+      "triggered_by": [],
+      "files_in_scope": 0,
+      "enabled": true,
+      "files_handed_over": 0,
+      "files_dropped_deleted": [],
+      "files_dropped_absent": [],
+      "file_list_consumed": false,
+      "dropped_source": "the runner dropped what it could not hand over",
+      "tool": {
+        "command": [
+          "./scripts/check-charlie.sh",
+          "--version"
+        ],
+        "version": null,
+        "exit_code": 1
+      },
+      "exit_code": null,
+      "duration_seconds": null,
+      "coverage": {
+        "from": null,
+        "observed": null,
+        "satisfied": null
+      },
+      "timed_out": false,
+      "output_tail": "",
+      "status": "not_triggered"
+    },
+    {
+      "id": "delta",
+      "why": "the fixture needs one check that ran and reported an obligation out of force",
+      "severity": "block",
+      "blocking": true,
+      "mode": "once",
+      "command": [
+        "./scripts/check-delta.sh"
+      ],
+      "trigger_scope": "always",
+      "triggered": true,
+      "triggered_by": [
+        "always"
+      ],
+      "files_in_scope": 6,
+      "enabled": true,
+      "files_handed_over": 4,
+      "files_dropped_deleted": [],
+      "files_dropped_absent": [],
+      "file_list_consumed": false,
+      "dropped_source": "the runner dropped what it could not hand over",
+      "tool": {
+        "command": [
+          "./scripts/check-delta.sh",
+          "--version"
+        ],
+        "version": "check-delta 1.0",
+        "exit_code": 0
+      },
+      "exit_code": 0,
+      "duration_seconds": 0.1,
+      "coverage": {
+        "from": null,
+        "observed": null,
+        "satisfied": null
+      },
+      "timed_out": false,
+      "output_tail": "delta: the guard is shut",
+      "status": "pass"
+    },
+    {
+      "id": "echo",
+      "why": "the fixture needs one check whose tool is reached through an interpreter, so that the tool node is the script and not python3",
+      "severity": "advise",
+      "blocking": false,
+      "mode": "once",
+      "command": [
+        "python3",
+        "./scripts/fixture-tool.py",
+        "--selftest"
+      ],
+      "trigger_scope": "always",
+      "triggered": true,
+      "triggered_by": [
+        "always"
+      ],
+      "files_in_scope": 6,
+      "enabled": true,
+      "files_handed_over": 4,
+      "files_dropped_deleted": [],
+      "files_dropped_absent": [],
+      "file_list_consumed": false,
+      "dropped_source": "the runner dropped what it could not hand over",
+      "tool": {
+        "command": [
+          "python3",
+          "--version"
+        ],
+        "version": "Python 3.14.6",
+        "exit_code": 0
+      },
+      "exit_code": 0,
+      "duration_seconds": 0.1,
+      "coverage": {
+        "from": null,
+        "observed": null,
+        "satisfied": null
+      },
+      "timed_out": false,
+      "output_tail": "fixture-tool: ok",
+      "status": "pass"
+    },
+    {
+      "id": "foxtrot",
+      "why": "the fixture needs two checks behind one tool, so that a graph with fewer tools than checks is exercised",
+      "severity": "advise",
+      "blocking": false,
+      "mode": "once",
+      "command": [
+        "./scripts/check-alpha.sh",
+        "--other-mode"
+      ],
+      "trigger_scope": "always",
+      "triggered": true,
+      "triggered_by": [
+        "always"
+      ],
+      "files_in_scope": 6,
+      "enabled": true,
+      "files_handed_over": 4,
+      "files_dropped_deleted": [],
+      "files_dropped_absent": [],
+      "file_list_consumed": false,
+      "dropped_source": "the runner dropped what it could not hand over",
+      "tool": {
+        "command": [
+          "./scripts/check-alpha.sh",
+          "--version"
+        ],
+        "version": "check-alpha 1.0",
+        "exit_code": 0
+      },
+      "exit_code": 0,
+      "duration_seconds": 0.1,
+      "coverage": {
+        "from": null,
+        "observed": null,
+        "satisfied": null
+      },
+      "timed_out": false,
+      "output_tail": "foxtrot: nothing claimed",
+      "status": "pass"
+    }
+  ]
+}

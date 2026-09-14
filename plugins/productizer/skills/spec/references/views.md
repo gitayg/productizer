@@ -219,7 +219,7 @@ scripts/build-view.sh --stale-after 900                # ... after 15 minutes
 scripts/build-view.sh --stale-after never              # or 0 - the default, off
 scripts/build-view.sh --arch                           # the declared graph as JSON, nothing written
 scripts/build-view.sh --arch FILE                      # ... derived from another result file
-scripts/build-view.sh --arch-selftest                  # the graph assertions, A1..A9
+scripts/build-view.sh --arch-selftest                  # the graph assertions, A1..A14
 scripts/build-view.sh --selftest                       # the exit-code contract
 ```
 
@@ -255,6 +255,47 @@ The other three are exercised by `fixtures/arch-graph/five-states.json`, for
 the same reason `ruling-requested` and `spec-home-stop` carry fixtures — a
 sweep over an empty set proves nothing. A break that stops counting one state
 was measured GREEN against this repository and RED against that fixture.
+
+### What this change did to the spec — `delta.spec`
+
+When `checks-result.json` records `change.base` as a 40-hex sha, the panel
+compares the spec at that commit with the working tree, **by requirement id**.
+Both sides are read with this repository's own tools — `validate-spec.py
+--list-files` for which files are the spec (run over the base commit unpacked
+into a scratch directory, so a spec that was split or moved since is found
+where it was), and `spec-requirements.sh --require-records` for the records:
+
+| change | when |
+|---|---|
+| `new` | the id is not in the spec at the base |
+| `changed` | the same id, and its sentence, its status or its supersession pointer moved |
+| `superseded` | active at the base, superseded now |
+| `withdrawn` | active at the base, withdrawn now |
+| `removed` | at the base, gone now — ids are meant to be permanent, so this is worth a look |
+
+A re-wrapped sentence is not an edit (the parser collapses whitespace), and a
+requirement that only moved between two spec files is unchanged. Moved
+requirements wear the change word as a pill beside their state on the graph.
+
+**Coverage is not compared with the base.** The result holds one check run, at
+HEAD; a requirement's state "at base" would need a second run, and a
+before/after drawn from one run is a measurement nobody took. So no requirement
+is ever drawn as having gained or lost coverage.
+
+Anything short of a read is `?`, never an empty delta: `no_base` (the result
+records none — every result under `--changed`, and every result written before
+the field existed), `base_unreadable` (not a sha, not a commit this clone has,
+or no spec discoverable at it — the tool's own refusal is published with the
+scratch path replaced by `<base>`), `unreadable` (the working spec). A base
+before the spec existed — this repository's root commit — reads
+`base_unreadable`, because `validate-spec.py` refuses to discover a declared
+spec that is not there. Every list is `null` in all of these, never `[]`.
+
+Measured over this repository with a base of `ef3fded^` (the commit before
+R7 was superseded): 10 new (R32–R41), 3 superseded (R7, R8, R23), 1 changed
+(R14, whose pointer moved R23 → R33), 27 unchanged. `--arch-selftest` A10–A14
+drive `fixtures/arch-graph/delta/`, a repository built at test time from two
+committed spec files with every input to the commit sha pinned.
 
 `files_handed_over` is **null for a check that consumed no file list**, which is
 29 of the 32 here. Those checks are triggered by `always` or a tag, so their

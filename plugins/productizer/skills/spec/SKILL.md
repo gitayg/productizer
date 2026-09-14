@@ -426,7 +426,7 @@ contract before wiring one into a gate.
 | `scripts/scaffold.sh` | copies a template, strips its examples | 0 · 1 refused · 2 usage |
 | `scripts/import-survey.sh` | read-only survey for Stage 0c | 0 |
 | `scripts/run-checks.sh` | runs the declared checks | 0 pass · 3 refused · 2 usage · 1 crash |
-| `scripts/contradiction-check.py` | second opinion on one pair | 0 no halt · 1 contradiction · 2 usage |
+| `scripts/contradiction-check.py` | second opinion on one pair | 0 no halt · 1 contradiction · 2 usage · 4 FILE mode read no EARS line (the default; `--allow-empty` accepts zero) |
 | `scripts/request-ruling.sh` | raises the ruling a contradiction needs | 0 wrote · 2 usage · 3 unreadable · 4 refused |
 | `scripts/pending-rulings.sh` | which decisions are waiting on a person | 0 none · 1 pending · 2 unknown |
 | `scripts/check-ruling-requested.sh` | every halt actually asked | 0 · 1 findings · 2 could not run |

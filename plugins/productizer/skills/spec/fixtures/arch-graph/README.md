@@ -68,3 +68,34 @@ reader to the wrong one.
 Nothing here is a real check, a real requirement or a real tool. The ids are
 `F*` and `fixture-*` so that a fixture row can never be mistaken for a row
 about this repository.
+
+## `delta/` — the spec delta between a base and the working tree
+
+`delta.spec` needs a git history, and neither this clone's history (an
+installed copy has none) nor a hand-typed sha is something a test can stand
+on. So `--arch-selftest` builds a repository at test time:
+
+- `base-spec.md` is committed as `.claude/productizer/spec.md` with the author,
+  committer, both dates and the message pinned and the user's git configuration
+  shut out, so the commit is `022fb0cd90adce89e6759dbc159a67f5f5965766` on every
+  machine. `result.json` names that sha as `change.base`, and A10 asserts the
+  built sha equals it — an edit to `base-spec.md` that forgets `result.json`
+  goes red rather than comparing against nothing.
+- `spec.md` is then written over it, uncommitted: the working tree is head.
+- `result.json` is `five-states.json` with `F1..F5` renamed `R1..R5` (the
+  parser reads `R<n>` ids only) and each unit's text taken from `spec.md`.
+
+| id | base | head | reads |
+|---|---|---|---|
+| `R1`, `R5` | active | identical | unchanged |
+| `R2` | active | sentence rewritten | `changed` |
+| `R3` | active, one line | same sentence re-wrapped over two | unchanged |
+| `R4` | absent | active | `new` |
+| `R6` | active | `Superseded by R4.` | `superseded` |
+| `R7` | active | `Withdrawn.` | `withdrawn` |
+| `R8` | active | absent | `removed` |
+| `R9` | superseded by R1 | identical | unchanged — superseded already, so not newly |
+| `R10` | superseded by R6 | superseded by R4 | `changed` — only the pointer moved |
+
+To render it: build that repository by hand the same way, copy `result.json`
+to its `.claude/productizer/checks-result.json`, and run `build-view.sh` on it.

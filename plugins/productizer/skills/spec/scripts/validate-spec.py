@@ -1531,6 +1531,16 @@ def as_datum(value, limit=120):
     return "`%s`" % text
 
 
+def json_datum(value):
+    """`as_datum`, but a non-string is spelled as the JSON that was written.
+
+    `str(None)` is `None`, which is a word the config never contained; the
+    reader of a refusal has to find `null` in the file."""
+    if isinstance(value, str):
+        return as_datum(value)
+    return as_datum(json.dumps(value))
+
+
 @dataclass
 class Discovery:
     """What `--repo` found. `refusal` non-empty means nothing was measured."""
@@ -1578,10 +1588,31 @@ def declared_spec_paths(root):
                         "the file that says where this repo's spec lives, so "
                         "nothing was discovered and nothing was checked"
                         % (config, exc))
-        product = data.get("product") if isinstance(data, dict) else None
-        product = product if isinstance(product, dict) else {}
-        kind = product.get("spec_kind")
-        if kind is not None:
+        # A WRITTEN KEY IS A DECLARATION; ONLY AN ABSENT ONE IS "OMITTED".
+        # `references/spec-stores.md` says `spec_kind` is `home` by default and
+        # to "omit it" -- omit, not null it. JSON `null` is a value somebody (or
+        # a templater that failed to substitute) put under the key, and it is
+        # neither `home` nor `store`. Reading it as `home` is the unknown-kind
+        # fall-through through a quieter door: a config meant for a store
+        # whose kind came out null would read the local cache and print
+        # `0 error(s)`. Measured before this: `"spec_kind": null` exited 0.
+        # Nothing in this repository writes null there (no template, fixture
+        # or config), so refusing it moves no existing reader. The same rule
+        # governs `product` itself: absent is the default, and a `product` that
+        # is present and not an object -- a string, a list, null -- is a
+        # declaration nothing here can read, so it refuses rather than being
+        # read as an empty one. Measured before this: `"product": "orders"`
+        # exited 0 over the default path.
+        product = data.get("product", {}) if isinstance(data, dict) else {}
+        if not isinstance(product, dict):
+            return [], ("%s declares `product` as %s, which is not an object. "
+                        "It is where this repo says whether its spec is in "
+                        "this work tree or in a store of its own, and a "
+                        "declaration that cannot be read is not one that "
+                        "said `home`. Nothing was discovered and nothing was "
+                        "checked" % (config, json_datum(product)))
+        if "spec_kind" in product:
+            kind = product["spec_kind"]
             name = kind.strip() if isinstance(kind, str) else None
             if name not in SPEC_KINDS:
                 return [], ("%s declares `product.spec_kind` as %s. The only "
@@ -1592,7 +1623,7 @@ def declared_spec_paths(root):
                             "it, and guessing is how a typo becomes a "
                             "confident read of the wrong file. Nothing was "
                             "discovered and nothing was checked"
-                            % (config, as_datum(kind)))
+                            % (config, json_datum(kind)))
             if name == "store":
                 repo = product.get("spec_repo")
                 where = (as_datum(repo)
@@ -2882,6 +2913,21 @@ def self_test():
         configure({"product": {"spec_kind": "Store"}})
         refuses("unknown-kind", "spec_kind", "home")
 
+        # 3b. `null` is a written value, not an omitted key. It exited 0 over
+        #     the local file before, because `null` and "absent" were one
+        #     `is not None` test. The refusal must spell what the file holds.
+        configure({"product": {"spec_kind": None}})
+        refuses("null-kind", "spec_kind", "`null`")
+
+        # 3c. A `product` that is present and not an object. Each of these
+        #     exited 0 before, read as an empty `product` -- so the store
+        #     declaration it might have been was never asked about.
+        for note, value in (("product-string", "orders"),
+                            ("product-list", ["example/orders-spec"]),
+                            ("product-null", None)):
+            configure({"product": value})
+            refuses(note, "`product`", "not an object")
+
         # 4. P4, the report-shaping half. These lines are parsed one per line
         #    by other tools, so a config value carrying a newline must not
         #    become a diagnostic line of its own. The value is collapsed and
@@ -2912,6 +2958,11 @@ def self_test():
         for note, payload in (
                 ("home-kind", {"product": {"spec_kind": "home",
                                            "spec_home": "example/home"}}),
+                # Absent `product`, absent `spec_kind`: omitted is still the
+                # default. Without these a guard that refused every missing
+                # key would pass 3b and 3c.
+                ("no-product", {"spec": {"path": ".claude/productizer/spec.md"}}),
+                ("no-kind", {"product": {"spec_home": "example/home"}}),
                 ("spec-path-agrees",
                  {"product": {"spec_home": "example/home",
                               "spec_path": ".claude/productizer/spec.md"},
@@ -3067,7 +3118,7 @@ def self_test():
         env = dict(os.environ, VALIDATE_SPEC_CHILD="1")
         me = os.path.abspath(__file__)
 
-        def drive(args, want, note):
+        def drive_exit(args, want, note):
             proc = subprocess.run([sys.executable, me] + args,
                                   capture_output=True, text=True, env=env)
             reached.add(proc.returncode)
@@ -3080,15 +3131,15 @@ def self_test():
             clean = os.path.join(work, "clean.md")
             with open(clean, "w", encoding="utf-8") as fh:
                 fh.write(VALID_SPEC)
-            drive([clean, "--quiet"], EXIT_CLEAN, "clean")
+            drive_exit([clean, "--quiet"], EXIT_CLEAN, "clean")
 
             broken = os.path.join(work, "broken.md")
             with open(broken, "w", encoding="utf-8") as fh:
                 fh.write(BROKEN_SPEC)
-            drive([broken, "--quiet"], EXIT_FAILED, "errors")
+            drive_exit([broken, "--quiet"], EXIT_FAILED, "errors")
 
-            drive(["--counts", "--baseline", clean, clean], EXIT_USAGE, "usage")
-            drive([os.path.join(work, "absent.md")], EXIT_UNMEASURED, "unread")
+            drive_exit(["--counts", "--baseline", clean, clean], EXIT_USAGE, "usage")
+            drive_exit([os.path.join(work, "absent.md")], EXIT_UNMEASURED, "unread")
 
             copy = os.path.join(work, "patched.py")
             source = open(me, encoding="utf-8").read()

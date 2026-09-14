@@ -18,34 +18,44 @@ an SMT solver when z3-solver happens to be importable; it is never required.
 
 Usage:
     contradiction-check.py --selftest
-    contradiction-check.py [--require-records] FILE   (one requirement per line)
+    contradiction-check.py [--allow-empty] FILE   (one requirement per line)
     contradiction-check.py --pair "R1 ..." "R2 ..."
 
 Exit codes
-    0  ran, and nothing halts the pipeline. Without --require-records a FILE
-       in which NO line parsed as EARS is also a 0 - a legitimate reading of
-       a file that holds no requirements, and refusing it is the caller's job.
+    0  ran, at least one line parsed as EARS, and nothing halts the pipeline.
+       With --allow-empty, also a FILE in which no line parsed.
     1  a halt. In FILE mode that is any pair decided CONTRADICTION or handed
        back UNDECIDED; in --pair mode, CONTRADICTION only, unchanged.
     2  usage error, or a --pair statement that is not EARS
-    4  NOT MEASURED. --require-records was asked for and not one line of the
-       file parsed as EARS: the file was read end to end and nothing in it was
-       understood. Opt-in, never the default.
+    4  NOT MEASURED. Not one line of the FILE parsed as EARS: it was read end
+       to end and nothing in it was understood. This is the DEFAULT;
+       --allow-empty is the explicit way to say zero is acceptable.
 
-THE SHARED CONVENTION. `spec-requirements.sh` carries the same one, spelled
-the same way: `--require-records`, and exit 4 for a clean parse that
-understood nothing. 4 is `validate-spec.py`'s EXIT_UNMEASURED, which already
-answers this question with this code and the sentence "a file that was not
-read has not passed". Three tools that read requirement sentences now say
-"understood nothing" the same way, instead of one of them saying it and two
-reporting success over a file they made no sense of.
+ZERO RECORDS IS NOT A CLEAN RESULT BY DEFAULT. Until this changed, a FILE in
+which nothing parsed printed `0 requirements, 0 pairs: nothing decidable as a
+contradiction` at exit 0. Measured on three inputs, all exit 0: a spec-kit
+spec (`- **FR-001**: System MUST ...`), an empty file, and THIS REPOSITORY'S
+OWN `.claude/productizer/spec.md` - 186 lines unparsed, because its
+requirements are list items (`- **R1** — When ...`) and FILE mode reads one
+bare sentence per line. `--require-records` existed to refuse that, and no
+caller passed it, so the refusal was real and never reached.
 
-It is a flag and not the default because these two tools are pointed at
-fixtures and at foreign notations where an empty parse is the expected answer,
-and because every caller in this repository reads any non-zero from them as a
-refusal. A caller that meant "a file of requirements" passes the flag; a bare
-exit 0 over a file this grammar did not recognise is a green over a file
-nothing read, which is the shape R15 and R26 exist to block.
+Why the default flipped here and did NOT flip in `spec-requirements.sh`, which
+answers the same question: this tool's FILE mode has no caller in the
+repository. `rg -uu` finds `--selftest` (checks.yaml, the workflow), `--pair`
+(check-nothing-merged.sh), and two module imports that use `parse` and
+`compare` and never `run_file` (build-view.sh, evals/solver-probe.py). Nothing
+reads a FILE-mode exit 0, so flipping it moves no reader, and the only person
+who meets the new 4 is someone who ran the tool by hand over a file it cannot
+read - which is who it is for. `spec-requirements.sh` is the opposite case; its
+header records what flipping it broke.
+
+`--require-records` is still accepted and is now what the default does, so a
+script that passes it keeps its meaning. Passing it WITH --allow-empty is a
+usage error: two answers to one question, and neither is picked.
+
+4 is `validate-spec.py`'s EXIT_UNMEASURED, which answers this question with
+this code and the sentence "a file that was not read has not passed".
 """
 
 from __future__ import annotations
@@ -1041,33 +1051,44 @@ def selftest(use_z3: bool) -> int:
 # wrong was that one: a file in which nothing parsed came back as 0, which
 # reads as "no contradictions" and was really "nothing was read". Every exit
 # code FILE mode can return is driven here, 4 included.
+_TWO_EARS = ("R1: When a batch completes, the widget shall stop polling the "
+             "queue.\n"
+             "R2: When a batch starts, the widget shall open the queue.\n")
+_CONFLICT = ("R1: When a client requests a report, the api gateway shall "
+             "respond in under 500 ms.\n"
+             "R2: When a client requests a report, the api gateway shall "
+             "respond in over 2 s.\n")
+# A foreign notation: spec-kit writes its requirements as `- **FR-001**:
+# System MUST ...`, which carries no `shall` and no EARS trigger, so not one
+# line of it parses.
+_FOREIGN = ("# Feature Specification: Archive old files\n"
+            "- **FR-001**: System MUST archive files older than the threshold.\n"
+            "- **FR-002**: System MUST skip symbolic links.\n")
+# This repository's own requirement form. FILE mode reads one bare sentence
+# per line, so a list item carrying a bold id and an em dash is not one - and
+# the whole of `.claude/productizer/spec.md` parsed to zero. It is here because
+# that was the measured case: the default must say NOT MEASURED over it, not
+# `0 requirements`. If FILE mode is ever taught this form, this row goes red
+# and should move to EXIT_CLEAN in the same change.
+_OWN_FORM = ("## Requirements\n\n"
+             "- **R1** \u2014 When an intent arrives, the lifecycle shall "
+             "classify it.\n"
+             "- **R2** \u2014 The lifecycle shall hold one living spec.\n")
+
+# (name, --allow-empty, expected exit, file body)
 FILE_CASES = [
-    ("two EARS lines, no conflict", False, EXIT_CLEAN,
-     "R1: When a batch completes, the widget shall stop polling the queue.\n"
-     "R2: When a batch starts, the widget shall open the queue.\n"),
-    ("the same file, --require-records", True, EXIT_CLEAN,
-     "R1: When a batch completes, the widget shall stop polling the queue.\n"
-     "R2: When a batch starts, the widget shall open the queue.\n"),
-    ("a real contradiction, --require-records", True, EXIT_HALT,
-     "R1: When a client requests a report, the api gateway shall respond in "
-     "under 500 ms.\n"
-     "R2: When a client requests a report, the api gateway shall respond in "
-     "over 2 s.\n"),
-    # A foreign notation: spec-kit writes its requirements as `- **FR-001**:
-    # System MUST ...`, which carries no `shall` and no EARS trigger, so not
-    # one line of it parses. The default still reports 0, deliberately.
-    ("a foreign notation, default", False, EXIT_CLEAN,
-     "# Feature Specification: Archive old files\n"
-     "- **FR-001**: System MUST archive files older than the threshold.\n"
-     "- **FR-002**: System MUST skip symbolic links.\n"),
-    ("a foreign notation, --require-records", True, EXIT_UNMEASURED,
-     "# Feature Specification: Archive old files\n"
-     "- **FR-001**: System MUST archive files older than the threshold.\n"
-     "- **FR-002**: System MUST skip symbolic links.\n"),
-    ("an empty file, --require-records", True, EXIT_UNMEASURED, ""),
-    # One line that parses is enough: the flag asks whether anything was
+    ("two EARS lines, no conflict", False, EXIT_CLEAN, _TWO_EARS),
+    ("the same file, --allow-empty", True, EXIT_CLEAN, _TWO_EARS),
+    ("a real contradiction", False, EXIT_HALT, _CONFLICT),
+    ("a real contradiction, --allow-empty", True, EXIT_HALT, _CONFLICT),
+    ("a foreign notation, default", False, EXIT_UNMEASURED, _FOREIGN),
+    ("a foreign notation, --allow-empty", True, EXIT_CLEAN, _FOREIGN),
+    ("an empty file, default", False, EXIT_UNMEASURED, ""),
+    ("an empty file, --allow-empty", True, EXIT_CLEAN, ""),
+    ("this repo's list-item form, default", False, EXIT_UNMEASURED, _OWN_FORM),
+    # One line that parses is enough: the default asks whether anything was
     # understood, not whether everything was.
-    ("one line among foreign ones, --require-records", True, EXIT_CLEAN,
+    ("one line among foreign ones, default", False, EXIT_CLEAN,
      "- **FR-001**: System MUST archive files older than the threshold.\n"
      "R1: When a batch completes, the widget shall stop polling the queue.\n"),
 ]
@@ -1086,21 +1107,26 @@ def selftest_file_mode(reached: set) -> int:
     print("\nFILE mode - the exit code a caller reads")
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
-        for i, (name, require, want, body) in enumerate(FILE_CASES):
+        for i, (name, allow_empty, want, body) in enumerate(FILE_CASES):
             path = os.path.join(tmp, "case%d.txt" % i)
-            with open(path, "w") as fh:
+            with open(path, "w", encoding="utf-8") as fh:
                 fh.write(body)
             buf, errbuf = _io.StringIO(), _io.StringIO()
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(errbuf):
-                got = run_file(path, require)
+                got = run_file(path, allow_empty)
             reached.add(got)
             said = "NOT MEASURED" in errbuf.getvalue()
-            ok = got == want and (said == (want == EXIT_UNMEASURED))
+            # A 4 must not also print the summary a clean run prints.
+            summary = "nothing decidable" in buf.getvalue()
+            ok = (got == want and said == (want == EXIT_UNMEASURED)
+                  and summary == (want == EXIT_CLEAN))
             if not ok:
                 failures += 1
             print("  %-5s %-44s exit %d (wanted %d)%s"
                   % ("ok" if ok else "FAIL", name, got, want,
-                     ", said NOT MEASURED" if said else ""))
+                     (", said NOT MEASURED" if said else "")
+                     + (", printed the clean summary"
+                        if summary and want != EXIT_CLEAN else "")))
     print("  %d of %d held" % (len(FILE_CASES) - failures, len(FILE_CASES)))
     return failures
 
@@ -1115,6 +1141,12 @@ USAGE_CASES = [
      ["--pair", "the widget is quite fast", "the widget is rather slow"]),
     ("--require-records asked for alongside --selftest",
      ["--selftest", "--require-records"]),
+    ("--allow-empty asked for alongside --pair",
+     ["--allow-empty", "--pair",
+      "When a batch starts, the widget shall open the queue.",
+      "When a batch ends, the widget shall close the queue."]),
+    ("--allow-empty and --require-records together",
+     ["--allow-empty", "--require-records", os.path.abspath(__file__)]),
     ("no file, no --pair, no --selftest", []),
 ]
 
@@ -1223,9 +1255,9 @@ def selftest_grammar() -> int:
 
 # --------------------------------------------------------------------------
 
-def run_file(path: str, require_records: bool = False) -> int:
+def run_file(path: str, allow_empty: bool = False) -> int:
     reqs, unparsed = [], []
-    with open(path) as fh:
+    with open(path, encoding="utf-8") as fh:
         for n, line in enumerate(fh, 1):
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
@@ -1233,6 +1265,17 @@ def run_file(path: str, require_records: bool = False) -> int:
             (reqs.append(r) if r else unparsed.append((n, line.strip())))
     for n, line in unparsed:
         print(f"unparsed (line {n}, not an EARS pattern): {line}")
+    # Before the pairs, and instead of the summary line: `0 requirements, 0
+    # pairs: nothing decidable as a contradiction` on stdout beside a NOT
+    # MEASURED on stderr is a clean-reading sentence over a file nothing read.
+    if not reqs and not allow_empty:
+        print(f"NOT MEASURED: {path} was read end to end and not one line in it "
+              f"parsed as EARS ({len(unparsed)} lines unparsed). This is not a "
+              f"file with no contradictions - it is a file nothing here "
+              f"understood. A file that was not read has not passed. Pass "
+              f"--allow-empty only if a file with no EARS in it is the answer "
+              f"you expected.", file=sys.stderr)
+        return EXIT_UNMEASURED
     halts = 0
     for a, b in itertools.combinations(reqs, 2):
         v = compare(a, b)
@@ -1247,15 +1290,6 @@ def run_file(path: str, require_records: bool = False) -> int:
               f"nothing decidable as a contradiction")
     if halts:
         return EXIT_HALT
-    # A halt is reported as a halt even under the flag: something WAS read and
-    # it conflicts, which is a stronger answer than "nothing was read".
-    if require_records and not reqs:
-        print(f"NOT MEASURED: {path} was read end to end and not one line in it "
-              f"parsed as EARS ({len(unparsed)} lines unparsed). --require-records "
-              f"was asked for, so this is not a file with no contradictions - it "
-              f"is a file nothing here understood. A file that was not read has "
-              f"not passed.", file=sys.stderr)
-        return EXIT_UNMEASURED
     return EXIT_CLEAN
 
 
@@ -1267,22 +1301,27 @@ def main() -> int:
     ap.add_argument("--verify-z3", action="store_true",
                     help="cross-check the interval arithmetic against an SMT solver")
     ap.add_argument("--require-records", action="store_true",
-                    help="FILE mode: exit 4 when no line parsed as EARS")
+                    help="FILE mode: exit 4 when no line parsed as EARS "
+                         "(the default; kept so callers that pass it still work)")
+    ap.add_argument("--allow-empty", action="store_true",
+                    help="FILE mode: a file in which no line parsed as EARS "
+                         "exits 0 instead of 4")
     args = ap.parse_args()
 
     if args.selftest:
-        if args.require_records:
-            print("--require-records applies to FILE mode; the self-test drives "
-                  "it on its own fixtures", file=sys.stderr)
+        if args.require_records or args.allow_empty:
+            print("--require-records and --allow-empty apply to FILE mode; the "
+                  "self-test drives them on its own fixtures", file=sys.stderr)
             return EXIT_USAGE
         return selftest(args.verify_z3)
     if args.pair:
         # Refused rather than ignored. A flag that is silently dropped is a
         # caller believing it asked for a refusal it will never get, which is
         # the defect this flag was added to close.
-        if args.require_records:
-            print("--require-records applies to FILE mode; --pair already "
-                  "refuses a statement it cannot parse", file=sys.stderr)
+        if args.require_records or args.allow_empty:
+            print("--require-records and --allow-empty apply to FILE mode; "
+                  "--pair already refuses a statement it cannot parse",
+                  file=sys.stderr)
             return EXIT_USAGE
         a, b = parse(args.pair[0], "A"), parse(args.pair[1], "B")
         if a is None or b is None:
@@ -1292,7 +1331,12 @@ def main() -> int:
         print(f"{v.verdict}: {v.reason}")
         return EXIT_HALT if v.verdict == CONTRADICTION else EXIT_CLEAN
     if args.file:
-        return run_file(args.file, args.require_records)
+        if args.require_records and args.allow_empty:
+            print("--require-records and --allow-empty are two answers to "
+                  "whether a file with no EARS in it may pass; give one",
+                  file=sys.stderr)
+            return EXIT_USAGE
+        return run_file(args.file, args.allow_empty)
     ap.print_help()
     return EXIT_USAGE
 

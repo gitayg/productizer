@@ -46,15 +46,25 @@ remembering the sentence that triggers it.
 | `/productizer:answer` | every question the repo is holding open for a person, one at a time |
 | `/productizer:import` | a repo that already exists — draft from its evidence, or read that evidence as drift if it already has a spec |
 | `/productizer:spec` | the whole lifecycle — intake, classification, deltas, releases |
+| `/productizer:upgrade` | what this repo installed from an older plugin and was never told about — reports only, applies nothing |
 
 Type `/productizer` and the menu lists them. The bare forms — `/dashboard`,
 `/check` — work too unless another plugin has claimed the name.
 
-All four are marked so the model will not invoke them on its own. One publishes
-a page, one runs every declared tool in the repo, one edits the queue and one
-starts asking you questions — none of those should happen because a sentence
-sounded like a request for it. You type those. `spec` is the opposite: it is
-meant to trigger from what you are doing.
+Six are marked so the model will not invoke them on its own — `help`,
+`dashboard`, `check`, `backlog`, `answer` and `import`. One publishes a page, one
+runs every declared tool in the repo, one edits the queue and one starts asking
+you questions — none of those should happen because a sentence sounded like a
+request for it. You type those. `spec` is the opposite: it is meant to trigger
+from what you are doing.
+
+`upgrade` is **not** marked, measured 2026-09-14, so the model may run it
+unprompted. It reports only and changes nothing in the repo, but its grant is
+unscoped Bash, so that promise rests on the model's behaviour rather than on a
+permission. Whether to mark it is backlog item B55.
+
+(Superseded 2026-09-14: this paragraph said "All four are marked", beside a table
+of seven commands of which six are marked.)
 
 `answer` is the one worth knowing about. It reads the spec, the rulings and the
 backlog and finds what is genuinely waiting on a person — a requirement nothing

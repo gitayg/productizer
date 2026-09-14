@@ -1079,6 +1079,44 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
 .vz-chip.a-miss{color:var(--warn)}
 .vz-chip.a-never,.vz-chip.a-shut,.vz-chip.a-unk{color:var(--text)}
 
+/* the spec delta. A change word is a PILL - a different shape from the five
+   state boxes - so it cannot be read as a sixth coverage state. The word and
+   the glyph carry it; hue repeats them. */
+.ag-delta{display:flex;flex-direction:column;gap:9px;border:1px solid var(--line);
+  border-radius:10px;background:var(--surface);padding:13px 14px}
+.ag-dhd{margin:0;font-family:var(--mono);font-size:10px;text-transform:uppercase;
+  letter-spacing:.09em;color:var(--text)}
+.ag-dbadge{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;border:1px solid var(--muted);
+  border-radius:999px;padding:0 7px 0 5px;font-family:var(--mono);font-size:9px;line-height:16px;
+  text-transform:uppercase;letter-spacing:.07em;color:var(--text);background:var(--bg);
+  white-space:nowrap}
+.ag-dg{font-size:11px;line-height:1;font-weight:600}
+.ag-dbadge.d-new{border-color:var(--accent)}
+.ag-dbadge.d-new .ag-dg{color:var(--accent)}
+.ag-dbadge.d-chg{border-color:var(--warn)}
+.ag-dbadge.d-chg .ag-dg{color:var(--warn)}
+.ag-dbadge.d-sup,.ag-dbadge.d-wd{border-style:dashed}
+.ag-dbadge.d-rm{border-color:var(--crit);border-width:2px}
+.ag-dbadge.d-rm .ag-dg{color:var(--crit)}
+.ag-dbadge.d-unk{border-style:dotted}
+.ag-dpill{margin-left:auto;font-size:8px;line-height:14px}
+.ag-dunk{display:flex;gap:11px;align-items:flex-start}
+.ag-dunk div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ag-dunk b{color:var(--text);font-weight:600;font-size:12.5px}
+.ag-dunk p{margin:0;color:var(--muted);font-size:12px;line-height:1.55;max-width:84ch}
+.ag-dtable{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.ag-drow{display:grid;grid-template-columns:118px 44px minmax(0,1fr);column-gap:10px;
+  align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)}
+.ag-drow .ag-dbadge{justify-self:start}
+.ag-did{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)}
+.ag-dbody{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ag-dmeta{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.ag-dtext,.ag-dnew{font-size:12px;color:var(--text);line-height:1.5}
+.ag-dold{font-size:12px;color:var(--muted);line-height:1.5;text-decoration:line-through;
+  text-decoration-color:color-mix(in srgb,var(--muted) 60%,transparent)}
+@media (max-width:620px){.ag-drow{grid-template-columns:auto minmax(0,1fr)}
+  .ag-dbody{grid-column:1 / -1}}
+
 /* the delta strip and the counts strip */
 .ag-strip{display:flex;flex-wrap:wrap;gap:8px}
 .ag-stat{display:flex;align-items:baseline;gap:7px;border:1px solid var(--line);
@@ -2204,10 +2242,15 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
     return s;
   }
   var hasBase = !!D.base;
+  // The ref as the runner was given it, beside the sha - unless it IS the sha,
+  // or a prefix of it, which would say one thing twice.
+  var baseName = hasBase ? String(D.base).slice(0, 12) +
+      (D.base_ref && String(D.base).indexOf(String(D.base_ref)) !== 0 ? " (" + D.base_ref + ")" : "")
+    : null;
   strip.appendChild(stat(hasBase && num(D.changed_files) ? D.changed_files : null,
-    hasBase ? "files changed since " + D.base
+    hasBase ? "files changed since " + baseName
             : "files changed — no base ref to difference against",
-    hasBase ? "counted against " + D.base
+    hasBase ? "counted by the check run against " + D.base
             : "no base ref was recorded, so this is " + GL_UNK + " and not a change of zero"));
   strip.appendChild(stat((D.checks_triggered || null) && D.checks_triggered.length,
     "check(s) triggered here"));
@@ -2220,6 +2263,120 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
   strip.appendChild(stat(tools.length, "tool(s)"));
   strip.appendChild(stat(reqs.length, "requirement(s)"));
   root.appendChild(strip);
+
+  /* --- the spec delta: what this change did to the SPEC, base to working
+         tree. Text and status only, by id. It is NOT a coverage delta: the
+         result holds one check run, and a coverage state "at base" would need
+         a second run nobody made - so no requirement is drawn as having
+         gained or lost coverage. A base nobody recorded is ?, not "nothing
+         changed". ------------------------------------------------------- */
+  var DS = D.spec || null;
+  var DC = {
+    "new":        {g:"+", w:"NEW",        k:"d-new",
+      m:"no requirement had this id at the base"},
+    changed:      {g:"Δ", w:"CHANGED",    k:"d-chg",
+      m:"the same id, and its sentence, its status or its supersession pointer moved"},
+    superseded:   {g:"↦", w:"SUPERSEDED", k:"d-sup",
+      m:"active at the base, superseded now — it stopped being an obligation"},
+    withdrawn:    {g:"⊖", w:"WITHDRAWN",  k:"d-wd",
+      m:"active at the base, withdrawn now — the behaviour is meant to be gone"},
+    removed:      {g:"−", w:"REMOVED",    k:"d-rm",
+      m:"at the base and gone from the spec now. Ids are meant to be kept for ever, so a " +
+        "removal is itself worth a look"}
+  };
+  var DC_ORDER = ["new","changed","superseded","withdrawn","removed"];
+  var DC_BAD = {g:GL_UNK, w:"UNREADABLE CHANGE", k:"d-unk",
+    m:"the generator emitted a change word this page has no rendering for"};
+  function dbadge(spec){
+    var b = el("span", "ag-dbadge " + spec.k);
+    var g = el("span", "ag-dg", spec.g);
+    g.setAttribute("aria-hidden", "true");
+    b.appendChild(g);
+    b.appendChild(document.createTextNode(spec.w));
+    return b;
+  }
+  var deltaOf = {};
+  var dsec = el("div", "ag-delta");
+  dsec.appendChild(el("p", "ag-dhd", "What this change did to the spec"));
+  if (!DS || DS.state !== "read"){
+    var why = DS && DS.reason ? String(DS.reason) : null;
+    var dhead = !DS ? GL_UNK + " — this reading carries no spec delta at all."
+      : DS.state === "no_base" ? GL_UNK + " — no base recorded."
+      : DS.state === "base_unreadable" ? GL_UNK + " — the base could not be read."
+      : DS.state === "unreadable" ? GL_UNK + " — the spec in the working tree could not be read."
+      : GL_UNK + " — the spec delta names a state this page cannot read.";
+    var dbox = el("div", "ag-dunk");
+    dbox.appendChild(glyph({g: GL_UNK, k: "a-unk"}));
+    var dtx = el("div");
+    dtx.appendChild(el("b", null, dhead));
+    dtx.appendChild(el("p", null, (why ? why.charAt(0).toUpperCase() + why.slice(1) + ". " : "") +
+      "So no requirement is marked new, changed or removed below. That is " + GL_UNK +
+      ", not a change of zero: nothing was compared."));
+    dbox.appendChild(dtx);
+    dsec.appendChild(dbox);
+  } else {
+    var rows = DS.rows || [];
+    for (i = 0; i < rows.length; i++) deltaOf[rows[i].id] = rows[i];
+    var sub = el("p", "ag-note");
+    sub.appendChild(document.createTextNode("Base " + (baseName || GL_UNK) + " against the working tree, " +
+      "compared by requirement id over " + ((DS.files_head || []).join(", ") || GL_UNK) +
+      ((DS.files_base || []).join(", ") !== (DS.files_head || []).join(", ")
+        ? " (at the base: " + ((DS.files_base || []).join(", ") || GL_UNK) + ")" : "") +
+      ". A re-wrapped sentence is not an edit. "));
+    sub.appendChild(el("b", null, "Coverage is not compared with the base:"));
+    sub.appendChild(document.createTextNode(" that would need a check run at the base, and this " +
+      "result holds one run. The five states on the graph are this run's, and nothing here " +
+      "says a requirement gained or lost them."));
+    dsec.appendChild(sub);
+    var dstrip = el("div", "ag-strip");
+    for (i = 0; i < DC_ORDER.length; i++){
+      var dk = DC_ORDER[i], dl = DS[dk];
+      var ds = el("div", "ag-stat" + (dl ? "" : " unk"));
+      ds.appendChild(el("b", null, dl ? String(dl.length) : GL_UNK));
+      ds.appendChild(dbadge(DC[dk]));
+      ds.title = DC[dk].m;
+      dstrip.appendChild(ds);
+    }
+    dstrip.appendChild(stat(DS.unchanged, "unchanged"));
+    dsec.appendChild(dstrip);
+    if (!rows.length){
+      dsec.appendChild(el("p", "ag-itext", "No requirement moved between the base and the " +
+        "working tree. That is a measured nothing: both specs were read and compared."));
+    } else {
+      var tbl = el("div", "ag-dtable");
+      tbl.setAttribute("role", "list");
+      for (i = 0; i < rows.length; i++){
+        var rw = rows[i], rsp = DC[rw.change] || DC_BAD;
+        var tr = el("div", "ag-drow");
+        tr.setAttribute("role", "listitem");
+        tr.appendChild(dbadge(rsp));
+        tr.appendChild(el("span", "ag-did", rw.id));
+        var body = el("div", "ag-dbody");
+        var bits = [];
+        if (rw.from_status !== rw.to_status)
+          bits.push((rw.from_status || "absent") + " → " + (rw.to_status || "absent"));
+        // A pointer that MOVED names both ends; a pointer that is simply there
+        // (a fresh supersession) names where it points, and nothing it came from.
+        if (rw.from_target && rw.to_target && rw.from_target !== rw.to_target)
+          bits.push("superseded by " + rw.from_target + " → " + rw.to_target);
+        else if (rw.to_target)
+          bits.push("superseded by " + rw.to_target);
+        if (rw.text_changed) bits.push("sentence rewritten");
+        if (bits.length) body.appendChild(el("span", "ag-dmeta", bits.join(" · ")));
+        if (rw.text_changed){
+          body.appendChild(el("span", "ag-dold", "was: " + rw.from_text));
+          body.appendChild(el("span", "ag-dnew", "now: " + rw.to_text));
+        } else {
+          body.appendChild(el("span", rw.change === "removed" ? "ag-dold" : "ag-dtext",
+            String(rw.to_text || rw.from_text || "")));
+        }
+        tr.appendChild(body);
+        tbl.appendChild(tr);
+      }
+      dsec.appendChild(tbl);
+    }
+  }
+  root.appendChild(dsec);
 
   /* --- geometry ----------------------------------------------------------- */
   var LX = [0, 272, 562], LW = [202, 220, 338];
@@ -2291,7 +2448,8 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
   }, null);
   place(checks, 1, kspec, function(c){
     return c.triggered === false ? "not triggered" :
-      (num(c.files_handed_over) ? c.files_handed_over + " handed" : GL_UNK + " handed");
+      (c.file_list_consumed === false ? "n/a handed" :
+        (num(c.files_handed_over) ? c.files_handed_over + " handed" : GL_UNK + " handed"));
   });
   // The verdict beside the state is the CLAIM, not the measurement, and the
   // two disagree exactly where it matters: the deriver's own fixture carries a
@@ -2308,6 +2466,19 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
     if (v === "Covered" || v === "Partial") return "claimed " + v;
     return "";
   });
+  // A requirement the spec delta moved wears the change word on its face, as
+  // a pill beside the state - never in place of it. The pill says what this
+  // change did to the SENTENCE; the state says what this run MEASURED.
+  for (i = 0; i < reqs.length; i++){
+    var dr = deltaOf[reqs[i].id];
+    if (!dr || !pos[reqs[i].id]) continue;
+    var pb = dbadge(DC[dr.change] || DC_BAD);
+    pb.className += " ag-dpill";
+    var nb = pos[reqs[i].id].el;
+    nb.appendChild(pb);
+    nb.setAttribute("aria-label", nb.getAttribute("aria-label") + " Spec delta: " +
+      (DC[dr.change] || DC_BAD).w + ".");
+  }
 
   function path(a, b, cls, id){
     var pa = pos[a], pb = pos[b];
@@ -2379,6 +2550,19 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
 
     if (d.kind === "requirement"){
       if (d.text) insp.appendChild(el("p", "ag-itext", String(d.text)));
+      var ddr = deltaOf[d.id];
+      if (ddr){
+        var dsp = DC[ddr.change] || DC_BAD;
+        var dp = el("p", "ag-itext");
+        dp.appendChild(dbadge(dsp));
+        dp.appendChild(document.createTextNode(" since " + (baseName || GL_UNK) + ": " + dsp.m +
+          ". This is the spec's text and status; the state above is this run's coverage, " +
+          "and it was not compared with the base."));
+        insp.appendChild(dp);
+      } else if (DS && DS.state === "read"){
+        insp.appendChild(el("p", "ag-itext ag-idim", "Unchanged in the spec since " +
+          (baseName || GL_UNK) + "."));
+      }
       insp.appendChild(el("p", "ag-ievh", "Evidence — why this is claimed, and by which check"));
       evList(d.evidence, "No evidence was recorded for this requirement. Nothing here says " +
         "why it reads as " + sp.w + ", which is itself the finding.");
@@ -2396,8 +2580,13 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
           " files and dropped " + GL_NEVER + " — an em dash, not a zero, because zero " +
           "would claim it looked and found none.");
       } else {
-        lines.push("Handed over " + (num(d.files_handed_over) ? d.files_handed_over : GL_UNK) +
-          " file(s); dropped " + (num(d.files_dropped) ? d.files_dropped : GL_UNK) + ".");
+        if (d.file_list_consumed === false) {
+          lines.push("Handed over n/a — this check takes no file list, so there is no count " +
+            "to show. That is not unreadable (?) and not zero: nothing was ever offered to it.");
+        } else {
+          lines.push("Handed over " + (num(d.files_handed_over) ? d.files_handed_over : GL_UNK) +
+            " file(s); dropped " + (num(d.files_dropped) ? d.files_dropped : GL_UNK) + ".");
+        }
       }
       insp.appendChild(el("p", "ag-itext", lines.join(" ")));
       var cm = claimsOf[d.id] || [], out = [];
