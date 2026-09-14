@@ -2039,56 +2039,99 @@ checks:
   # version of Semgrep is available", measured in the same scratch run.
   #
   # Measured 2026-09-13 on this machine: `command -v` finds semgrep 1.171.0 and
-  # npm 10.9.4, and does NOT find gitleaks. `git ls-files` finds no root
-  # package manifest and no `check-pii-logging.sh` anywhere in the tree.
+  # npm 10.9.4. It did not find gitleaks until B54, the same day, installed
+  # 8.30.1. `git ls-files` finds no root package manifest and no
+  # `check-pii-logging.sh` anywhere in the tree.
 
-  # --- secret scan: gitleaks, DISABLED, and blocked rather than n/a ----------
+  # --- secret scan: gitleaks 8.30.1, RUNNING ---------------------------------
   #
-  # This one is applicable and is not running, and that is said plainly rather
-  # than dressed as an n/a. The only blocker is that gitleaks is not installed
-  # on the maintainer's machine: a declared, enabled check whose tool is absent
-  # reads `missing_tool` and refuses the whole local suite, and installing a
-  # binary on someone's machine is that person's decision, not a config edit.
+  # CHANGED 2026-09-13 (B54). Declared DISABLED in v4.58.0 because gitleaks was
+  # not installed on the maintainer's machine; it now is (Homebrew, `gitleaks
+  # version` -> 8.30.1), and the workflow installs the same release, checksum
+  # verified. Everything below was measured against that binary.
   #
-  # WHAT RUNS INSTEAD, AND HOW MUCH LESS IT IS. `hygiene` carries thirteen
-  # credential patterns. Five fake credentials were planted in a scratch
-  # directory - an AWS key id and its secret key in Markdown, a GitHub token in
-  # a shell script, a Slack webhook in JSON, a quoted password in YAML, a GitLab
-  # token in text - and `hygiene` exited 1 naming TWO of the five: the AWS key
-  # id and the GitHub token. The secret key, the webhook, the password and the
-  # GitLab token passed it clean. `semgrep --config p/secrets`, which runs here,
-  # was measured over the same five and found ONE. So semgrep is not the
-  # substitute, and the gap is real and sized.
+  # DETECTION, measured through run-checks.sh in a scratch clone. Six fake
+  # credentials in five files - AWS key id and secret key, GitHub token, Slack
+  # webhook, GitLab token, quoted password - generated in the formats the real
+  # issuers use: FAIL, six results (aws-access-token, generic-api-key x2,
+  # github-pat, slack-webhook-url, gitlab-pat). `hygiene` named two of the six
+  # and `semgrep p/secrets` three. The v4.58.0 comment said "five" and "two of
+  # five": it was six credentials in five files. The EARLIER hand-typed set is
+  # weaker evidence and is kept as such: gitleaks caught only its GitHub and
+  # GitLab tokens, because that AWS key id used digits outside AWS's base32
+  # alphabet and its secret carried the stopword `example`, which gitleaks
+  # allowlists.
   #
-  # TO ENABLE: install gitleaks here and in the workflow, pinned, then flip
-  # `enabled` and falsify it against the same five before believing it. The
-  # argv, the exit codes and the coverage below are the template's as corrected
-  # on 2026-09-13 against gitleaks' own source at v8.30.1: exit 1 is "leaks OR
-  # error", so leaks are moved to exit 3 with `--exit-code` and exit 1 becomes
-  # refused. `detect --no-git` is deprecated there in favour of `dir`.
+  # ONE INVOCATION OVER THE TREE, and why each flag is there:
+  #
+  #   `dir .`, not `{file}`. First shipped per file: 675 processes, and the
+  #      runner's one-second poll made it about eleven minutes (60 files took
+  #      61.7s). This shape took 3.6s over the same tree. `{files}` is not an
+  #      option: `gitleaks dir a b` does not scan a and b - it printed `no leaks
+  #      found`, exit 0, while one of them held a token. `.` also walks
+  #      untracked and ignored files, so a local run examines more than the
+  #      change and a credential left in an untracked file fails it.
+  #   `--exit-code 3`. gitleaks exits 1 for a scan that errored and, by default,
+  #      for a finding. With 3, 1 is an error (`FTL stat ...: no such file or
+  #      directory`) and 126 an unknown flag. Dropping it turns a leak into
+  #      REFUSED exit 1 - run.
+  #   COVERAGE FROM `--log-level trace`, BECAUSE EXIT 0 IS NOT "EXAMINED". An
+  #      unreadable file logs `WRN skipping file: permission denied`, `scanned
+  #      ~0 bytes`, `no leaks found`, exit 0. A file counts only if trace logs
+  #      `scanning path` (or `skipping empty file`) for it and no later
+  #      skipping/could/issue/unable line names it. Measured: that file is
+  #      HOLLOW, `not_examined ['cl/locked.txt']`; judged by exit code, PASS.
+  #   `--report-format sarif --report-path -`, BECAUSE TRACE PRINTS CONTENT.
+  #      Trace logs the text of candidates it SKIPS - unredacted despite
+  #      `--redact`; an allowlisted secret-shaped value came out whole - and
+  #      debug logs decoded file content (`segment found`). The runner stores
+  #      the last 2000 characters of output in checks-result.json. The SARIF
+  #      report is written to stdout after every log line, is redacted, and is
+  #      about 53KB, so it is what the stored tail holds. Measured without it:
+  #      the stored tail held 2 skipped-candidate lines and 16 decoded-content
+  #      lines. With it: 0 and 0, and 0 of 15 planted tokens on a failing run.
+  #      This depends on the tail staying far smaller than the report.
+  #   THE REPOSITORY CAN SWITCH THE SCAN OFF WITHOUT TOUCHING THIS FILE. A
+  #      committed `.gitleaksignore` suppressed a planted token to exit 0; a
+  #      `.gitleaks.toml` at the root replaces the ruleset; GITLEAKS_CONFIG in
+  #      the environment can load an empty one. `rules_command` asks gitleaks,
+  #      at debug level, which configuration it loaded, and counts 1 only for
+  #      `using default gitleaks config` with no `.gitleaksignore` found; its
+  #      output is counted and never stored. All three were run: HOLLOW, 0
+  #      rules. `--ignore-gitleaks-allow` closes inline `gitleaks:allow`
+  #      comments; this tree has none.
+  #
+  # NO ALLOWLIST. The whole working tree was scanned on 2026-09-13 and gitleaks
+  # reported no finding in any file, tracked or not, so nothing is exempted. If
+  # one appears it is a finding for a person first: a real credential in a
+  # public repository is rotated, not suppressed.
   - id: secret-scan
-    enabled: false
-    why: a credential pushed to a public repo installed by strangers must be rotated, and hygiene's thirteen credential patterns caught two of five planted fakes; DISABLED only because gitleaks is not installed on this machine, which is a blocker to clear and not an n/a
+    why: a credential pushed to a public repo installed by strangers has to be rotated, and hygiene's regexes caught two of the six planted fakes where gitleaks caught six
     when:
       always: true
     severity: block
     requires: [gitleaks]
     version_command: [gitleaks, version]
-    mode: per_file
-    command: [gitleaks, dir, --no-banner, --redact, --exit-code, "3", "{file}"]
-    timeout_seconds: 900
+    mode: batch
+    command: [gitleaks, dir, --no-banner, --no-color, --redact, --ignore-gitleaks-allow, --exit-code, "3", --log-level, trace, --report-format, sarif, --report-path, "-", "."]
+    timeout_seconds: 300
     exit_codes:
       pass: [0]
       fail: [3]
       refused: [1, 126]
     coverage:
-      from: per_file_exit
-      examined_when_exit_in: [0, 3]
+      from: stdout_paths
+      pattern: '^[^\n]*(?:TRC|DBG)(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*(?:scanning path|skipping empty file)(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*path=(?:\x1b\[[0-9;]*m)*"?([^"\n\x1b]*[^"\s\x1b])"?(?:\x1b\[[0-9;]*m)*$(?![\s\S]*^[^\n]*(?:DBG|WRN|ERR|FTL)(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*(?:skipping (?!finding|empty file)|could|issue|unable)[^\n]*path=(?:\x1b\[[0-9;]*m)*"?\1"?(?:\x1b\[[0-9;]*m)*(?:\s|$))'
       must_cover: all_triggering
       min_covered: 1
+      min_rules: 1
+      rules_command: [gitleaks, dir, --no-banner, --no-color, --redact, --exit-code, "0", --log-level, debug, "."]
+      rules_pattern: '\A(?![\s\S]*found \.gitleaksignore file)[\s\S]*?(using default (?:gitleaks )?config)'
     limitations:
-      - Disabled. It covers nothing and claims nothing until gitleaks is installed here and in CI and the check has been seen failing on a planted credential.
-      - The corrected argv and exit codes were read from gitleaks' source at v8.30.1, not executed; nothing here has run gitleaks.
+      - It inherits gitleaks' global allowlist. Lockfiles, images and .git are skipped before `scanning path` is logged, so such a file in the change reads as not examined rather than passing - measured for the allowlist, not for every skip path gitleaks has.
+      - It scans the working tree, not git history. A credential committed and later deleted is still in history, and nothing here scans history.
+      - The stored-output protection depends on the SARIF report staying far larger than the runner's 2000-character tail. That size is the runner's, not declared here.
+      - Encoded credentials depend on gitleaks' default decode depth of 5; nothing here measured one.
 
   # --- dependency audit: declared, and not triggered while there is nothing to audit
   #

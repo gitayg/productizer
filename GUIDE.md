@@ -51,20 +51,25 @@ remembering the sentence that triggers it.
 Type `/productizer` and the menu lists them. The bare forms — `/dashboard`,
 `/check` — work too unless another plugin has claimed the name.
 
-Six are marked so the model will not invoke them on its own — `help`,
-`dashboard`, `check`, `backlog`, `answer` and `import`. One publishes a page, one
+Seven are marked so the model will not invoke them on its own — `help`,
+`dashboard`, `check`, `backlog`, `answer`, `import` and `upgrade`. One publishes a page, one
 runs every declared tool in the repo, one edits the queue and one starts asking
 you questions — none of those should happen because a sentence sounded like a
 request for it. You type those. `spec` is the opposite: it is meant to trigger
 from what you are doing.
 
-`upgrade` is **not** marked, measured 2026-09-14, so the model may run it
-unprompted. It reports only and changes nothing in the repo, but its grant is
-unscoped Bash, so that promise rests on the model's behaviour rather than on a
-permission. Whether to mark it is backlog item B55.
+`upgrade` is typed, never triggered, and its "changes nothing" is a
+permission rather than a promise. Its frontmatter pre-approves only `Read`,
+re-running `upgrade-drift.sh`, and `echo`, and denies `Write`, `Edit` and
+`NotebookEdit`. Measured headless on 2026-09-14: five out-of-scope calls —
+`mktemp`, a shell redirect, a chained `touch`, a `python3` write and the Write
+tool — were all denied, and the same five went through with the scope widened.
+Read-only commands such as `ls` and `find` still run without asking, and in a
+live session an out-of-scope call prompts you rather than being denied.
 
-(Superseded 2026-09-14: this paragraph said "All four are marked", beside a table
-of seven commands of which six are marked.)
+(Superseded 2026-09-14, twice: this paragraph first said "All four are marked",
+beside a table of seven commands; then said six were marked and that `upgrade`
+had unscoped Bash — backlog item B55, now done.)
 
 `answer` is the one worth knowing about. It reads the spec, the rulings and the
 backlog and finds what is genuinely waiting on a person — a requirement nothing

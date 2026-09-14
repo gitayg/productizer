@@ -118,17 +118,32 @@ checks:
   # runner watch each file be accepted or refused, so "it only looked at one of
   # them" becomes visible instead of green. It costs one process per file.
   #
-  # EXIT 1 IS NOT "LEAKS FOUND". Read from gitleaks' own source at v8.30.1
-  # (`cmd/root.go`): a scan that errored exits 1 even with no findings, a
-  # finding exits whatever `--exit-code` says (default 1), and an unknown flag
-  # exits 126. With the default, a file gitleaks failed to read and a file
-  # holding a key are the same exit code - and `examined_when_exit_in: [0, 1]`
-  # counted the unread one as examined. `--exit-code 3` separates them: 3 is a
-  # leak in a file that was read, 1 is a scan that did not complete.
+  # ONE `gitleaks dir .` OVER THE TREE. Every flag below was measured on
+  # gitleaks 8.30.1; what each prevents:
   #
-  # `dir`, not `detect --no-git --source`. v8.19.0 deprecated `detect`; its
-  # replacement for scanning files without git history is `dir` (aliases
-  # `file`, `directory`), which takes the path as a positional argument.
+  #   `--exit-code 3`  gitleaks exits 1 both for an error and, by default, for
+  #                    a finding. With 3, a leak is 3 and 1 is an error.
+  #   trace coverage   exit 0 is not "examined": an unreadable file logs `WRN
+  #                    skipping file: permission denied` and exits 0. A file
+  #                    counts only when trace logs `scanning path` for it and
+  #                    nothing later says it was skipped.
+  #   SARIF on stdout  trace prints the text of candidates gitleaks SKIPS,
+  #                    unredacted despite `--redact`, and debug prints decoded
+  #                    file content. The runner stores the tail of the output;
+  #                    the redacted SARIF report comes last and fills it.
+  #   rules_command    a `.gitleaksignore` or `.gitleaks.toml` in the scanned
+  #                    tree, or GITLEAKS_CONFIG in the environment, changes or
+  #                    empties what runs with no edit to this file. This counts
+  #                    1 only for the default config with no ignore file, so
+  #                    any of them reads 0 rules and the check is hollow. If you
+  #                    need exemptions, remove the guard deliberately, here.
+  #   not `{files}`    `gitleaks dir a b` does not scan both - measured, it
+  #                    exited 0 with a token in one of them. And not per file:
+  #                    one process per file cost about a second each under
+  #                    this runner.
+  #
+  # `.` includes untracked and ignored files, so a local run examines more than
+  # the change. `detect --no-git` is deprecated since v8.19.0.
   - id: secret-scan
     why: a secret reaching the remote must be rotated; blocking the merge afterwards fixes nothing
     when:
@@ -136,18 +151,21 @@ checks:
     severity: block
     requires: [gitleaks]
     version_command: [gitleaks, version]
-    mode: per_file
-    command: [gitleaks, dir, --no-banner, --redact, --exit-code, "3", "{file}"]
+    mode: batch
+    command: [gitleaks, dir, --no-banner, --no-color, --redact, --ignore-gitleaks-allow, --exit-code, "3", --log-level, trace, --report-format, sarif, --report-path, "-", "."]
     timeout_seconds: 300
     exit_codes:
       pass: [0]
-      fail: [3]           # leaks found, in a file that was read
-      refused: [1, 126]   # the scan errored or was partial; an unknown flag
+      fail: [3]
+      refused: [1, 126]
     coverage:
-      from: per_file_exit
-      examined_when_exit_in: [0, 3]
+      from: stdout_paths
+      pattern: '^[^\n]*(?:TRC|DBG)(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*(?:scanning path|skipping empty file)(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*path=(?:\x1b\[[0-9;]*m)*"?([^"\n\x1b]*[^"\s\x1b])"?(?:\x1b\[[0-9;]*m)*$(?![\s\S]*^[^\n]*(?:DBG|WRN|ERR|FTL)(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*(?:skipping (?!finding|empty file)|could|issue|unable)[^\n]*path=(?:\x1b\[[0-9;]*m)*"?\1"?(?:\x1b\[[0-9;]*m)*(?:\s|$))'
       must_cover: all_triggering
       min_covered: 1
+      min_rules: 1
+      rules_command: [gitleaks, dir, --no-banner, --no-color, --redact, --exit-code, "0", --log-level, debug, "."]
+      rules_pattern: '\A(?![\s\S]*found \.gitleaksignore file)[\s\S]*?(using default (?:gitleaks )?config)'
 
       # WHICH REQUIREMENTS THIS CHECK VERIFIES. Uncomment and point at ids that
       # exist in `policy.spec`; the runner refuses a claim against an id the

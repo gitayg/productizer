@@ -91,12 +91,72 @@ jobs:
       # declares 27 direct dependencies on Linux, and none of them gets to change the
       # interpreter that parses checks.yaml. Its dependencies are not pinned -
       # only semgrep itself is - and that is a gap, not a lockfile.
+      #
+      # ONLY `semgrep` REACHES PATH. v4.58.0 appended the venv's whole `bin/` to
+      # $GITHUB_PATH, and that directory holds the venv's own `python3` and
+      # `pip`. Every later step's `python3` became the venv interpreter, which
+      # has no PyYAML, and Stage 5 refused: "python3 has no yaml module". The
+      # entry point is symlinked into a directory holding nothing else. Its
+      # shebang names the venv interpreter by absolute path, so it still runs
+      # there, and semgrep's entry point appends its own scripts directory to
+      # PATH inside its own process to find `pysemgrep` - read from
+      # `semgrep/console_scripts/entrypoint.py` at 1.171.0. Homebrew installs
+      # semgrep in exactly this shape: its `bin/semgrep` is a symlink into a
+      # private venv.
       - name: semgrep, which the declared sast check runs
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/semgrep-venv"
           "$RUNNER_TEMP/semgrep-venv/bin/python" -m pip install --disable-pip-version-check 'semgrep==1.171.0'
-          echo "$RUNNER_TEMP/semgrep-venv/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/tools-bin"
+          ln -s "$RUNNER_TEMP/semgrep-venv/bin/semgrep" "$RUNNER_TEMP/tools-bin/semgrep"
+          echo "$RUNNER_TEMP/tools-bin" >> "$GITHUB_PATH"
+
+      # The declared `secret-scan` check runs gitleaks. Pinned to v8.30.1, the
+      # version installed where the check was falsified, and verified BEFORE
+      # anything is extracted. The expected hash is written here rather than
+      # read from the release's checksums file at run time: a file fetched from
+      # the same place as the tarball can only confirm the tarball matches
+      # whatever that place serves today. Read 2026-09-13 from
+      # `gitleaks_8.30.1_checksums.txt` (999 bytes, itself sha256
+      # 061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae), and
+      # equal to the `digest` GitHub's release API reports for the 8,230,402-byte
+      # asset. `sha256sum -c` exits non-zero on a mismatch and `set -e` stops the
+      # step there. Only the `gitleaks` member is extracted, into the same
+      # one-purpose directory as semgrep.
+      - name: gitleaks, which the declared secret-scan check runs
+        env:
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          tgz="$RUNNER_TEMP/gitleaks_8.30.1_linux_x64.tar.gz"
+          curl -fsSL --retry 3 -o "$tgz" \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "${GITLEAKS_SHA256}  ${tgz}" | sha256sum -c --strict -
+          mkdir -p "$RUNNER_TEMP/tools-bin"
+          tar -xzf "$tgz" -C "$RUNNER_TEMP/tools-bin" gitleaks
+          chmod 0755 "$RUNNER_TEMP/tools-bin/gitleaks"
+          "$RUNNER_TEMP/tools-bin/gitleaks" version
+
+      # THE INTERPRETER THAT PARSES checks.yaml, ASSERTED WHERE IT COULD BREAK.
+      # v4.58.0's semgrep step put a second `python3` first on PATH, and nothing
+      # failed until Stage 5 refused many steps later, naming PyYAML and not
+      # the step that caused it. This runs straight after every step that
+      # writes $GITHUB_PATH, so the same mistake fails here, by name.
+      - name: Guard — python3 is still the interpreter with PyYAML
+        run: |
+          set -euo pipefail
+          py="$(command -v python3)"
+          echo "python3: $py"
+          case "$py" in
+            "$RUNNER_TEMP"/*)
+              echo "::error::python3 resolves under \$RUNNER_TEMP ($py): a tool install leaked its interpreter onto PATH"
+              exit 1 ;;
+          esac
+          if ! python3 -c 'import yaml; print("PyYAML", yaml.__version__)'; then
+            echo "::error::python3 ($py) cannot import yaml. A step above changed which python3 later steps get; run-checks.sh would refuse at Stage 5."
+            exit 1
+          fi
 
       # FAIL CLOSED, FIRST. Every tool below is asserted present here so a
       # missing one is a named failure at the top of the log, not a check that
@@ -107,7 +167,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          for tool in git python3 node npm shellcheck semgrep; do
+          for tool in git python3 node npm shellcheck semgrep gitleaks; do
             command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
@@ -127,7 +187,8 @@ jobs:
           # credentials. Two unpinned hops for a linter is not a trade worth
           # making.
           shellcheck --version
-          semgrep --version
+          semgrep --version --disable-version-check
+          gitleaks version
 
       # Pinned exactly. `claude plugin validate` is the gate on both manifests,
       # and a validator that changes what it accepts between two runs of an

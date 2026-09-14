@@ -39,7 +39,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.58.0"`.
+`plugin.json` sets `"version": "4.59.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -199,7 +199,10 @@ organisation without each person toggling it:
    scaffolded the repo, installed executables against the templates they came
    from, schema versions, checks the plugin ships that the repo never
    declared, and templates that gained content — and **changes nothing**: it
-   reports the drift and the exact diff, and a person applies each one. It
+   reports the drift and the exact diff, and a person applies each one. That
+   is enforced by permission, not promised: its frontmatter denies `Write` and
+   `Edit` and scopes Bash to re-running its own script, and the model cannot
+   invoke it on its own. It
    never executes anything from the repo it is reading, and it deliberately
    does NOT follow `spec.path` from that repo's config, because following it
    would let a foreign repo choose what gets opened. Exit `3` outranks `1`: a
