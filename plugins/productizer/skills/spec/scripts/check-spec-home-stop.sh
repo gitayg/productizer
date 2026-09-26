@@ -155,8 +155,21 @@
 #   1  findings - an assertion did not hold, or (--tree) the tree holds one
 #   2  could not run - bad usage, no fixture, no python3, a case whose premise
 #      did not hold, an assertion no case exercised, a shallow clone under a
-#      tree whose timeline had to be read, or a constructed history that did
-#      not come out as constructed. Never confused with 0.
+#      tree whose timeline had to be read, a constructed history that did not
+#      come out as constructed, or a GIT CALL THAT FAILED while the timeline
+#      was being read. Never confused with 0.
+#
+#      That last one is why `git_answer` below exists. MEASURED 2026-09-26: in a
+#      work tree with no commits, `git log` exits 128 saying `your current
+#      branch 'main' does not have any commits yet`, and under `set -e` that 128
+#      left this script as its own exit status - a code neither this header nor
+#      the `spec-home-stop` entry in `checks.yaml` declares, so the runner had
+#      no mapping for it, and an undeclared exit is a code nobody wrote down.
+#      Every git call whose ANSWER the timeline depends on now refuses at 2 and
+#      names the call. One consequence is deliberate and worth seeing: a tree
+#      with NO commits at all is now refused rather than reported as a finding
+#      whose timeline was `not applied`, because nothing here can tell a git
+#      that found nothing from a git that could not look.
 #
 # Under --selftest (--self-test is accepted too) the same three mean: every
 # case produced the exit code it declares and said what it was supposed to say
@@ -187,6 +200,41 @@ STORE_IN_TREE=".claude/productizer/classifications"
 SPEC_IN_TREE=""
 
 die_unmeasured() { printf 'check-spec-home-stop: %s\n' "$1" >&2; exit 2; }
+
+# Runs one git call whose ANSWER the timeline depends on, with stdout captured
+# to <outfile>. Two separate defects made this a function rather than a bare
+# call, and only one of them was visible as a wrong exit code:
+#
+#   A git that FAILED and a git that legitimately printed NOTHING are different
+#   answers. `git log` exits 0 and prints nothing when a path was never deleted,
+#   which is an answer and is read as one; a git that could not read the history
+#   knows nothing at all, and handing both of them back as the same empty string
+#   is R25's fabricated measurement wearing git's clothes.
+#
+#   The second call site took git's output through `| tail -1`, and the tail is
+#   now taken from the file instead. MEASURED, because the first version of this
+#   comment claimed that pipeline made the failure INVISIBLE, and that was
+#   wrong: this file sets `pipefail`, so the assignment did fail and the 128
+#   escaped there too, exactly as it did at the other site. Without `pipefail`
+#   it WOULD be invisible - `git log ... | tail -1` returns tail's 0 and hands
+#   back an empty string, which this function reads as `no commit touches this
+#   record` - so the point of capturing to a file is that the refusal no longer
+#   depends on one shell option staying switched on three hundred lines away.
+#
+# The refusal quotes git's diagnosis, because a refusal that does not say what
+# git said cannot be acted on.
+git_answer() { # <outfile> <what is UNKNOWN without it> <git args...>
+  local out="$1" what="$2" rc=0 said
+  shift 2
+  # stderr-ok: git's stderr is captured and then QUOTED in the refusal below,
+  # which is the opposite of hiding it - it reaches the log only inside a
+  # sentence that names the call which produced it.
+  git "$@" > "$out" 2> "$out.err" || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  said="$(tr '\n' ' ' < "$out.err" | sed 's/  */ /g; s/ *$//')"
+  [ -n "$said" ] || said="nothing on stderr"
+  die_unmeasured "the git call \`git $*\` exited $rc, so $what is UNKNOWN - not yes, and not no. git said: $said"
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -343,6 +391,22 @@ REC
   git -C "$SB/spared" add -A
   git -C "$SB/spared" -c commit.gpgsign=false commit -q -m "the spec home breaks afterwards"
 
+  # A work tree with NO COMMITS, which is the cheapest way to make a git call
+  # that the timeline depends on fail. `git init` alone: no add, no commit. Both
+  # `rev-parse --show-toplevel` and `rev-parse --is-shallow-repository` SUCCEED
+  # here, so this case reaches the `git log` that does not, which is the whole
+  # point of it - it drives the refusal through the same door a real repository
+  # would, rather than through a missing directory.
+  #
+  # It is shaped like `classified`: a config, a record, and no spec file, so the
+  # home reads unreachable and there is an A2 finding for the timeline to try to
+  # date. Without that finding `apply_timeline` is never called and this case
+  # would quietly assert nothing.
+  mk_tree no-commits; put_config no-commits
+  put_record no-commits rec "$GOOD_SHA"
+  git -c init.defaultBranch=main init -q "$SB/no-commits" ||
+    die_unmeasured "could not init a work tree with no commits, so the refusal that covers a failing git call was never driven"
+
   # The same history, cloned shallow. Neither commit is reachable, so a record
   # cannot be dated at all - UNKNOWN, and never innocent.
   git clone -q --depth 1 "file://$SB/spared" "$SB/shallow" ||
@@ -430,6 +494,11 @@ DECL
   drive tree-bad-config     2 'could not be read as JSON'       --tree "$SB/bad-config"
   drive tree-store-not-dir  2 'is UNKNOWN, not zero'            --tree "$SB/store-not-dir"
   drive tree-shallow        2 'SHALLOW clone'                   --tree "$SB/shallow"
+  # Asserts the SENTENCE and not git's number: 128 is git's own fatal code and
+  # this case would still be driving the right leg if a future git changed it.
+  # The exit code being 2 is asserted by `drive` itself, which is the half that
+  # regressed - it was 128, a code nobody declared.
+  drive tree-no-commits     2 'is UNKNOWN - not yes, and not no. git said'  --tree "$SB/no-commits"
   drive fixture-missing     2 'no fixture directory at'         --root "$SB/no-lifecycle" --fixture "$SB/no-such-fixture"
   drive fixture-empty       2 'holds no case directory'         --root "$SB/no-lifecycle" --fixture "$SB/fixture-empty"
   drive fixture-premise     2 'The case was never tested'       --root "$SB/no-lifecycle" --fixture "$FIX_BAD"
@@ -456,6 +525,7 @@ DECL
     exit 1
   fi
   printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2 in BOTH modes, and every case asserts which refusal or which verdict it produced as well as which code.\n'
+  printf '  NOT ASSERTED: of the two git calls the timeline depends on, only the one that finds the DELETION commit has a case driving its refusal (tree-no-commits). The call that dates a RECORD is guarded the same way and has no case: reaching it needs a history whose deletion commit reads fine while a `git log` over one record path fails, and git answers a path it has never seen with silence and exit 0 rather than an error, so no cheap fixture produces that. The guard there is argued for, not driven.\n'
   printf '  NOT ASSERTED: the REFUSED path for an assertion no case exercises. Reaching it needs a fixture whose cases cover some of A1 to A6 and not others, and A5 and A6 are built unconditionally by this script rather than declared, so no fixture can leave them unexercised.\n'
   exit 0
 fi
@@ -740,7 +810,10 @@ apply_timeline() { # <tree>
   # The commit that removed the spec path. `git log` exits 0 and prints
   # nothing when the path was never deleted, so an empty result is an answer
   # and is read as one.
-  del="$(git -C "$top" log --diff-filter=D --format=%H -1 -- "$tree/$SPEC_IN_TREE")"
+  git_answer "$WORK/timeline-del" \
+    "which commit removed the spec path, and therefore whether any record here was written after the spec home broke" \
+    -C "$top" log --diff-filter=D --format=%H -1 -- "$tree/$SPEC_IN_TREE"
+  del="$(cat "$WORK/timeline-del")"
   if [ -z "$del" ]; then
     D_TIMELINE="not applied - this history holds no commit that deleted the spec path, so there is no breakage to date a record against. Every record's finding stands."
     return 0
@@ -764,7 +837,10 @@ apply_timeline() { # <tree>
       continue
     fi
     # The OLDEST commit touching this record is when it was written.
-    line="$(git -C "$top" log --format=%H -- "$tree/$STORE_IN_TREE/$name" | tail -1)"
+    git_answer "$WORK/timeline-rec" \
+      "when the record $name was written, and therefore whether it predates the breakage" \
+      -C "$top" log --format=%H -- "$tree/$STORE_IN_TREE/$name"
+    line="$(tail -1 "$WORK/timeline-rec")"
     if [ -z "$line" ]; then
       printf '%s\t%s\t%s\n' "$cls" "$loc" "$text" >> "$kept"
       continue
