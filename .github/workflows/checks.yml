@@ -231,6 +231,53 @@ jobs:
           python3 plugins/productizer/skills/spec/scripts/validate-spec.py --self-test
           python3 plugins/productizer/skills/spec/scripts/validate-spec.py --repo .
 
+      # B63. The step above validates `--repo .`, which discovers the spec and
+      # the constitution from `spec.path` in config.json. It deliberately does
+      # NOT discover the backlog: `--repo` treats any other file in the spec
+      # directory that reads as a spec as an ERROR rather than a silent
+      # inclusion, and the backlog is a different document kind. Measured:
+      # `--repo .` reports 2 file(s) checked - spec.md and constitution.md - and
+      # exits 0 with backlog.md sitting in that same directory. So nothing in
+      # CI, and nothing in the declared suite, had ever read backlog.md.
+      #
+      # MEASURED 2026-09-14, at a tagged release: the backlog's `Next backlog
+      # id` counter read B48 while its rows ran to B53, and had done since
+      # v4.53.0 - five BACKLOG_ID_AT_OR_ABOVE_COUNTER errors. The next id
+      # allocated would have been B48, which already names shipped work. It was
+      # found by running this command by hand, which is the only way it could
+      # have been found.
+      #
+      # A SEPARATE STEP, NOT A LINE APPENDED ABOVE. The step above is
+      # `set -euo pipefail`: a spec error there would stop the run before the
+      # backlog was read, so a stale counter would stay invisible for as long as
+      # the spec had any error at all. `if: ${{ !cancelled() }}` on its own step
+      # is what makes the two documents independently reported.
+      #
+      # A WORKFLOW STEP AND NOT A `checks.yaml` CHECK, decided on one measured
+      # fact rather than on taste: `run-checks.sh` refuses to load a `block`
+      # check that declares no `version_command`, and `validate-spec.py` has no
+      # `--version` flag - `--version` exits 2, "unrecognized arguments". Every
+      # version_command available for it therefore records either python3's
+      # version or, on a non-zero exit, `"version": null` in
+      # checks-result.json - a blocking check whose tool version is permanently
+      # unknown, which is the hollow evidence this repo refuses everywhere else.
+      # Adding `--version` to validate-spec.py is the change that would make the
+      # declared check honest, and it is a change to the validator, not to this
+      # config. Until then the backlog belongs beside the spec, on the same tool,
+      # in the same job.
+      #
+      # `--kind backlog` is passed explicitly although the kind is auto-detected
+      # from the heading. A backlog whose heading is rewritten into something the
+      # detector reads as another kind would then be validated under the wrong
+      # grammar and pass; named explicitly, it is an error. Not `--strict`, for
+      # the same reason the spec step is not: a WARN is printed and does not
+      # block, so nobody's first move is to delete the step.
+      - name: Backlog — id permanence and header counts
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --kind backlog .claude/productizer/backlog.md
+
       # Precision must stay at 1.00. A contradiction checker that halts on a
       # non-conflict gets switched off, and then nothing is checked.
       - name: Self-tests — every check tool the suite invokes
@@ -268,16 +315,35 @@ jobs:
         # meant to be edited. A `block` check over a report that is for a person
         # to apply, dismiss or defer would be red on every commit for content
         # nobody is obliged to adopt, and would be switched off.
+        #
+        # `list-commands.sh` and `spec-requirements.sh` are here for the same
+        # reason and are not declared for a third. B58: both carry a passing
+        # self-test and were named in neither checks.yaml nor this workflow, so
+        # both were outside R39 and R40 - `check-selftest-coverage.sh` reads
+        # exactly those two files to decide reachability, and a tool in neither
+        # is not in its denominator. `list-commands.sh` is the help skill's
+        # lister: it reaches no verdict about a change, so a check declared over
+        # it would block a merge on the shape of a help listing.
+        # `spec-requirements.sh` is a LIBRARY the checks already use: it is in
+        # the `requires` list of four declared blocking checks - `changelog-row`,
+        # `pending-ruling-scope`, `superseded-text` and `suspect-links` - and the
+        # scanner builds its set from `command` argv, never from `requires`, so
+        # being required by four of them never put it in the set. Declaring it as
+        # a check of its own would be a second check over what those four
+        # already run it for.
         run: |
           set -euo pipefail
           python3 evals/solver-probe.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
+          bash plugins/productizer/skills/help/scripts/list-commands.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-release-notes.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-cannot-run-coverage.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-changelog-row.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-classification-provenance.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-declared-scope.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-diff-paths-named.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-governance-weakening.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-import-marking.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-installed-copies.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-jira-unbound.sh --selftest
@@ -297,10 +363,14 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/check-untrusted-execution.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-view-publish-refused.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-view-readonly.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-view-rendered.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-waiver-rendering.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/classify-change-risk.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh --selftest
           bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
           bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
           bash plugins/productizer/skills/spec/scripts/spec-doctor.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/spec-requirements.sh --selftest
           bash plugins/productizer/skills/spec/scripts/upgrade-drift.sh --selftest
           bash scripts/check-hygiene.sh --selftest
 

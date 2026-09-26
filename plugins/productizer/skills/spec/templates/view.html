@@ -1168,6 +1168,129 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
   .ag-canvas.ag-on .vz-wire:not(.hot){opacity:1}
   .ag-node:hover,.ag-node:focus-visible{box-shadow:none}}
 @media (prefers-reduced-motion:reduce){.ag-node{transition:none}}
+/* PREFERS-CONTRAST: MORE. A reader who has asked their system for more
+   contrast has said the default ground is not working for them, and unlike
+   forced colours nothing here is taken away: the page keeps its palette and is
+   asked to push it. v4.57.0's notes said this block existed. It did not, for
+   four releases; the claim was corrected in the backlog as B57 before it was
+   made true here. How the absence was established, by rendering rather than by
+   reading:
+   with `prefers-contrast: more` emulated through a raw CDP
+   `Emulation.setEmulatedMedia` call, the page's own `matchMedia` reported the
+   feature matching while the screenshot came back byte-identical to the
+   default one. That is what a media query nobody wrote looks like.
+
+   1. THE TOKENS ARE LIFTED at :root, the one place in this sheet where a
+      literal colour lives, so the lift reaches every rule that resolves
+      through them rather than the sections somebody remembered. Measured
+      against --bg #0d1117 with the WCAG 2.1 contrast formula, before -> after:
+
+        --text    12.26 -> 17.39      --ok      7.45 -> 9.82
+        --muted    6.15 -> 11.31      --warn    7.50 -> 9.72
+        --line     1.55 ->  5.07      --crit    4.11 -> 7.51
+                                      --accent  5.05 -> 9.73
+
+      --crit and --accent were under 4.5:1 against the raised ground before
+      this, and --line was a hairline at 1.55:1 that a reader with reduced
+      contrast sensitivity cannot see at all.
+
+   2. WHAT A COLOUR LIFT CANNOT REACH is strengthened directly: a border thin
+      enough that its STYLE is a guess, a hatch faint enough to read as a flat
+      fill, and an opacity that dims a word somebody has to read.
+
+   THE FIVE STATES KEEP THEIR PAIRWISE DISTINCTION, and the pair that carries
+   it is (style, width). No two of the six are the same pair here, which is the
+   property `check-view-rendered.sh` asserts rather than trusting this comment:
+
+        measured   solid 3px        guard shut  solid 2px + a denser hatch
+        never ran  dashed 2px       missing     dotted 2px
+        void       double 3px       unreadable  dotted 3px
+
+   Nothing goes past 3px: a node is 32px tall with `box-sizing: border-box`,
+   and at 4px the state WORD - channel two of four, and the one colour cannot
+   take away - starts to clip. 3px was rendered and looked at before it was
+   written down; `void` has worn 3px since v4.57.0 and its word is intact. */
+@media (prefers-contrast: more){
+  :root{--text:#f0f6fc;--muted:#c0c9d4;--line:#7d8590;--accent:#79c0ff;
+    --ok:#56d364;--warn:#e3b341;--crit:#ff7b72}
+
+  /* the five overlay states, on the node and on the legend swatch */
+  .ag-n.a-meas{border-width:3px}
+  .ag-n.a-never{border-width:2px}
+  /* The hatch gets denser, not brighter. A word printed over a bright hatch is
+     a word a high-contrast reader has to pick out of a pattern, which is the
+     opposite of what was asked for - rendered at 55% first, and the state word
+     inside it was worse than the default. */
+  .ag-n.a-shut{border-width:2px;
+    background-image:repeating-linear-gradient(135deg,
+      color-mix(in srgb,var(--muted) 34%,transparent) 0 2px,transparent 2px 6px)}
+  .ag-n.a-miss{border-width:2px}
+  .ag-n.a-unk{border-width:3px}
+  /* The glyph box repeats the border style, so it grows with it. The box grows
+     too: at 17px a 3px border leaves 11px for a 10px glyph, and the glyph is
+     channel one. */
+  .ag-g{width:19px;height:19px}
+  .a-meas>.ag-g,.ag-g.a-meas{border-width:3px}
+  .a-never>.ag-g,.ag-g.a-never{border-width:2px}
+  /* The glyph box carries `n/a` in 8.5px type. Its hatch is dropped, not
+     strengthened: at 17px the pattern and the glyph are the same size. */
+  .a-shut>.ag-g,.ag-g.a-shut{border-width:2px;background-image:none}
+  .a-miss>.ag-g,.ag-g.a-miss{border-width:2px}
+  .a-unk>.ag-g,.ag-g.a-unk{border-width:3px}
+  /* The state word stops being muted-grey text. Weight, not size: size moves
+     the line box inside a node whose height is fixed. */
+  .ag-w{color:var(--text);font-weight:600}
+  .a-meas .ag-w{color:var(--ok)}
+  .a-void .ag-w{color:var(--crit)}
+  .a-miss .ag-w{color:var(--warn)}
+  /* A faded node is still a node. The fade says "not related to what you
+     picked"; at .3 it also says "and you may not read me". */
+  .ag-canvas.ag-on .ag-node:not(.hot){opacity:.72}
+  .ag-canvas.ag-on .vz-wire:not(.hot){opacity:.45}
+
+  /* the spec delta's pills, where two states are carried by a dashed edge and
+     one by a dotted one */
+  .ag-dbadge{border-width:2px}
+  .ag-dbadge.d-rm{border-width:3px}
+  .ag-dold{text-decoration-color:var(--muted)}
+  /* the box a graph that could not be read is drawn in */
+  .ag-unread{border-width:2px}
+
+  /* `.stats` draws its hairlines by showing 1px of the grid container through
+     the gaps, so the container's background IS the line colour - and the last
+     row of that grid is half empty. Lifting --line therefore turned an empty
+     grid area into a bright slab that reads as a filled tile with nothing in
+     it, which is the one thing this page must never draw. Rendered, seen, and
+     fixed here rather than by leaving --line dark: the tiles keep a crisper
+     hairline than before, drawn as a shadow that takes no space, and the
+     container goes back to being a surface. */
+  .stats{background:var(--surface)}
+  .stat{box-shadow:0 0 0 1px var(--line)}
+
+  /* Borders elsewhere that are a hue at 25% alpha over the ground - a colour
+     the lift above cannot reach, because the alpha is what makes them faint. */
+  .rkind.crit,.bk-st.blocked,.chkrow .cs.bad,.kc.att{border-color:var(--crit)}
+  .rkind.warn,.rtag.warn,.chkrow .cs.unk,.kc.warn,.bk-st.todo,
+  .kcol:last-child .kcol-h{border-color:var(--warn)}
+  .rkind.ok,.rtag.ok,.bk-st.in-progress{border-color:var(--ok)}
+  .rpush.warn{color:var(--warn);border-color:var(--warn)}
+  .rnode.human,.sw.human{border-color:var(--warn)}
+  .rnode.human .rsn,.rnode.human .ract,.rnode.on.human .rt,.who.human{color:var(--warn)}
+  .sx.done{border-color:var(--ok)}
+  .sx.unk{border-color:var(--warn)}
+  a.h-sub,a.stat.att .stat-l,a.kc.att .kc-t{text-decoration-color:var(--crit)}
+  a.stat.warn .stat-l,a.kc.warn .kc-t{text-decoration-color:var(--warn)}
+
+  /* Opacity dims the colour AND the word. Every selector here dims text a
+     reader has to read - a zero, a date, a note, a state word, the provenance
+     line under every panel. The dimmers left alone are decorative: a drag
+     ghost, a sort caret, an icon beside a filename. */
+  .rnode .rn.zero,.hubbig.zero,.hl-go,.rpush.ok,.rpush.unk,.rtag.none,
+  .reldate,.rnote,.bk-st.long-term,.bk-note,.bksort-n,.stat-d,
+  .stat.att .stat-l,.stat.unk .stat-l,.kcol-c,.kc-n,
+  .kc.att .kc-id,.kc.att .kc-n,.kc.warn .kc-id,.kc.warn .kc-n,
+  .provenance,.provenance .mono,.limund,.chkrow .cc,.vz-lsub,
+  .vz-hero-value.unk,.vz-hero-delta.unk{opacity:1}}
 @media (max-width:620px){.vz-board{padding:10px}.vz{gap:20px}}@@STALECSS@@
 </style>
 @@BODY@@

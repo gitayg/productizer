@@ -125,6 +125,7 @@ SELF="${BASH_SOURCE[0]}"
 ST_DIR=""
 ST_FAILS=0
 ST_TOTAL=0
+ST_CODES=""
 
 st_case() {
   # st_case <name> <expected-exit> <expected-records> [args...]
@@ -134,6 +135,7 @@ st_case() {
   ST_TOTAL=$((ST_TOTAL + 1))
   bash "$SELF" "$@" > "$ST_DIR/out" 2> "$ST_DIR/err" || rc=$?
   n="$(awk 'END { print NR }' "$ST_DIR/out")"
+  ST_CODES="$ST_CODES $rc"
   if [ "$rc" -eq "$want_rc" ] && [ "$n" -eq "$want_n" ]; then
     printf '  ok    %-46s exit %s, %s records\n' "$name" "$rc" "$n"
     return 0
@@ -184,6 +186,7 @@ selftest() {
   ST_TOTAL=$((ST_TOTAL + 1))
   local rc=0
   bash "$SELF" --require-records "$ST_DIR/foreign.md" > "$ST_DIR/out" 2> "$ST_DIR/err" || rc=$?
+  ST_CODES="$ST_CODES $rc"
   if grep -q 'NOT MEASURED' "$ST_DIR/err"; then
     printf '  ok    %-46s exit %s\n' "the 4 names itself NOT MEASURED" "$rc"
   else
@@ -192,7 +195,45 @@ selftest() {
       "the 4 names itself NOT MEASURED" "$rc" "$(cat "$ST_DIR/err")"
   fi
 
+  # Exit 3 is what a DISAGREEING case returns, so no case above can reach it
+  # and the contract is driven rather than trimmed: a copy of this file is
+  # broken on purpose and must come back 3. The break is asserted to have
+  # applied - a sed that matched nothing would otherwise leave a green run
+  # that drove one documented code fewer and said nothing about it.
+  ST_TOTAL=$((ST_TOTAL + 1))
+  sed 's/\(st_case "a spec with requirements" *\)0 2/\19 2/' "$SELF" \
+    > "$ST_DIR/broken.sh"
+  if cmp -s "$SELF" "$ST_DIR/broken.sh"; then
+    ST_FAILS=$((ST_FAILS + 1))
+    printf '  FAIL  %-46s the break did not apply, so 3 was never driven\n' \
+      "a disagreeing case exits 3"
+  else
+    rc3=0
+    bash "$ST_DIR/broken.sh" --selftest > "$ST_DIR/out3" 2> "$ST_DIR/err3" || rc3=$?
+    ST_CODES="$ST_CODES $rc3"
+    if [ "$rc3" -eq 3 ] && grep -q '^  FAIL' "$ST_DIR/out3"; then
+      printf '  ok    %-46s exit %s\n' "a disagreeing case exits 3" "$rc3"
+    else
+      ST_FAILS=$((ST_FAILS + 1))
+      printf '  FAIL  %-46s exit %s (wanted 3), FAIL lines: %s\n' \
+        "a disagreeing case exits 3" "$rc3" "$(grep -c '^  FAIL' "$ST_DIR/out3")"
+    fi
+  fi
+
   printf '\n%s of %s cases held\n' "$((ST_TOTAL - ST_FAILS))" "$ST_TOTAL"
+
+  REACHED="$(printf '%s\n' $ST_CODES | grep -v '^$' | sort -u | tr '\n' ' ' \
+    | sed 's/  *$//')"
+  ST_MISSING=""
+  for want in 0 2 3 4; do
+    printf '%s\n' $ST_CODES | grep -qx "$want" || ST_MISSING="$ST_MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 2 3 4\n' "$REACHED"
+  printf '    NOT ASSERTED: the CONTENT of a record. Each case asserts the exit code and the number of lines on stdout, so a parse that emitted the right count of wrong records - a mis-split field, a status read from the wrong column - is green here. The id, line, status and text columns are asserted by check-declared-scope.sh and contradiction-check.py against the real spec, not here.\n'
+  if [ -n "$ST_MISSING" ]; then
+    printf 'FAIL: documented code(s)%s never driven by any case\n' "$ST_MISSING" >&2
+    ST_FAILS=$((ST_FAILS + 1))
+  fi
   [ "$ST_FAILS" -eq 0 ] || return 3
   return 0
 }

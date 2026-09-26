@@ -249,6 +249,42 @@ and a greenish block reads as fine before anyone reads the label. Every node
 also carries the state and its meaning in its `aria-label`, so the distinction
 survives with no pixels at all.
 
+### The page in a contrast mode
+
+Two media queries carry the states when the palette cannot.
+
+**`forced-colors: active`** replaces every colour with the reader's own pair.
+Border STYLE, the glyph and the word survive it, which is why the state is
+carried by those three. Measured in Chrome 146 through a raw CDP
+`Emulation.setEmulatedMedia` call: the HATCH DOES NOT SURVIVE — `guard_shut`
+comes back a flat fill — so the block gives it a border width that the other
+dashed state does not have, and all five stay pairwise distinct. That block is
+DEFENSIVE, and measured as such: neutering it leaves the five distinct in this
+browser anyway, so `check-view-rendered.sh` has no case that goes red when it
+is removed, and says so on every run.
+
+**`prefers-contrast: more`** keeps the palette and is asked to push it. Nothing
+is taken away here, so the block lifts the colour tokens at `:root` and
+strengthens what a colour lift cannot reach — a border thin enough that its
+style is a guess, a hatch faint enough to read as a flat fill, and an opacity
+that dims a word somebody has to read. Measured against `--bg` with the WCAG
+2.1 formula, before → after: `--text` 12.26 → 17.39, `--muted` 6.15 → 11.31,
+`--line` 1.55 → 5.07, `--ok` 7.45 → 9.82, `--warn` 7.50 → 9.72, `--crit` 4.11 →
+7.51, `--accent` 5.05 → 9.73. `--crit` and `--accent` were under 4.5:1 on the
+raised ground before it.
+
+Under that mode the five states wear `solid 3px`, `dashed 2px`, `double 3px`,
+`solid 2px` over a denser hatch and `dotted 2px` — no two the same pair, and
+nothing past 3px, because a node is 32px tall with `box-sizing: border-box` and
+at 4px the state word starts to clip.
+
+**This block did not exist until B57 was closed, and four releases of notes
+said it did.** `prefers-contrast` appeared nowhere in the template, and emulating the
+mode produced a screenshot byte-identical to the default one — the shape a
+media query nobody wrote has. That is why `check-view-rendered.sh` asserts that
+the reading under the mode DIFFERS from the plain reading, rather than that the
+rule is present in the sheet.
+
 **This repository reaches only two of the five.** Measured 2026-09-08:
 `measured` 32, `guard_shut` 3, and `never_ran`, `void` and `missing` all zero.
 The other three are exercised by `fixtures/arch-graph/five-states.json`, for
@@ -296,6 +332,49 @@ R7 was superseded): 10 new (R32–R41), 3 superseded (R7, R8, R23), 1 changed
 (R14, whose pointer moved R23 → R33), 27 unchanged. `--arch-selftest` A10–A14
 drive `fixtures/arch-graph/delta/`, a repository built at test time from two
 committed spec files with every input to the commit sha pinned.
+
+### Testing what the page DRAWS — `check-view-rendered.sh`
+
+`build-view.sh --selftest` asserts the graph the generator DERIVES, and
+`check-view-readonly.sh` reads the page's bytes for what it reaches for.
+Between them sits a page of JavaScript and a sheet of CSS, and for a long time
+nothing committed exercised it: the delta and its `?` rendering were checked in
+headless Chrome by a scratch script that was never committed, so the next break
+would not have been caught. That is B62.
+
+`scripts/check-view-rendered.sh` builds four pages with the real builder, opens
+each in headless Chrome through `scripts/view-render-probe.js`, opens the
+architecture panel through the page's own `showTab()`, and asserts what came
+out — three times over, plain, under `forced-colors: active` and under
+`prefers-contrast: more`.
+
+| page | built from | what it must draw |
+|---|---|---|
+| states, delta | `fixtures/arch-graph/delta/`, its repository built at test time with every sha input pinned | all five overlay states, pairwise distinct on (border style, width, fill), on glyph and on word; all five change words, one per state |
+| unreadable | a result file that is not parseable JSON | one `?` box saying it could not be READ, and no node, no count tile, no delta row |
+| absent | a repository with no result file | one `?` box saying there is NO RESULT, and the same three zeros |
+| no-base | `fixtures/arch-graph/five-states.json`, which records no base | the graph in full, and a spec delta that is `?` — the changed-file tile reads `?`, never 0 |
+
+The fixture's right answers are hardcoded there from
+`fixtures/arch-graph/README.md` rather than read back out of `--arch`: an
+expectation taken from the deriver would only assert that the page agrees with
+it, and a deriver that lost a state would take the page with it and stay green.
+
+It needs node, puppeteer and a browser, and **it exits 2 when it cannot find
+them** — never 0. A page that was never drawn has measured nothing about what
+it draws, and "the states are distinct" asserted by a run in which no browser
+opened is the hollow green this repository refuses. Nothing it does touches the
+network: the probe aborts every request that is not `file:`, so the page's font
+link cannot make the test depend on a name server.
+
+`--selftest` drives sixteen cases, six of which are BREAKS applied to a page
+that was really built: the `prefers-contrast` block neutered, `guard_shut`
+trading its hatch for another state's border, `withdrawn` drawn as
+`superseded`, the unreadable branch skipped on each of the two `?` pages, and a
+base nobody recorded counted as a number. Each is asserted to come back exit 1.
+A break whose text is no longer in the page is not skipped — it is counted,
+printed as `mutation-lost` and fails the run, because a self-test that quietly
+drives fewer cases than it lists is the failure this check exists to refuse.
 
 `files_handed_over` is **null for a check that consumed no file list**, which is
 29 of the 32 here. Those checks are triggered by `always` or a tag, so their

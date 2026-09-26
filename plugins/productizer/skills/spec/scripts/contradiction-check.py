@@ -18,8 +18,16 @@ an SMT solver when z3-solver happens to be importable; it is never required.
 
 Usage:
     contradiction-check.py --selftest
-    contradiction-check.py [--allow-empty] FILE   (one requirement per line)
+    contradiction-check.py [--allow-empty] FILE
     contradiction-check.py --pair "R1 ..." "R2 ..."
+
+FILE mode has TWO readings and the FILE picks which, not a flag. A file holding
+a `## Requirements` heading is a living spec, and its list items are read the way
+`scripts/spec-requirements.sh` reads them - section-scoped, continuations joined,
+status markers honoured, and only `active` requirements paired. Anything else
+keeps the one-requirement-per-line reading this mode has always had. The reading
+used is printed on every run, because a file read the wrong way is the failure
+this mode had.
 
 Exit codes
     0  ran, at least one line parsed as EARS, and nothing halts the pipeline.
@@ -36,9 +44,16 @@ which nothing parsed printed `0 requirements, 0 pairs: nothing decidable as a
 contradiction` at exit 0. Measured on three inputs, all exit 0: a spec-kit
 spec (`- **FR-001**: System MUST ...`), an empty file, and THIS REPOSITORY'S
 OWN `.claude/productizer/spec.md` - 186 lines unparsed, because its
-requirements are list items (`- **R1** — When ...`) and FILE mode reads one
+requirements are list items (`- **R1** — When ...`) and FILE mode read one
 bare sentence per line. `--require-records` existed to refuse that, and no
 caller passed it, so the refusal was real and never reached.
+
+The third of those three is now READ rather than refused: the list-item form is
+parsed, and `.claude/productizer/spec.md` resolves to 35 active requirements, 6
+superseded ones named and left out, 595 pairs and nothing decidable as a
+contradiction. The refusal remains for the other two, and for a living spec
+whose requirements are all superseded - a section with nothing current in it is
+still a file nothing here could measure.
 
 Why the default flipped here and did NOT flip in `spec-requirements.sh`, which
 answers the same question: this tool's FILE mode has no caller in the
@@ -79,7 +94,26 @@ EXIT_HALT = 1
 EXIT_USAGE = 2
 EXIT_UNMEASURED = 4
 
-ID_RE = re.compile(r"^\s*(?:\*\*)?(R\d+)(?:\*\*)?\s*[:.\-]\s*", re.I)
+# The id prefix a requirement may carry in front of its sentence. Three
+# spellings reach this tool and all three are the SAME id form, so one regex
+# reads them rather than three: `R1: ...`, as `--pair` and the corpus write it;
+# `- **R1** — ...`, as this repository's spec writes it; and the same with an en
+# dash or a hyphen after the id. The list bullet and the three separators are
+# taken from `scripts/spec-requirements.sh`, the parser six other checks already
+# read this repository's spec through. Nothing here decides what a requirement
+# line looks like on its own.
+#
+# The three separators are written as ESCAPES rather than as glyphs. An em dash,
+# an en dash and a hyphen are three near-identical characters inside one
+# character class, and `scripts/spec-requirements.sh` spells them as octal
+# escapes for exactly that reason: a reviewer cannot tell them apart, and a
+# parser that silently stopped recognising the em dash would report every
+# requirement in this repo's spec as text beginning with a dash. The hyphen is
+# last so it stays literal inside the class.
+DASHES = "\u2014\u2013-"
+
+ID_RE = re.compile(
+    rf"^\s*(?:-\s+)?(?:\*\*)?(R\d+)(?:\*\*)?\s*[:.{DASHES}]\s*", re.I)
 
 # The determiner before the system noun. `references/format-spec.md` documents
 # `Every ...` as a second spelling of the ubiquitous form, and
@@ -142,6 +176,140 @@ def parse(line: str, fallback_id: str = "?") -> Requirement | None:
             guard=", ".join(parts), guards=parts,
         )
     return None
+
+
+# --------------------------------------------------------------------------
+# The living-spec list-item form
+# --------------------------------------------------------------------------
+# A spec in this plugin's own format holds no bare sentence per line. It holds a
+# `## Requirements` section of list items - `- **R1** — When an intent arrives,
+# the lifecycle shall classify it.` - each optionally followed by an indented
+# status marker. FILE mode read one bare sentence per line and so read none of
+# them: every one of the 186 non-blank lines of `.claude/productizer/spec.md`
+# went unparsed and the run exited 4.
+#
+# THE GRAMMAR IS NOT DEFINED HERE. `references/format-spec.md` is the normative
+# grammar; `scripts/spec-requirements.sh` is the parser `check-superseded-text.sh`,
+# `check-pending-ruling-scope.sh` and four other checks already read this
+# repository's spec through; and `validate-spec.py` owns the EARS sentence forms.
+# All three were read before this was written, and on every part that matters
+# here they agree - format-spec section 1 for the id form, section 2 for the six
+# patterns, section 3 for the markers:
+#
+#   * requirements live only under `## Requirements` (spec-requirements.sh's
+#     `ins` flag; validate-spec.py's `in_requirements`, set on that title alone;
+#     format-spec: "ids written anywhere else in the file are citations, not
+#     definitions")
+#   * an item opens on `- **R<n>**` at the top level (all three, same shape)
+#   * a continuation line is INDENTED, and a blank line closes the item
+#     (spec-requirements.sh emits on `/^[ \t]*$/` and on `/^[^ \t]/`;
+#     validate-spec.py's `blank_since_bullet` and `raw[:1] in " \t"`)
+#   * a continuation opening `Superseded`/`Withdrawn` is the STATUS and anything
+#     else is requirement text; a second marker in one item is malformed rather
+#     than "the first one wins" (both, and both refuse to guess wider)
+#
+# The one place they differ is the separator after the id, and they differ by
+# permissiveness rather than by meaning. format-spec names three - "the separator
+# is an em dash; a hyphen or en dash parses but is non-canonical" -
+# spec-requirements.sh accepts exactly those three, and validate-spec.py accepts
+# any single character and WARNs when it is not an em dash. This follows the
+# narrowest reading, the three format-spec names, so a spelling this reads is a
+# spelling all three read.
+#
+# WHY A SUPERSEDED REQUIREMENT IS NOT PAIRED. R3 of this repo's spec keeps a
+# replaced requirement's original sentence in the file, so the section holds
+# sentences that were once agreed and are not agreed now. Pairing them reports a
+# conflict between a requirement and the thing that replaced it, which is never
+# a finding - measured over this spec, R14, R23 and R21 each read as a longer
+# version of the active requirements they were split into. So the status is
+# read, and only `active` is paired, for the same reason
+# `check-superseded-text.sh` reads status out of the same parser.
+
+SPEC_SECTION_RE = re.compile(r"^##[ \t]+Requirements[ \t]*$")
+SPEC_H2_RE = re.compile(r"^## ")
+SPEC_ITEM_RE = re.compile(r"^-[ \t]+\*\*(R\d+)\*\*(?P<rest>.*)$")
+SPEC_SEP_RE = re.compile(rf"^[ \t]*[{DASHES}][ \t]*")
+SPEC_MARKER_RE = re.compile(r"^[Ss]uperseded|^[Ww]ithdrawn")
+SPEC_SUPERSEDED_RE = re.compile(r"^Superseded by R\d+\.(?:[ \t].*)?$")
+SPEC_WITHDRAWN_RE = re.compile(r"^Withdrawn\.(?:[ \t].*)?$")
+
+
+@dataclass
+class SpecItem:
+    rid: str
+    line: int
+    status: str
+    text: str
+
+
+def is_spec_document(lines) -> bool:
+    """True when the file carries a `## Requirements` section heading."""
+    return any(SPEC_SECTION_RE.match(line) for line in lines)
+
+
+def spec_items(lines) -> list:
+    """The requirement definitions of a living spec, in file order.
+
+    A transcription of `scripts/spec-requirements.sh`'s awk program, rule for
+    rule and in its order, down to which line closes an open item. It is
+    transcribed rather than shelled out to because this file is standard library
+    only and is imported as a module by `evals/solver-probe.py` and
+    `build-view.sh`; a subprocess would make both depend on a sibling script's
+    path. The self-test asserts the records, so the two drifting apart is
+    visible rather than silent.
+    """
+    items: list = []
+    in_section = False
+    cur = None
+    buf: list = []
+
+    def close():
+        nonlocal cur
+        if cur is None:
+            return
+        cur.text = re.sub(r"\s+", " ", " ".join(buf)).strip()
+        items.append(cur)
+        cur = None
+
+    for n, raw in enumerate(lines, 1):
+        if SPEC_H2_RE.match(raw):
+            close()
+            in_section = bool(SPEC_SECTION_RE.match(raw))
+            continue
+        if not in_section:
+            continue
+        if raw.startswith("#"):
+            close()
+            continue
+        item = SPEC_ITEM_RE.match(raw)
+        if item:
+            close()
+            rest = SPEC_SEP_RE.sub("", item.group("rest"), count=1).strip()
+            cur = SpecItem(item.group(1).upper(), n, "active", "")
+            buf = [rest] if rest else []
+            continue
+        if not raw.strip():
+            close()
+            continue
+        if raw[:1] not in (" ", "\t"):
+            close()
+            continue
+        if cur is None:
+            continue
+        marker = raw.strip()
+        if SPEC_MARKER_RE.match(marker):
+            if cur.status != "active":
+                cur.status = "malformed"
+            elif SPEC_SUPERSEDED_RE.match(marker):
+                cur.status = "superseded"
+            elif SPEC_WITHDRAWN_RE.match(marker):
+                cur.status = "withdrawn"
+            else:
+                cur.status = "malformed"
+            continue
+        buf.append(marker)
+    close()
+    return items
 
 
 # --------------------------------------------------------------------------
@@ -501,6 +669,21 @@ def budget_conflict(a: str, b: str) -> str | None:
 # between two verbs; it is between a verb and its own cessation.
 CEASE_RE = re.compile(r"\b(?:stop|stops|cease|ceases|halt|halts|discontinue|discontinues)\s+(\w+)", re.I)
 
+# `stop <word>` names an activity only when that word can BE one. `stop rather
+# than classify against a remembered copy` stops something the sentence never
+# names: `rather than` introduces the alternative, not the object of the
+# cessation. Read as an object it becomes an activity called "rather" - and R13
+# of this repo's own spec, "report that check as missing rather than skipped",
+# carries the same word, so the two paired on a conjunction. That pair was the
+# ONLY halt FILE mode produced over `.claude/productizer/spec.md` once the
+# list-item form parsed, and it halted with a reason that reads as nonsense.
+#
+# Deliberately narrow, and a REFUSAL rather than a guess: a contrast marker, or
+# a word the tokeniser already holds to carry no content. A cessation this
+# cannot read is left to the other branches or escalated by none of them, which
+# is the conservative direction for a tool that decides whether work halts.
+NOT_AN_ACTIVITY = STOP | {"rather", "instead"}
+
 
 def ceased_activity(a: str, b: str) -> str | None:
     """One response stops an activity the other performs.
@@ -511,6 +694,8 @@ def ceased_activity(a: str, b: str) -> str | None:
     for x, y in ((a, b), (b, a)):
         m = CEASE_RE.search(x)
         if not m or CEASE_RE.search(y):
+            continue
+        if m.group(1).lower() in NOT_AN_ACTIVITY:
             continue
         activity = m.group(1).lower()[:5]
         if any(t.startswith(activity) for t in stems(y)):
@@ -1022,6 +1207,7 @@ def selftest(use_z3: bool) -> int:
     # would satisfy the reader that parses the line and prove nothing.
     reached: set[int] = set()
     grammar_failures = selftest_grammar()
+    item_failures = selftest_items()
     file_failures = selftest_file_mode(reached)
     usage_failures = selftest_usage_mode(reached)
 
@@ -1042,7 +1228,7 @@ def selftest(use_z3: bool) -> int:
     if parse_failures:
         print("corpus rows that did not parse: %d" % parse_failures,
               file=sys.stderr)
-    return 1 if (fp or parse_failures or grammar_failures
+    return 1 if (fp or parse_failures or grammar_failures or item_failures
                  or file_failures or usage_failures or missing) else 0
 
 
@@ -1064,16 +1250,108 @@ _CONFLICT = ("R1: When a client requests a report, the api gateway shall "
 _FOREIGN = ("# Feature Specification: Archive old files\n"
             "- **FR-001**: System MUST archive files older than the threshold.\n"
             "- **FR-002**: System MUST skip symbolic links.\n")
-# This repository's own requirement form. FILE mode reads one bare sentence
-# per line, so a list item carrying a bold id and an em dash is not one - and
-# the whole of `.claude/productizer/spec.md` parsed to zero. It is here because
-# that was the measured case: the default must say NOT MEASURED over it, not
-# `0 requirements`. If FILE mode is ever taught this form, this row goes red
-# and should move to EXIT_CLEAN in the same change.
+# This repository's own requirement form, which FILE mode once could not read:
+# a `## Requirements` section of list items carrying a bold id and an em dash,
+# where FILE mode read one bare sentence per line, so the whole of
+# `.claude/productizer/spec.md` parsed to zero and the run exited 4. This row
+# was EXIT_UNMEASURED and is now EXIT_CLEAN, which is the same assertion from
+# the other side: the form is read, the two requirements pair, and the pair is
+# consistent.
 _OWN_FORM = ("## Requirements\n\n"
              "- **R1** \u2014 When an intent arrives, the lifecycle shall "
              "classify it.\n"
              "- **R2** \u2014 The lifecycle shall hold one living spec.\n")
+
+# The same form carrying a real conflict, so the rows below assert that the
+# items were COMPARED rather than merely counted. C4's shape, in list items.
+_OWN_CONFLICT = (
+    "# A living spec\n\n"
+    "## Requirements\n\n"
+    "### Unwanted behaviour\n\n"
+    "- **R1** \u2014 While a record is older than 30 days, the archive shall "
+    "delete it.\n"
+    "- **R2** \u2014 While a record is older than 30 days, the archive shall "
+    "retain it.\n")
+
+# THE PINNING CASE, and the one most likely to be got wrong. The conflicting
+# half is SUPERSEDED, so the file is clean: a replaced requirement keeps its
+# original sentence in the spec by R3 of this repo's own spec, and pairing it
+# against what replaced it reports a conflict between a requirement and its
+# successor - never a finding. Drop the status read and this row goes EXIT_HALT.
+_OWN_SUPERSEDED = (
+    "## Requirements\n\n"
+    "- **R1** \u2014 While a record is older than 30 days, the archive shall "
+    "delete it.\n"
+    "- **R2** \u2014 While a record is older than 30 days, the archive shall "
+    "retain it.\n"
+    "  Superseded by R1. The retention window moved to the ledger.\n")
+
+# A section whose every requirement is superseded holds nothing current, so
+# there is nothing to measure and the default must still refuse.
+_OWN_ALL_SUPERSEDED = (
+    "## Requirements\n\n"
+    "- **R1** \u2014 While a record is older than 30 days, the archive shall "
+    "delete it.\n"
+    "  Superseded by R3. Replaced wholesale.\n"
+    "- **R2** \u2014 While a record is older than 30 days, the archive shall "
+    "retain it.\n"
+    "  Superseded by R3. Replaced wholesale.\n")
+
+# Requirements live only under `## Requirements`, which both reference parsers
+# enforce. The conflicting item sits under a later heading, so it is not a
+# requirement and the file is clean. Drop the section scoping and this goes
+# EXIT_HALT - and so would every worked example a Design section quotes.
+_OWN_OUT_OF_SECTION = (
+    "## Requirements\n\n"
+    "- **R1** \u2014 While a record is older than 30 days, the archive shall "
+    "delete it.\n\n"
+    "## Design\n\n"
+    "- **R2** \u2014 While a record is older than 30 days, the archive shall "
+    "retain it.\n")
+
+# A requirement wrapped over an indented continuation. Neither line carries a
+# whole sentence, so nothing parses until the two are joined: without the join
+# this row is EXIT_UNMEASURED, not a missed conflict.
+_OWN_WRAPPED = (
+    "## Requirements\n\n"
+    "- **R1** \u2014 While a record is older than 30 days, the archive\n"
+    "  shall delete it.\n"
+    "- **R2** \u2014 While a record is older than 30 days, the archive\n"
+    "  shall retain it.\n")
+
+# The list-item form with no `## Requirements` heading above it, which is the
+# one-per-line reading over a line that opens with a bullet and a bold id. It
+# asserts the id form alone, without the section machinery.
+_BULLETS_NO_SECTION = (
+    "- **R1** \u2014 While a record is older than 30 days, the archive shall "
+    "delete it.\n"
+    "- **R2** \u2014 While a record is older than 30 days, the archive shall "
+    "retain it.\n")
+
+# R13 and R19 of `.claude/productizer/spec.md`, verbatim, and the ONLY halt FILE
+# mode produced over that file once the list-item form parsed. Both say `rather
+# than`, and `stop rather than classify` was read as stopping an activity called
+# "rather", which R13's own `rather` then answered - a halt off a conjunction.
+# It lives in FILE_CASES rather than in the corpus above on purpose: a corpus row
+# whose actual verdict is UNDECIDED prints a `*` and does not fail the run, so it
+# would have been coverage in name only. Here the UNDECIDED is a halt, the halt
+# is exit 1, and the row goes red.
+_OWN_RATHER = (
+    "## Requirements\n\n"
+    "- **R1** — While a check tool named by the configuration is absent, "
+    "the lifecycle shall report that check as missing rather than skipped.\n"
+    "- **R2** — If the spec home is unreachable, then the lifecycle shall "
+    "stop rather than classify against a remembered copy.\n")
+
+# A foreign spec that DOES carry the heading. It is read as a living spec and
+# still understands nothing, because `- **FR-001**:` is not `- **R<n>**`. The
+# refusal has to survive the new reading, or a spec-kit file would come back
+# clean the moment it happened to name its section `Requirements`.
+_FOREIGN_SECTION = ("# Feature Specification: Archive old files\n\n"
+                    "## Requirements\n\n"
+                    "- **FR-001**: System MUST archive files older than the "
+                    "threshold.\n"
+                    "- **FR-002**: System MUST skip symbolic links.\n")
 
 # (name, --allow-empty, expected exit, file body)
 FILE_CASES = [
@@ -1085,7 +1363,20 @@ FILE_CASES = [
     ("a foreign notation, --allow-empty", True, EXIT_CLEAN, _FOREIGN),
     ("an empty file, default", False, EXIT_UNMEASURED, ""),
     ("an empty file, --allow-empty", True, EXIT_CLEAN, ""),
-    ("this repo's list-item form, default", False, EXIT_UNMEASURED, _OWN_FORM),
+    ("this repo's list-item form, default", False, EXIT_CLEAN, _OWN_FORM),
+    ("list items that conflict", False, EXIT_HALT, _OWN_CONFLICT),
+    ("the conflicting half superseded", False, EXIT_CLEAN, _OWN_SUPERSEDED),
+    ("every requirement superseded", False, EXIT_UNMEASURED, _OWN_ALL_SUPERSEDED),
+    ("every requirement superseded, --allow-empty", True, EXIT_CLEAN,
+     _OWN_ALL_SUPERSEDED),
+    ("the conflicting item out of section", False, EXIT_CLEAN,
+     _OWN_OUT_OF_SECTION),
+    ("a requirement wrapped over two lines", False, EXIT_HALT, _OWN_WRAPPED),
+    ("`rather than` on both sides", False, EXIT_CLEAN, _OWN_RATHER),
+    ("list items with no section heading", False, EXIT_HALT,
+     _BULLETS_NO_SECTION),
+    ("a foreign spec under the same heading", False, EXIT_UNMEASURED,
+     _FOREIGN_SECTION),
     # One line that parses is enough: the default asks whether anything was
     # understood, not whether everything was.
     ("one line among foreign ones, default", False, EXIT_CLEAN,
@@ -1226,7 +1517,123 @@ GRAMMAR_CASES = [
     ("Any check shall declare its scope.", None, ""),
     ("Each check shall declare its scope.", None, ""),
     ("Every check declares its scope.", None, ""),
+    # The id prefix, in the three spellings that reach this tool. The colon form
+    # is what `--pair` and the corpus use; the list-item forms are what a living
+    # spec writes, and the separator may be an em dash, an en dash or a hyphen
+    # because `scripts/spec-requirements.sh` accepts all three.
+    ("R1: When an intent arrives, the lifecycle shall classify it.",
+     "event", "lifecycle"),
+    ("- **R1** — When an intent arrives, the lifecycle shall classify it.",
+     "event", "lifecycle"),
+    ("- **R1** – When an intent arrives, the lifecycle shall classify it.",
+     "event", "lifecycle"),
+    ("- **R1** - When an intent arrives, the lifecycle shall classify it.",
+     "event", "lifecycle"),
+    ("- **R1** — The lifecycle shall hold exactly one living spec per "
+     "product.", "ubiquitous", "lifecycle"),
+    # A list item is not a requirement because it is a list item. Stripping the
+    # id must not make a sentence with no obligation into one.
+    ("- **R1** — The lifecycle holds one living spec.", None, ""),
+    ("- **FR-001**: System MUST archive files older than the threshold.",
+     None, ""),
 ]
+
+
+# --------------------------------------------------------------------------
+# The list-item reader, record by record
+# --------------------------------------------------------------------------
+# FILE_CASES above assert an EXIT CODE, which is what a caller reads but is one
+# number over a whole file: a reader that found the right count of the wrong
+# requirements passes every one of them. These assert the RECORDS - id, status
+# and joined text - the way `spec-requirements.sh --selftest` asserts its own.
+#
+# The fixture is one section carrying every shape the two reference parsers
+# distinguish, so a rule dropped from the transcription names itself here rather
+# than showing up as a verdict somewhere downstream.
+_ITEM_FIXTURE = (
+    "# A living spec\n\n"
+    "## Scope\n\n"
+    "- **R99** — The archive shall never be read as a requirement here.\n\n"
+    "## Requirements\n\n"
+    "### Ubiquitous\n\n"
+    "- **R1** — The archive shall hold one record.\n"
+    "- **R2** – The archive shall hold two records.\n"
+    "- **R3** - The archive shall hold three records.\n\n"
+    "### Unwanted behaviour\n\n"
+    "- **R4** — If a record expires, then the archive\n"
+    "  shall delete it.\n"
+    "- **R5** — If a record expires, then the archive shall retain it.\n"
+    "  Superseded by R4. Erasure won.\n"
+    "- **R6** — If a record expires, then the archive shall archive it.\n"
+    "  Withdrawn. The behaviour no longer exists.\n"
+    "- **R7** — If a record expires, then the archive shall move it.\n"
+    "  Superseded by R4. Erasure won.\n"
+    "  Withdrawn. And also this.\n"
+    "- **R8** — If a record expires, then the archive shall count it.\n"
+    # WHITESPACE-ONLY, not empty, and measured rather than chosen. An empty line
+    # is also caught by the unindented-line rule below it, so with an empty line
+    # here the blank-line rule could be deleted outright and every case still
+    # passed - the break came back GREEN. Two spaces separate the two rules: this
+    # line is indented, so only the blank-line rule can close the item.
+    "  \n"
+    "  Superseded by R4. A blank line closed the item, so this is prose.\n"
+    "- **R9** — If a record expires, then the archive shall log it.\n"
+    "Superseded by R4. Unindented, so this is prose and not a marker.\n"
+    "- **R10** — If a record expires, then the archive shall stamp it.\n"
+    "  The stamp carries the expiry date.\n\n"
+    "## Design\n\n"
+    "- **R98** — The archive shall never be read as a requirement here.\n")
+
+# (id, status, joined text)
+ITEM_CASES = [
+    ("R1", "active", "The archive shall hold one record."),
+    ("R2", "active", "The archive shall hold two records."),
+    ("R3", "active", "The archive shall hold three records."),
+    ("R4", "active", "If a record expires, then the archive shall delete it."),
+    ("R5", "superseded", "If a record expires, then the archive shall retain it."),
+    ("R6", "withdrawn", "If a record expires, then the archive shall archive it."),
+    # Two markers in one item is a status nobody declared. Picking the first
+    # would invent the answer, so both reference parsers call it malformed - and
+    # malformed is not `active`, so it is named and not paired.
+    ("R7", "malformed", "If a record expires, then the archive shall move it."),
+    # A blank line closes the item, so the marker after it belongs to nothing
+    # and R8 stays active. This is the rule that decides whether the paragraph
+    # under a superseded requirement can flip the NEXT one's status.
+    ("R8", "active", "If a record expires, then the archive shall count it."),
+    # An unindented continuation closes the item too, for the same reason.
+    ("R9", "active", "If a record expires, then the archive shall log it."),
+    ("R10", "active", "If a record expires, then the archive shall stamp it. "
+                      "The stamp carries the expiry date."),
+]
+
+
+def selftest_items() -> int:
+    """Assert the records the list-item reader produces. Returns failures."""
+    print("\nLIST ITEMS - the records read out of a living spec's own form")
+    failures = 0
+    got = spec_items(_ITEM_FIXTURE.splitlines())
+    if len(got) != len(ITEM_CASES):
+        failures += 1
+        print("  FAIL  %d records read, wanted %d: %s"
+              % (len(got), len(ITEM_CASES), " ".join(i.rid for i in got)))
+    for want, item in zip(ITEM_CASES, got):
+        ok = (item.rid, item.status, item.text) == want
+        if not ok:
+            failures += 1
+        print("  %-5s %-4s %-11s %s%s"
+              % ("ok" if ok else "FAIL", want[0], item.status, item.text,
+                 "" if ok else "   WANTED %s / %s" % (want[1], want[2])))
+    # The two headings outside `## Requirements` carry a well-formed item each,
+    # and neither may be read. Asserted by id rather than by count, so a reader
+    # that picked one up and dropped another cannot balance out.
+    for stray in ("R98", "R99"):
+        ok = stray not in {i.rid for i in got}
+        if not ok:
+            failures += 1
+        print("  %-5s %s outside `## Requirements` is not a requirement"
+              % ("ok" if ok else "FAIL", stray))
+    print("  %d of %d held" % (len(ITEM_CASES) + 2 - failures, len(ITEM_CASES) + 2))
+    return failures
 
 
 def selftest_grammar() -> int:
@@ -1255,22 +1662,58 @@ def selftest_grammar() -> int:
 
 # --------------------------------------------------------------------------
 
-def run_file(path: str, allow_empty: bool = False) -> int:
-    reqs, unparsed = [], []
+def read_file(path: str):
+    """Requirements, the lines that were not requirements, and the ones that are
+    no longer current. Returns (reqs, unparsed, not_current, reading).
+
+    Which of the two readings applies is decided by the FILE, not by a flag: a
+    file carrying a `## Requirements` heading is a living spec and is read as
+    one, and anything else keeps the one-sentence-per-line reading FILE mode has
+    always had. `reading` is reported, because a file read the wrong way is the
+    failure this whole function exists to close and it must not be silent.
+    """
     with open(path, encoding="utf-8") as fh:
-        for n, line in enumerate(fh, 1):
+        lines = fh.read().splitlines()
+    reqs, unparsed, not_current = [], [], []
+    if is_spec_document(lines):
+        reading = ("the `## Requirements` list items of a living spec, "
+                   "as scripts/spec-requirements.sh reads them")
+        for item in spec_items(lines):
+            if item.status != "active":
+                not_current.append(item)
+                continue
+            r = parse(item.text, fallback_id=item.rid)
+            if r is None:
+                unparsed.append((item.line, f"{item.rid} — {item.text}"))
+            else:
+                reqs.append(r)
+    else:
+        reading = "one requirement per line"
+        for n, line in enumerate(lines, 1):
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
             r = parse(line, fallback_id=f"L{n}")
             (reqs.append(r) if r else unparsed.append((n, line.strip())))
+    return reqs, unparsed, not_current, reading
+
+
+def run_file(path: str, allow_empty: bool = False) -> int:
+    reqs, unparsed, not_current, reading = read_file(path)
     for n, line in unparsed:
         print(f"unparsed (line {n}, not an EARS pattern): {line}")
+    # Named, never dropped. A requirement left out of the pairing is a pair that
+    # was not decided, and a run that silently compared 35 of 41 requirements is
+    # claiming coverage it does not have.
+    for item in not_current:
+        print(f"not compared (line {item.line}, {item.status}): {item.rid} "
+              f"is not an active requirement")
     # Before the pairs, and instead of the summary line: `0 requirements, 0
     # pairs: nothing decidable as a contradiction` on stdout beside a NOT
     # MEASURED on stderr is a clean-reading sentence over a file nothing read.
     if not reqs and not allow_empty:
-        print(f"NOT MEASURED: {path} was read end to end and not one line in it "
-              f"parsed as EARS ({len(unparsed)} lines unparsed). This is not a "
+        print(f"NOT MEASURED: {path} was read end to end as {reading}, and not "
+              f"one requirement in it parsed as EARS ({len(unparsed)} unparsed, "
+              f"{len(not_current)} not current). This is not a "
               f"file with no contradictions - it is a file nothing here "
               f"understood. A file that was not read has not passed. Pass "
               f"--allow-empty only if a file with no EARS in it is the answer "
@@ -1285,6 +1728,7 @@ def run_file(path: str, allow_empty: bool = False) -> int:
             print(f"  {a.rid}: {a.raw}")
             print(f"  {b.rid}: {b.raw}")
             print(f"  {v.reason}")
+    print(f"read as {reading}")
     if not halts:
         print(f"{len(reqs)} requirements, {len(reqs) * (len(reqs) - 1) // 2} pairs: "
               f"nothing decidable as a contradiction")

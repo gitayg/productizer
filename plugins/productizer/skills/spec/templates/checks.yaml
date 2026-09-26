@@ -55,8 +55,33 @@
 # ---------------------------------------------------------------------------
 # THIS IS A TEMPLATE. AN UNEDITED COPY CHECKS AN IMAGINARY REPO.
 #
-#   1. Delete the checks whose tools you do not run. A declared tool that is
-#      not installed fails the run; it is never skipped.
+#   1. DO NOT DELETE A CHECK YOU DO NOT RUN. Switch it off in writing instead.
+#      A declared tool that is not installed fails the run — it is never
+#      skipped — so a check you cannot run has to be taken out of force. There
+#      are two ways to do that and deleting it is neither of them, because
+#      `upgrade-drift.sh` reads the plugin's shipped check ids against the ids
+#      THIS FILE NAMES: a deleted id is reported as a check the plugin ships
+#      that you have never declared, on every run, forever, and nothing you can
+#      write in this file will settle it. An id that is present and switched off
+#      is recorded by id in `checks-result.json` as `disabled` or
+#      `not_triggered`, neither of which is counted as passing, and the drift
+#      report holds. (Only `disabled` also prints a terminal line; a
+#      `not_triggered` check shows up in the JSON and in the `N declared, M
+#      triggered` header, so read those and not the terminal tail.)
+#
+#      `enabled: false` — for a check that CANNOT run here: no tool, no
+#      subject, nothing for it to read. Put the reason in `why`, starting with
+#      the word DISABLED so it reads as a decision in the diff rather than an
+#      accident, and leave a `limitations` entry saying it covers nothing.
+#
+#      `when.paths` (or `when.tags`) that matches nothing today — for a check
+#      whose premise may return. The runner re-reads the premise from the change
+#      on every run and reports `not_triggered`; the check starts running by
+#      itself the day the premise stops holding, and nobody has to remember it.
+#      Prefer this whenever the reason is "not yet" rather than "not here".
+#
+#      Delete a check only when you are also deleting the requirement it
+#      asserts — and then say so in the same diff.
 #   2. Run it once and read the coverage line of every check. A scanner
 #      reporting one file out of thirty-three has found you a bug in your
 #      checks stage, not a green build.
@@ -217,15 +242,14 @@ checks:
       examined_when_exit_in: [0, 1]
       must_cover: all_triggering
       min_covered: 1
+    limitations:
+      - Runs at --severity=warning, which does NOT include SC2086, unquoted expansions. That was found when a deliberate SC2086 failed to turn the gate red.
 
   # --- 3 · dependency audit ----------------------------------------------
   #
   # Triggered by the manifest and lockfile, and by a requirement tagged
   # `dependency` even when the diff touches no manifest — a requirement that
   # says "adopt library X" attracts the audit before the code exists.
-    limitations:
-      - Runs at --severity=warning, which does NOT include SC2086, unquoted expansions. That was found when a deliberate SC2086 failed to turn the gate red.
-
   - id: dependency-audit
     why: a transitive advisory lands without anyone editing a file; the lockfile is the change
     when:
@@ -357,6 +381,8 @@ checks:
     # `enabled: false` takes a check out of force without deleting it: it is
     # reported as `disabled` rather than omitted, and every requirement it
     # claimed goes back to Missing. Switching every check off is a load error.
+    # This is rule 1 at the top of this file - if you do not run this tool, set
+    # this to false and say why in `why`; do not delete the check.
     enabled: true
     why: PII in a log line survives every retention policy the product promises
     when:
@@ -449,6 +475,9 @@ checks:
       examined_when_exit_in: [0, 1]
       must_cover: all_triggering
       min_covered: 1
+    limitations:
+      - An allowlist entry exempts the whole LINE its snippet matches, not only the redirection inside it, so a genuine error on that line stays hidden for as long as the entry stands.
+      - How many exemptions you end up with, and what each one rests on, is yours to record here after the first run. A count carried in from the repo that wrote this template would be a fact about that repo and read as a fact about yours.
 
   # --- 8 · one living spec per product ------------------------------------
   #
@@ -473,9 +502,6 @@ checks:
   # contents API via `gh`. `--remote` is off by default because a check that
   # reaches the network is not deterministic, and a rate limit would read as an
   # outage rather than a verdict.
-    limitations:
-      - Fourteen suppressions remain, exempted by allowlist entries with written reasons. Three rest on a measured SIGPIPE from a deliberate cap, and they exempt the whole line - a genuine error on it would still be hidden.
-
   - id: spec-home
     why: two repos both holding a living spec means two allocators both handing out R42, and nothing else in the lifecycle notices
     when:
@@ -497,6 +523,8 @@ checks:
       from: stdout_count
       pattern: 'repos reachable:\s*([0-9]+)'
       min_covered: 1
+    limitations:
+      - A repo it cannot open is refused, never counted as having no spec. But a product whose repos are not all declared is invisible to it entirely.
 
   # --- 9 · a control framework, wired to the same tags --------------------
   #
@@ -515,9 +543,6 @@ checks:
   # covered. That is the evidence layer UNDER a management system. It is not
   # the management system. `references/checks.md` sets out the boundary in
   # full — read it before anyone writes "ISO 27001 compliant" on a slide.
-    limitations:
-      - A repo it cannot open is refused, never counted as having no spec. But a product whose repos are not all declared is invisible to it entirely.
-
   - id: secure-coding-controls
     why: a change touching a tagged control gets the control's own scan, on the change that touches it, with a dated record of what was covered
     when:
@@ -561,9 +586,9 @@ checks:
   # stopped with nobody holding a question. This check observes the ask.
   #
   # It asserts the obligation, not the implementation. The cautionary case in
-  # this repo is R18, whose row says `argv[0] validation` while the principle it
-  # enforces requires the whole argv - a row that describes what the code does
-  # can never fail.
+  # the repo that wrote this template is a requirement whose acceptance row says
+  # `argv[0] validation` while the principle it enforces requires the whole argv
+  # - a row that describes what the code does can never fail.
   #
   # `always`, because the failure does not arrive in a diff. A contradiction is
   # raised in conversation and abandoned; no file changes, which is precisely
@@ -591,6 +616,9 @@ checks:
       from: stdout_paths
       pattern: '^(\S+)$'
       min_covered: 1
+    limitations:
+      - It observes that a ruling was drafted, not that the question was good. A ruling can pass every field check and still ask something nobody can answer.
+      - A contradiction stopped in conversation with nothing written leaves it nothing to find.
 
   # --- agent templates carry frontmatter nothing reads ------------------------
   #
@@ -602,10 +630,6 @@ checks:
   #
   # `always`, because the failure does not arrive in a diff: a key stops being
   # honoured when the host changes, not when the template does.
-    limitations:
-      - It observes that a ruling was drafted, not that the question was good. A ruling can pass every field check and still ask something nobody can answer.
-      - A contradiction stopped in conversation with nothing written leaves it nothing to find.
-
   - id: template-frontmatter
     why: a mistyped frontmatter key does not fail, it falls back to a default, so a template that asked for a restricted tool set silently gets the unrestricted one
     when:
@@ -626,6 +650,8 @@ checks:
       from: stdout_count
       pattern: '([0-9]+) file\(s\) checked'
       min_covered: 1
+    limitations:
+      - It checks the frontmatter of the agent templates only. A key the host silently ignores still reads as valid here.
 
   # --- the guide the release ships with ---------------------------------------
   #
@@ -645,9 +671,6 @@ checks:
   # AN UNREADABLE SPEC IS 3, NOT 0. A guide generated from a spec nobody could
   # open would describe a product nobody agreed to, so it refuses to render a
   # count it could not measure - and refused is not a pass.
-    limitations:
-      - It checks the frontmatter of the agent templates only. A key the host silently ignores still reads as valid here.
-
   - id: guide-current
     why: two releases shipped from a hand-edited guide, and a guide describing behaviour the spec never agreed to reads exactly like one that does
     when:
@@ -671,6 +694,8 @@ checks:
       from: stdout_count
       pattern: '([0-9]+) active requirement\(s\) rendered'
       min_covered: 1
+    limitations:
+      - It compares the generated section against the spec. The hand-written prose around it can say anything, and nothing checks that.
 
   # --- a view that writes back, or a page that can republish itself ---------
   #
@@ -688,9 +713,6 @@ checks:
   # calls.
   #
   # A PAGE THAT COULD NOT BE BUILT IS EXIT 2, never "0 capabilities declared".
-    limitations:
-      - It compares the generated section against the spec. The hand-written prose around it can say anything, and nothing checks that.
-
   - id: view-read-only
     why: a view that writes into the repo, or a page that can save new versions of itself, makes the provenance line under every panel false - the page becomes a second source of truth that can disagree with the repo
     when:
@@ -715,6 +737,10 @@ checks:
       pattern: '^(\S+)$'
       must_cover: none
       min_covered: 1
+    limitations:
+      - It reads what the page ASKS for. A capability granted in the publish call and never used by the page leaves no trace in the file.
+      - The forbidden-name list comes from the reference doc, not the live runtime roster. An unrecognised name fails safe, but the classification is unverified.
+      - The two hashes bracket the generator's run, so anything else writing to the tree in that window is attributed to it.
 
   # --- an absent tool must be reported missing, not skipped -----------------
   #
@@ -731,11 +757,6 @@ checks:
   # The fixture's own premise is guarded: if its declared tool turns out to be
   # installed, the case was never tested and that is exit 2 - unmeasured, not a
   # pass.
-    limitations:
-      - It reads what the page ASKS for. A capability granted in the publish call and never used by the page leaves no trace in the file.
-      - The forbidden-name list comes from the reference doc, not the live runtime roster. An unrecognised name fails safe, but the classification is unverified.
-      - The two hashes bracket the generator's run, so anything else writing to the tree in that window is attributed to it.
-
   - id: missing-tool-reported
     why: a check whose tool is absent has to refuse the stage, and a refactor turning that back into a skip would leave every run green with no scanner behind it
     when:
@@ -757,6 +778,8 @@ checks:
       pattern: '^(\S+)$'
       must_cover: none
       min_covered: 3
+    limitations:
+      - It exercises batch mode and the PATH-lookup branch. The executable-path branch and per_file mode are untested.
 
   # --- a requirement nobody said how to prove ---------------------------------
   #
@@ -777,12 +800,12 @@ checks:
   # when a requirement is added elsewhere in the file, not when the acceptance
   # table is edited. The table is the thing that did NOT change.
   #
-  # MEASURED 2026-08-30: 25 active, 25 rows, 0 missing - so it lands blocking
-  # rather than advisory. The count prints on every run, so if it ever has to
-  # drop to `advise`, the day to promote it back is not a judgement call.
-    limitations:
-      - It exercises batch mode and the PATH-lookup branch. The executable-path branch and per_file mode are untested.
-
+  # IT SHIPS BLOCKING, AND THAT IS A NUMBER YOU HAVE TO TAKE YOURSELF. In the
+  # repo that wrote this template the first run read 25 active requirements, 25
+  # rows, 0 missing, which is what earned `block` there - it says nothing about
+  # your spec. Run it once: if rows are missing, set `advise`, and because the
+  # count prints on every run the day to promote it back to `block` is a number
+  # and not a judgement call.
   - id: acceptance-rows
     why: a requirement with no acceptance row is one nobody can tell "verified" from "never looked at" for, and every plan and PR citing its id inherits that
     when:
@@ -803,6 +826,8 @@ checks:
       from: stdout_count
       pattern: 'requirements read:\s*([0-9]+)'
       min_covered: 1
+    limitations:
+      - It asserts a row EXISTS, never that the row is true. A row saying nothing asserts this satisfies it exactly as well as a real verifier.
 
   # --- an import that reads as agreed -----------------------------------------
   #
@@ -816,10 +841,10 @@ checks:
   # EVERY RUN. Stage 0c writes no artifact and sets no config key. The obvious
   # signal - the word "import" in a commit message - was built and MEASURED
   # FIRST, and attributed six requirements to an import in a fixture where four
-  # were agreed one at a time. On THIS repo that is not hypothetical: it is a
-  # lifecycle tool WITH an import stage, so a requirement about importing carries
-  # the word while having nothing to do with a Stage 0c run. A check that fails
-  # on a correct spec gets switched off.
+  # were agreed one at a time. Any repo whose own subject matter includes
+  # importing hits this immediately: a requirement ABOUT imports carries the word
+  # while having nothing to do with a Stage 0c run. A check that fails on a
+  # correct spec gets switched off.
   #
   # So detection is structural: a spec holding an inferred requirement is a spec
   # an import touched. From each MARKED requirement it reaches the batch - the
@@ -836,9 +861,6 @@ checks:
   #
   # GIT IS PART OF THE INPUT. A history that cannot be walked is exit 2 with that
   # cohort printed as an em dash - never as 0 commits.
-    limitations:
-      - It asserts a row EXISTS, never that the row is true. A row saying nothing asserts this satisfies it exactly as well as a real verifier.
-
   - id: import-marking
     why: a drafted requirement that lost its inferred marker reads as agreed, so the contradiction halt starts defending an imported accident with the authority of a decision nobody made
     when:
@@ -860,6 +882,8 @@ checks:
       from: stdout_count
       pattern: 'requirements read:\s*([0-9]+)'
       min_covered: 1
+    limitations:
+      - An import that marked nothing at all and named no stage is invisible: both structural cohorts start from a marker. The run says no import was FOUND, which is not the same fact as an import having been marked correctly. Closing this needs an artifact Stage 0c does not write.
 
   # --- a classification nobody can check ------------------------------------
   #
@@ -891,9 +915,6 @@ checks:
   #
   # `always`, because the failure does not arrive in a diff: an intent is
   # classified against half a spec and nothing in the repo changes.
-    limitations:
-      - An import that marked nothing at all and named no stage is invisible: both structural cohorts start from a marker. The run says no import was FOUND, which is not the same fact as an import having been marked correctly. Closing this needs an artifact Stage 0c does not write.
-
   - id: classification-provenance
     why: a graded eval scored 16/16 on classification OUTCOMES, which is equally consistent with a classifier that saw half the spec and got lucky; only the ids that were in scope tell those apart
     when:
@@ -916,6 +937,9 @@ checks:
       from: stdout_paths
       pattern: '^(\S+)$'
       min_covered: 1
+    limitations:
+      - A classification that left no record at all is invisible. Zero recorded is not detectable as an intake that classified in conversation and wrote nothing.
+      - It proves the scope list matches the spec it names. That the named commit is the RIGHT one is established by the writer, not by this.
 
   # --- a replaced requirement rewritten years later --------------------------
   #
@@ -927,8 +951,9 @@ checks:
   # This is the first check here to take GIT HISTORY as an input, and it reads
   # what a commit USED TO SAY rather than what a commit changed. A diff-only
   # gate sees an edit at the moment it is proposed and never again - which is
-  # how both of this repo's real leaks survived: one in a blob, one in a commit
-  # message, neither visible to any diff after the commit that made it.
+  # how both real leaks in the repo that wrote this template survived: one in a
+  # blob, one in a commit message, neither visible to any diff after the commit
+  # that made it.
   #
   # The baseline is chosen PER REQUIREMENT: the newest commit at which that
   # requirement was still active. One ref cannot be that commit for every id,
@@ -939,10 +964,6 @@ checks:
   #
   # min_covered: 2 is deliberate. One covered path means the spec was read and
   # NO history was - precisely the run that answers nothing while exiting 0.
-    limitations:
-      - A classification that left no record at all is invisible. Zero recorded is not detectable as an intake that classified in conversation and wrote nothing.
-      - It proves the scope list matches the spec it names. That the named commit is the RIGHT one is established by the writer, not by this.
-
   - id: superseded-text
     why: a superseded requirement's sentence can be rewritten long after the fact and nothing in the file shows it; only the commit before the supersede holds what was agreed
     when:
@@ -964,6 +985,9 @@ checks:
       from: stdout_paths
       pattern: '^(\S+)$'
       min_covered: 2
+    limitations:
+      - A requirement that ENTERS the repo already superseded and already rewritten cannot be caught: its first commit is the only baseline there is.
+      - A shallow clone is refused rather than passed, which means CI must fetch full history for this to measure anything.
 
   # --- a spec change merged under a live contradiction ------------------------
   #
@@ -983,13 +1007,9 @@ checks:
   # ruling raised in a different PR governs this one.
   #
   # UNREADABLE IS NOT ABSENT. No rulings directory is clean and says so: R12
-  # governs a state this repo has never entered. A rulings directory that
+  # governs a state a repo may never enter. A rulings directory that
   # exists and cannot be listed is exit 2 - that is where an unruled
   # contradiction hides.
-    limitations:
-      - A requirement that ENTERS the repo already superseded and already rewritten cannot be caught: its first commit is the only baseline there is.
-      - A shallow clone is refused rather than passed, which means CI must fetch full history for this to measure anything.
-
   - id: pending-ruling-scope
     why: a pending ruling that blocks nothing is a stop nobody obeys, and one that blocks everything is a stop everybody routes around
     when:

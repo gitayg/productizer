@@ -184,6 +184,14 @@ MODE="measure"
 
 on_exit() {
   status=$?
+  # The work directory, on EVERY exit and not only on a signal. `cleanup` is
+  # defined beside the mktemp that creates it, far below this handler, so the
+  # removal is written out here: a run that dies before that line has no $WORK
+  # to remove, and calling a function that does not exist yet would print a
+  # `command not found` over the top of whatever actually went wrong.
+  # MEASURED 2026-09-26: 111 work directories had accumulated in $TMPDIR,
+  # because the trap that removed it listed HUP INT TERM and not EXIT.
+  [ -z "${WORK:-}" ] || [ -n "${KEEP_WORK:-}" ] || rm -rf "$WORK"
   # --selftest does not run the stage at all, so the rewriting below does not
   # apply to it: its 1 means "a case did not produce the code it declares", and
   # relabelling that as "crashed before reaching a verdict" would report the
@@ -292,6 +300,11 @@ done
 #                 the same scope in a real git repository built here,
 #                 a path committed then deleted, run under --base: the
 #                 drop is labelled `deleted` by git's D list           -> 0
+#   renamed-away  a deletion git reports as a RENAME, in a second
+#                 repository built here: without `--no-renames` the old
+#                 path is in neither list and vanishes from the
+#                 accounting entirely, which is the one absence this
+#                 file treats as a defect                              -> 0
 #   all-scope-gone
 #                 every path in the one check's scope is gone: no
 #                 scan at all, which is not a pass                     -> 3
@@ -302,8 +315,8 @@ done
 # IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
 # writes over `policy.output`, so a self-test that did it would be slower than
 # the thing it tests and would rewrite a committed file every time anyone
-# probed it. The corpus is a handful of files, five configs and one two-commit
-# git repository, all built under mktemp, and the only tool any config names is
+# probed it. The corpus is a handful of files, five configs and two two-commit
+# git repositories, all built under mktemp, and the only tool any config names is
 # grep (or one that is deliberately not installed).
 #
 # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If a config whose one check passes
@@ -620,6 +633,54 @@ SELFTEST_CFG_GONE_NO_TOOL
     self_unmeasured "the fixture repository does not hold gone.txt at the base and lack it at HEAD, so nothing was deleted in the range. Unmeasured, not a pass"
   fi
 
+  # A SECOND GIT REPOSITORY, holding the deletion the one above was built to
+  # AVOID. Commit 1 holds `renamed-away.txt`; commit 2 removes it and adds
+  # `renamed-to.txt` with byte-identical content, which is what a rename, a file
+  # split in two, or a plain delete-and-add of boilerplate all look like from
+  # here. git's rename detection collapses the pair into one `R100` line, and a
+  # rename has no D side - so `--name-only` used to list only the new path,
+  # `--diff-filter=D` listed nothing, and the old path was neither examined nor
+  # dropped nor labelled. The runner passes `--no-renames` now, and the
+  # assertions under the case below are what says so.
+  fixture_rename_git() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      git -C "$SB/repo-rename" -c user.name=selftest -c user.email=selftest@example.invalid \
+      -c commit.gpgsign=false -c init.defaultBranch=main "$@" >> "$SB/repo-rename-build.log" 2>&1
+  }
+  mkdir -p "$SB/repo-rename/fixture/scope"
+  { fixture_rename_git init -q &&
+    printf 'RUN-CHECKS-SELFTEST-NEEDLE\nthis file is committed once and then moved in the next commit\nand its content is copied over byte for byte, which is what git calls a rename\n' \
+      > "$SB/repo-rename/fixture/scope/renamed-away.txt" &&
+    fixture_rename_git add fixture/scope/renamed-away.txt &&
+    fixture_rename_git commit -q -m one &&
+    cp "$SB/repo-rename/fixture/scope/renamed-away.txt" "$SB/repo-rename/fixture/scope/renamed-to.txt" &&
+    fixture_rename_git add fixture/scope/renamed-to.txt &&
+    fixture_rename_git rm -q fixture/scope/renamed-away.txt &&
+    fixture_rename_git commit -q -m two; } ||
+    self_unmeasured "the rename fixture git repository could not be built, so the rename case was never driven. Unmeasured, not a pass"
+  GIT_RENAME_BASE_REF="HEAD~1"
+  # PREMISE ONE, read off the TREES: the old path is in the base commit, absent
+  # from HEAD and absent from disk, and the new path is in HEAD. Any one of those
+  # false and the case stops being about a path that went away.
+  if GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-rename" cat-file -e "$GIT_RENAME_BASE_REF:fixture/scope/renamed-away.txt" >> "$SB/repo-rename-build.log" 2>&1 &&
+     ! GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-rename" cat-file -e "HEAD:fixture/scope/renamed-away.txt" >> "$SB/repo-rename-build.log" 2>&1 &&
+     [ ! -e "$SB/repo-rename/fixture/scope/renamed-away.txt" ] &&
+     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-rename" cat-file -e "HEAD:fixture/scope/renamed-to.txt" >> "$SB/repo-rename-build.log" 2>&1; then :; else
+    self_unmeasured "the rename fixture does not hold renamed-away.txt at the base, lack it at HEAD and on disk, and hold renamed-to.txt at HEAD, so nothing was renamed away in the range. Unmeasured, not a pass"
+  fi
+  # PREMISE TWO, and it is the one that makes this case different from
+  # `deleted-under-base`: GIT MUST ACTUALLY CALL THIS A RENAME. Asked with
+  # detection explicitly ON and the machine's own `diff.renames` switched out of
+  # the way, so the corpus is a rename as a fact about the corpus and not about
+  # whoever is running the self-test. If this ever stops reporting an R line the
+  # two files no longer look alike to git, and the case has quietly become
+  # `deleted-under-base` a second time.
+  if GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-rename" \
+       diff --find-renames --name-status "$GIT_RENAME_BASE_REF" HEAD 2>> "$SB/repo-rename-build.log" \
+       | grep -q '^R'; then :; else
+    self_unmeasured "git does not report the rename fixture's two commits as a rename even with detection explicitly on, so there is no rename collapse for the runner to be asked about. Unmeasured, not a pass"
+  fi
+
   SELF_CASES=0
   SELF_FAILED=0
   # Assertions read off a RESULT FILE rather than off an exit code. Counted
@@ -817,12 +878,39 @@ SELFTEST_ASSERT_CHANGE
     "the dropped path is labelled DELETED, because git named it removed in the range"
   self_assert "$SB/git-deleted.json" files_dropped_absent '[]' \
     "and it is not also called absent"
-  self_assert "$SB/git-deleted.json" dropped_source "\"git diff --diff-filter=D against $GIT_BASE_REF\"" \
-    "the label says git is where it came from, and against which ref"
+  self_assert "$SB/git-deleted.json" dropped_source "\"git diff --no-renames --diff-filter=D against $GIT_BASE_REF\"" \
+    "the label says git is where it came from, against which ref, and under which rename assumption - the flag is part of the query and a provenance string that omitted it would name a query nobody ran"
   self_assert_change "$SB/git-deleted.json" base "\"$GIT_BASE_SHA\"" \
     "change.base is the full commit id the diff was taken from, read back from the fixture repository by rev-parse"
   self_assert_change "$SB/git-deleted.json" base_ref "\"$GIT_BASE_REF\"" \
     "change.base_ref is the ref exactly as typed"
+
+  # A DELETION GIT REPORTS AS A RENAME, DRIVEN. The line below the case list used
+  # to say this was NOT ASSERTED, and the defect it named was the worst shape an
+  # absence can take here: the old path reached no tool, was not dropped, was not
+  # labelled, and never appeared in `change.files` - so nothing in the result or
+  # on the dashboard said it had been left out. The same scope and the same
+  # per_file check as `deleted-under-base`, over a repository whose two commits
+  # git calls `R100`. Without `--no-renames` on the runner's diff the scope is 1,
+  # the drop list is empty and this case passes for the wrong reason - which is
+  # why `files_in_scope` and `files_dropped_deleted` are both asserted and not
+  # only the exit code.
+  self_drive renamed-away 0 \
+    "a path git reports as RENAMED away rather than deleted, run under --base: still named in the scope, still dropped before argv, and still labelled deleted - not silently missing from the accounting" \
+    --config "$SB/checks-scope.yaml" --root "$SB/repo-rename" \
+    --base "$GIT_RENAME_BASE_REF" --out "$SB/git-renamed.json"
+  self_assert "$SB/git-renamed.json" status '"pass"' \
+    "the check RAN over the path that arrived, rather than being refused over the one that went away"
+  self_assert "$SB/git-renamed.json" files_in_scope 2 \
+    "BOTH paths are in the declared scope. This is the assertion the defect was: the rename collapse made it 1, and the old path was absent from the accounting with nothing saying so"
+  self_assert "$SB/git-renamed.json" files_handed_over 1 \
+    "exactly one path reached a command line - the one that is there"
+  self_assert "$SB/git-renamed.json" files_dropped_deleted '["fixture/scope/renamed-away.txt"]' \
+    "the path that went away is NAMED and labelled deleted, because git's D list under --no-renames names it removed in the range"
+  self_assert "$SB/git-renamed.json" files_dropped_absent '[]' \
+    "and it is not called absent, which in this runner's vocabulary is what a typo looks like"
+  self_assert "$SB/git-renamed.json" dropped_source "\"git diff --no-renames --diff-filter=D against $GIT_RENAME_BASE_REF\"" \
+    "the label names the query that produced it, rename flag included"
 
   # EVERY path in scope gone. Without the guard the drop leaves an empty list,
   # per_file iterates zero times, and the executor's `worst` stays at its
@@ -854,10 +942,11 @@ SELFTEST_ASSERT_CHANGE
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '  exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
-  printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The last four cases are the exception - eighteen assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope` and `deleted-under-base` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'
+  printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The last five cases are the exception - twenty-four assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope`, `deleted-under-base` and `renamed-away` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` case alone proves only that an absent path was ACCEPTED, because the path it names falls outside the one check scope and no tool was asked to open it. `deleted-in-scope` puts an absent path INSIDE a per_file check scope, where the executor would have substituted it into argv, and five assertions read off the result file: the check ran, the scope is still 2, one path was handed over, the dropped one is named, and it is labelled absent and not deleted.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` LABEL, and the git query that produces it. `deleted-under-base` builds a two-commit git repository, deletes an in-scope path in the second commit and runs under --base HEAD~1; assertions read off the result file that git named both paths, one was handed over, the drop is labelled deleted and not absent, dropped_source names git and the ref, and change.base / change.base_ref record the commit and the ref. The --changed case asserts both are null.\n'
-  printf '  NOT ASSERTED: a --base whose ref is NOT an ancestor of HEAD, where change.base (the merge base) and `git rev-parse <ref>` differ; and a deletion git reports as a RENAME, where --name-only and --diff-filter=D both omit the old path, so it is neither handed over nor dropped nor labelled.\n'
+  printf '  NOW ASSERTED, and this line used to say it was not: a deletion git reports as a RENAME. Both diffs this runner takes pass --no-renames, so the old path can no longer vanish from the accounting - the shape where --name-only lists only the new path, --diff-filter=D lists nothing, and the old one is neither handed over nor dropped nor labelled nor present in change.files. `renamed-away` builds a second git repository whose two commits git calls R100 - measured, with detection explicitly on, before the case runs - and six assertions read off the result file that the scope is still 2, one path was handed over, the drop is labelled deleted and not absent, and dropped_source names the query including the flag.\n'
+  printf '  NOT ASSERTED: a --base whose ref is NOT an ancestor of HEAD, where change.base (the merge base) and `git rev-parse <ref>` differ. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
     exit 1
@@ -987,7 +1076,53 @@ elif [ -n "$BASE" ]; then
   BASE_SHA="$(cd "$ROOT" && git rev-parse --verify "${merge_base}^{commit}")" ||
     die_usage "the merge base against $BASE did not resolve to a commit. A wrong base makes every result below confidently wrong at once."
   BASE_REF="$BASE"
-  (cd "$ROOT" && git diff --name-only "$merge_base" HEAD) > "$WORK/changed.txt"
+  # `--no-renames` ON BOTH DIFFS, AND IT IS NOT A PREFERENCE.
+  #
+  # With git's default rename detection a deletion can DISAPPEAR FROM THE
+  # ACCOUNTING ALTOGETHER. Reproduced 2026-09-26 on git 2.54.0 in a scratch
+  # repository: commit 1 holds `gone.txt`, commit 2 removes it and adds a file
+  # with the same content, and `git diff --name-status` reports one line,
+  # `R100 gone.txt -> newthing.txt`. A rename has no D side, so
+  # `--diff-filter=D` lists NOTHING, and `--name-only` lists only the new path.
+  # The old path was therefore not handed to a tool, not dropped, and not
+  # labelled - it was never in `change.files` at all, so no reader of the result
+  # or of the dashboard could see that it had been left out. Every other absence
+  # in this runner is COUNTED and printed under its own name; that one was
+  # silent, which is the only kind this file treats as a defect.
+  #
+  # IT IS NOT HYPOTHETICAL HERE. Against this repository's own root commit the
+  # default diff names 689 paths and 14 deletions; with `--no-renames` it names
+  # 701 and 26. The twelve are the old paths of the plugin's rename from its
+  # first name to its current one, one of them a `.sh` file that `shell-lint`
+  # and `stderr-suppression` both have in scope.
+  #
+  # WHY `--no-renames` RATHER THAN READING `--name-status` AND SPLITTING THE R
+  # LINES. Both recover the old path. This one also makes the change set
+  # INDEPENDENT OF THE READER'S GIT CONFIG: `diff.renames` is a user setting -
+  # false, true or `copies` - so without the flag two people running this runner
+  # over the same range get different scopes, different denominators and
+  # different published `change.files`. A gate whose scope depends on whose
+  # machine it ran on is not a gate. Parsing `--name-status` would have to keep
+  # its own rename-detection assumption in step with that setting instead.
+  #
+  # WHAT THIS CHANGES DOWNSTREAM, stated rather than discovered. The old path of
+  # a rename now enters the scope and is absent from the tree, so it is dropped
+  # before argv and labelled `deleted` by the D list below - exactly the path a
+  # plain deletion already takes, and already driven by the `deleted-under-base`
+  # and `renamed-away` self-test cases.
+  #
+  # THE ONE BEHAVIOUR THAT MOVES, measured 2026-09-26 in a scratch repository
+  # rather than reasoned about: a check whose ENTIRE scope is renamed-away
+  # paths. Rename the only `.sh` file in a tree to `.txt` and diff. Before, a
+  # check scoped `**/*.sh` was reported `not_triggered` - the change was never
+  # examined by it, nothing said so, and the run was saved only by
+  # `policy.empty_run: refuse` catching a run where NOTHING triggered; under
+  # `empty_run: pass` that is a green run over a change no check looked at.
+  # After, the same run reports `nothing_to_examine` and blocks, naming the one
+  # path and labelling it deleted. That is the same answer this runner already
+  # gives when a plain deletion empties a scope, and "nothing was scanned, so
+  # nothing is clean" is the rule it is stated under.
+  (cd "$ROOT" && git diff --no-renames --name-only "$merge_base" HEAD) > "$WORK/changed.txt"
   if [ ! -s "$WORK/changed.txt" ]; then
     die_usage "the diff against $BASE is empty. An empty diff is far more often a base problem than a change that did nothing; resolve the base before believing a green run."
   fi
@@ -998,8 +1133,14 @@ elif [ -n "$BASE" ]; then
   # is what a typo or a path that was never in this repository looks like from
   # here. Both are dropped and both are printed; only a reader can tell the
   # third case from the second, and this is what gives them the chance.
-  (cd "$ROOT" && git diff --name-only --diff-filter=D "$merge_base" HEAD) > "$WORK/deleted.txt"
-  DELETED_SOURCE="git diff --diff-filter=D against $BASE"
+  # `--no-renames` here for the same reason as above, and it is load-bearing in
+  # the other direction too: without it a renamed-away path reaches the change
+  # set by no route at all, and with it on the first diff but not this one the
+  # path would arrive, be dropped, and be labelled `absent` - which in this
+  # runner's own vocabulary is what a TYPO looks like. Both diffs must be taken
+  # under the same rename assumption or the label contradicts the scope.
+  (cd "$ROOT" && git diff --no-renames --name-only --diff-filter=D "$merge_base" HEAD) > "$WORK/deleted.txt"
+  DELETED_SOURCE="git diff --no-renames --diff-filter=D against $BASE"
 else
   die_usage "no change given. Pass --changed <file> or --base <ref>."
 fi
@@ -2123,23 +2264,74 @@ PARSED=1
 
 # --- execute ---------------------------------------------------------------
 
+# CAN THIS MACHINE'S `sleep` TAKE A FRACTION OF A SECOND? Measured once, here,
+# rather than assumed by the poll loop below. POSIX requires `sleep` to accept
+# an integer and nothing more; GNU coreutils and the BSD one on macOS both take
+# fractions, and a handful of minimal userlands do not. Asking costs one fork at
+# startup and decides whether the loop can poll faster than one second - and
+# where it cannot, the loop keeps the whole-second poll it always had, which is
+# slow but correct, and says so instead of silently erroring once per poll.
+#
+# The probe's stderr is KEPT, in the work directory, not discarded: a `sleep`
+# that rejects a fraction says why, and that sentence is the evidence for the
+# fallback this run then uses.
+POLL_SUBSECOND=1
+sleep 0.01 2>> "$WORK/sleep-probe.log" || POLL_SUBSECOND=0
+if [ "$POLL_SUBSECOND" -eq 0 ]; then
+  printf 'run-checks: NOTE: this sleep(1) will not take a fractional interval, so every tool invocation is polled once a second and a fast tool is charged a whole second. See %s.\n' \
+    "$WORK/sleep-probe.log" >&2
+fi
+
 # Runs argv with a wall-clock limit, appending combined output to $2.
 # Returns the child's status, or 124 when the limit was reached.
+#
+# WHY THE POLL IS NOT `sleep 1`. It was, and that put a ONE-SECOND FLOOR under
+# every invocation whatever the tool's own speed, because the loop sleeps before
+# it looks. Measured on this repository, 73 changed `.sh` files: `shell-lint`
+# 74s and `stderr-suppression` 74s, and a per-file `secret-scan` 683s for 675
+# gitleaks runs of about 1ms each. In every one of those the runner, not the
+# tool, was the cost - `head -n1` over the same 73 files measured 74.99s, of
+# which the tools account for well under a second.
+#
+# A LADDER, NOT ONE SHORT SLEEP. Polling at 10ms for the whole of a 600s lint
+# run would be 60000 forks to learn nothing, so the interval GROWS: 10ms
+# for the first 200ms, 100ms to the one-second mark, one second after that. A
+# tool that finishes in milliseconds is charged milliseconds; a tool that runs
+# for minutes is polled once a second exactly as before.
+#
+# THE LIMIT IS STILL COUNTED FROM THE SLEEPS, and deliberately so. `$SECONDS`
+# and `date +%s` both tick on a wall-clock boundary that can arrive immediately
+# after the child is spawned, so a limit compared against either can fire a
+# whole second EARLY - a tool given one second killed after a millisecond. Each
+# poll's own interval is added up instead: `sleep` returns no sooner than asked,
+# so this accumulator can only UNDERSTATE the real elapsed time, and the limit
+# fires late rather than early. That is the direction the old tick counter erred
+# in too, so a tool's budget is not shortened by this change.
 run_limited() {
   limit="$1"; outfile="$2"; shift 2
   "$@" >>"$outfile" 2>&1 &
   pid=$!
-  waited=0
+  limit_ms=$((limit * 1000))
+  waited_ms=0
+  polls=0
+  if [ "$POLL_SUBSECOND" -eq 1 ]; then poll=0.01; poll_ms=10; else poll=1; poll_ms=1000; fi
   while kill -0 "$pid" 2>/dev/null; do
-    if [ "$waited" -ge "$limit" ]; then
+    if [ "$waited_ms" -ge "$limit_ms" ]; then
       kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
       sleep 2
       kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       return 124
     fi
-    sleep 1
-    waited=$((waited + 1))
+    sleep "$poll"
+    waited_ms=$((waited_ms + poll_ms))
+    polls=$((polls + 1))
+    if [ "$POLL_SUBSECOND" -eq 1 ]; then
+      case "$polls" in
+        20) poll=0.1; poll_ms=100 ;;
+        28) poll=1;   poll_ms=1000 ;;
+      esac
+    fi
   done
   rc=0
   wait "$pid" || rc=$?

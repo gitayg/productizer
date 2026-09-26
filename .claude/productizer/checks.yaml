@@ -2330,3 +2330,275 @@ checks:
       min_covered: 1
     limitations:
       - Disabled. It covers nothing.
+
+# --- risk tiers: a path no rule covers -------------------------------------
+#
+# ADVISORY ON PURPOSE, and by the rule these scripts propose: a check earns
+# `block` by having its fires RULED over merged history, and this one has no
+# fire rate taken at all. references/risk-and-calibration.md carries the rule
+# and the figures. Grey is not a tier - a path no rule covers is a decision
+# nobody made, and rendering it as the bottom tier is R26's fabricated zero in
+# words rather than in numbers.
+
+  - id: risk-tier-classified
+    why: a change touching a path no risk rule covers is unmeasured, not safe, and nothing else in this repository notices a path arriving from outside the policy
+    when:
+      always: true
+    severity: advise
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/classify-change-risk.sh
+      - git
+    version_command: [./plugins/productizer/skills/spec/scripts/classify-change-risk.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/classify-change-risk.sh, "{files}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2, 3]
+    coverage:
+      spec_units:
+        - id: R42
+          verdict: Partial
+          reason: >-
+            Reports the tier of every path and the rule that decided it. It reads the PATH and never
+            the file's CONTENT, so a typo fix and an inverted requirement in the same red file are
+            one measurement here, and the tier being RIGHT is not asserted by anything.
+          evidence: >-
+            18 self-test cases over exit codes 0 1 2 3, five of which assert the sentence and not
+            only the code. The policy was calibrated against all 121 commits and one rule moved
+            because of the number: plugin.json is touched by 106 of 121 commits, which put 111 of
+            121 commits in the top tier - a tier reached by 92% of commits is a second word for
+            "a commit". After the move, 55 of 121.
+        - id: R43
+          verdict: Covered
+          evidence: >-
+            A path matching no rule exits 1 and is named. There is deliberately no catch-all rule:
+            a catch-all makes every path added tomorrow low-risk on the day nobody has looked at it.
+            Falsified by collapsing grey into the bottom tier - three cases went red and one
+            documented exit code stopped being reached, which the declaration line reported.
+        - id: R44
+          verdict: Covered
+          evidence: >-
+            The other half of the same case, asserted separately: the word `unclassified` is printed
+            and no tier word is. Measured over all 121 commits - 740 distinct paths, grey residue 0 -
+            which is a property of a policy written after reading that history and says nothing
+            about a path arriving tomorrow.
+        - id: R45
+          verdict: Covered
+          evidence: >-
+            Prints `complexity: unmeasured` on every run, and is covered by printing the same word
+            every time: no path predicts how much planning a change needs, so there is nothing to
+            measure and R25 says what to print instead. SIZE is measured from the diff and named as
+            size, `unmeasured` with no `--base`.
+        - id: R46
+          verdict: Covered
+          evidence: >-
+            The one break the exit codes could not catch. Deriving complexity from the tier left all
+            18 codes correct and was caught only by the case that asserts the sentence
+            (`wording:mixed`) - the whole argument for asserting sentences and not only codes.
+      from: stdout_paths
+      pattern: '^(\S+)$'
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - ADVISORY by its own rule - no fire of this check has ever been ruled, and its rate over merged history has not been taken. The only check here whose fires HAVE been ruled is stderr-suppression, at 2 fires over 17 verdicts, both genuine.
+      - The tier list's ORDER is the ranking, and that is a property of the policy file. A policy listing its tiers low-to-high would produce confident backwards answers and nothing here would notice.
+      - '`--calibrate` and `--base` have no self-test case: both need a real git history, and a self-test that built one would be measuring the fixture it had just written.'
+      - checks-result.json is the bottom tier because 43 of 121 commits regenerate it. A hand-forged result file therefore reads as routine - a path cannot tell regenerated from forged.
+      - plugin.json is the middle tier because the version is bumped before every commit. A changed description or declared-skills list reads the same as a version bump.
+
+# --- the governance config did not protect itself --------------------------
+#
+# Measured on this repository at v4.60.0, five ways, each committed on its own
+# clone and each run through the whole suite: deleting a check from checks.yaml,
+# flipping its `severity: block` to `advise`, adding `enabled: false`, replacing
+# `always: true` with a glob matching nothing, and removing one tool's
+# `--selftest` line from the workflow. ALL FIVE EXITED 0 PASS. Nothing was
+# reading the file that decides which gates exist.
+#
+# Declared as TWO checks on purpose. The sweep ADVISES, because most weakenings
+# are deliberate and a blocking sweep would be switched off inside a week. The
+# self-footing half BLOCKS, because a diff that switches off the check watching
+# for switched-off checks is the one move that cannot be left to advice.
+
+  - id: governance-weakening
+    why: loosening a declared check is an ordinary diff, and five separate weakenings of secret-scan each passed the whole suite green at v4.60.0
+    when:
+      always: true
+    severity: advise
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh
+      - python3
+      - git
+    version_command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      spec_units:
+        - id: R47
+          verdict: Partial
+          reason: >-
+            Reports WHAT MOVED and what it was, and leaves the judgement to a person: whether a
+            weakening was WRONG is not asserted and cannot be. Comments, `why:` text and
+            `limitations:` entries are outside the governance surface deliberately - a rule that
+            went red on reflowed prose would be switched off inside a week.
+          evidence: >-
+            65 self-test cases over exit codes 0 1 2. Each of the five weakenings measured above is
+            now reported by name and by what it was, for example `WEAKENED:
+            checks[secret-scan].severity (effective) was 'block' is now 'advise'`. Over all 36
+            commits that ever touched either governance file: 32 exit 0, 2 exit 1 (undecided moves,
+            zero claimed weakenings), 2 exit 2 (a checks.yaml genuinely unparseable at that commit).
+      from: stdout_paths
+      pattern: '^(\S+)$'
+      must_cover: none
+      min_covered: 1
+    limitations:
+      - It reports movement between a base and the work tree. A check that was never strict, and a whole governance surface weak from the day it was written, are invisible to it.
+      - Four of its own falsifications came back GREEN on the first attempt, and each was reported as a finding about the test rather than quietly re-run.
+
+  - id: governance-self-footing
+    why: a diff that deletes or switches off the check watching for switched-off checks is the one move that cannot be left to advice
+    when:
+      always: true
+    severity: block
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh
+      - python3
+      - git
+    version_command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh, --self-only, --self-id, governance-weakening]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      spec_units:
+        - id: R47
+          verdict: Partial
+          reason: >-
+            The narrow half: it asserts only this pair of declarations' own footing, and says nothing
+            about any other check. A run under this mode prints `mode: self-footing only` so it can
+            never be mistaken for the sweep.
+          evidence: >-
+            Driven by its own cases both ways: a check switched off elsewhere exits 0 under
+            `--self-only` (a real weakening of the surface, and not of this check's footing), while
+            deleting this check's own declaration exits 1 naming `SELF WEAKENED: self.declaration`.
+            Asking it to assert a footing declared at neither end is exit 2 - nothing to assert,
+            which is not a pass.
+      from: stdout_paths
+      pattern: '^(\S+)$'
+      must_cover: none
+      min_covered: 1
+    limitations:
+      - It asserts that the declaration EXISTS and has not moved down a ladder. A declaration that exists and points at a tool that no longer asserts anything is outside it - that is what R39 and R40 are for.
+
+# --- if the diff shows a path, the record should name it --------------------
+#
+# The failure this exists for happened here: eight agents were writing at once,
+# one had files open in a directory that was not being committed, and those
+# files went into an unrelated commit. The message was true about the work it
+# described and silent about the rest, and silence is what a sweep looks like.
+# ADVISORY: a swept path and a path deliberately left unmentioned look identical
+# to it, and only a person can tell them apart.
+
+  - id: diff-paths-named
+    why: nothing in this repository compared the set of paths a commit touched against the set its own message names, and a sweep is exactly the commit that looks clean
+    when:
+      always: true
+    severity: advise
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/check-diff-paths-named.sh
+      - git
+    version_command: [./plugins/productizer/skills/spec/scripts/check-diff-paths-named.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-diff-paths-named.sh]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      spec_units:
+        - id: R48
+          verdict: Partial
+          reason: >-
+            Asserts that the record NAMES the path - as a full path, a path-shaped directory prefix,
+            or a basename. It does not assert that the record is HONEST about a path it names:
+            naming is not explaining, and a message listing every path mechanically would pass.
+          evidence: >-
+            The commit message is the record, chosen over the spec's change log (keyed on a
+            different event - a classification that changed the spec - so the sweep this exists for
+            is outside its trigger and always will be) and over the checks result file (which
+            records what the suite examined, and a swept path is examined exactly as happily as an
+            intended one).
+      from: stdout_paths
+      pattern: '^(\S+)$'
+      must_cover: none
+      min_covered: 1
+    limitations:
+      - ADVISORY, because a swept path and a path deliberately left unmentioned are identical to it. It says which paths the record does not name and leaves the reading to a person.
+      - It reads the LAST commit by default, so the commit being written is outside it until it exists. `--message-file` points the same rule at an uncommitted message, which is how a pre-commit hook would use it.
+
+# --- what the dashboard DRAWS, in a browser --------------------------------
+#
+# Everything else that touches the view reads the GENERATOR. Between the derived
+# graph and the pixels sit a page of JavaScript and 1200 lines of CSS that
+# nothing committed had ever exercised. Two page-level breaks were caught there
+# once, by a scratch script that was never committed - so the next one would not
+# have been.
+
+  - id: view-rendered
+    why: a delta state drawn as another state, or an unreadable result drawn as a measured zero, is a false figure in front of a reader and no check read the rendered page
+    when:
+      always: true
+    severity: block
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/check-view-rendered.sh
+      - node
+    # The probe is deliberately NOT listed. `requires` asks the runner whether a
+    # tool can be EXECUTED, and the probe is data for node rather than a program
+    # of its own; listing it reported `missing_tool` for a file that is present
+    # and readable. The check itself refuses with exit 2 when its probe is absent,
+    # which names the real reason instead of the runner guessing at it.
+    version_command: [./plugins/productizer/skills/spec/scripts/check-view-rendered.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-view-rendered.sh]
+    timeout_seconds: 600
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      spec_units:
+        - id: R49
+          verdict: Partial
+          reason: >-
+            Asserts that the five delta states and the five overlay states are pairwise distinct on
+            (border-style, border-width, fill) AND glyph AND word, three times over - plain,
+            `forced-colors: active`, and `prefers-contrast: more` - and that an unreadable or absent
+            result draws exactly one `?` box with zero nodes, zero stat tiles and zero delta rows.
+            What a human eye can actually distinguish is not asserted, and three of the five
+            overlay states have no live example in this repository's own data, so they are asserted
+            against fixtures only.
+          evidence: >-
+            76 assertions in 22 seconds against fixtures whose right answers are written down, plus
+            16 self-test cases over exit codes 0 1 2, each break applied to a BUILT page so a
+            template edit that moves the text it matches reads as a mutation that did not apply and
+            fails the run rather than silently driving one case fewer. Writing it found that
+            `prefers-contrast: more` was not in the template at all - 0 occurrences before, 2 after.
+      from: stdout_paths
+      pattern: '^(\S+)$'
+      must_cover: none
+      min_covered: 1
+    limitations:
+      - Colour is deliberately not asserted, because a reader who cannot use hue must still tell the states apart. Contrast RATIOS are not measured either - the ones behind the prefers-contrast block were computed by hand and written into the template beside the tokens.
+      - Of the two contrast modes only `prefers-contrast` has a case that goes red when its block is removed: deleting the `forced-colors` block leaves the states distinct in this browser because the hatch is discarded by the browser, not by the rule.
+      - It refuses loudly (exit 2) when node is absent rather than skipping, so an environment without node reports unmeasured instead of green.

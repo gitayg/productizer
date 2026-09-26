@@ -1,0 +1,327 @@
+# Risk tiers for this repository.
+#
+# WHAT THIS IS FOR. Every change here meets the same gates. A one-line edit to
+# the living spec and a two-hundred-line edit to a fixture corpus are, to Stage
+# 5, the same event. This file says which paths carry which RISK, so that
+# attention can be spent where being wrong is expensive.
+#
+# IT DECIDES NOTHING YET. Nothing reads this file to gate anything. It is read
+# by `classify-change-risk.sh`, which REPORTS a tier and the rule that decided
+# it. That ordering is deliberate and is the same rule B68 asks for: a policy
+# earns the right to gate by being measured first. The measurement is in
+# `references/risk-and-calibration.md`.
+#
+# THE TWO AXES ARE NOT THE SAME AXIS.
+#
+#   RISK        how bad it is if this change is wrong. A property of WHAT was
+#               touched, so a path can predict it, so this file declares it.
+#   COMPLEXITY  how much planning the change needs. A property of the change
+#               itself. No path predicts it: a one-line change to the spec is
+#               maximum risk and minimum complexity at once, which is the exact
+#               case a single blended score hides.
+#
+# So this file declares risk ONLY, and the tool prints complexity as
+# `unmeasured` on every run rather than deriving it from the tier. Size - files
+# touched, lines added and removed - IS measured and printed beside it, named as
+# size and never as complexity.
+#
+# GREY IS NOT A TIER. A path no rule covers is UNCLASSIFIED, and unclassified
+# means nobody has decided, not that it is safe. The tool exits non-zero on it.
+# There is deliberately NO catch-all rule at the bottom of this file: a
+# catch-all would make every new path low-risk on the day it was added, which is
+# the day nobody has looked at it.
+#
+# ORDER IS THE SEMANTICS. Rules are evaluated top to bottom and the FIRST match
+# wins. The tool prints the index and the glob of the rule that matched, so the
+# answer is always attributable to one line of this file. Reordering rules
+# changes answers.
+#
+# GLOBS. `*` matches within one path segment. `**` matches across segments,
+# including none. `plugins/*/skills/*/scripts/**` is written with wildcards
+# rather than the current plugin name on purpose: this repository has renamed
+# its plugin directory twice, and a calibration run over history has to classify
+# the old names or the past reads as grey.
+
+version: 1
+
+axes:
+  risk:
+    declared_by_path: true
+    where: the `rules` list below
+  complexity:
+    declared_by_path: false
+    why: >-
+      No path predicts how much planning a change needs. A tool that derived
+      complexity from the tier would be printing the tier twice under two names.
+      It is reported as `unmeasured`, never as `low`.
+
+tiers:
+  - id: red
+    means: a structural decision - what the product promises, or what the gate permits
+    review: >-
+      A person decides. The diff is read line by line against the requirement or
+      the principle it serves, and an agent does not land it unattended.
+  - id: amber
+    means: shipped machinery - code that runs on a stranger's machine
+    review: >-
+      Wrong here breaks somebody else's repository, but it does not change what
+      this product promises. Needs the falsification P1 already demands: the
+      test seen red before the fix and green after.
+  - id: blue
+    means: autonomous-safe - prose, recorded evidence, corpora, the backlog
+    review: >-
+      Wrong here is visible and cheap to undo. An agent may land it on its own
+      judgement.
+
+unclassified:
+  id: grey
+  is_a_tier: false
+  renders_as: unclassified
+  means: no rule in this file covers this path
+  never: low risk
+  why: >-
+    An unclassified change is UNMEASURED. Rendering it as the bottom tier would
+    turn "nobody has decided about this path" into "this path is safe", which is
+    the fabricated-zero failure R26 already forbids for numbers, in words.
+
+# --- red: structural decisions ------------------------------------------------
+rules:
+  - tier: red
+    glob: ".claude/productizer/spec.md"
+    why: the living spec is the agreement; a sentence rewritten here changes what every citation means
+
+  - tier: red
+    glob: ".claude/productizer/constitution.md"
+    why: the principles the spec is read against, and the thing a requirement can be refused for contradicting
+
+  - tier: red
+    glob: ".claude/productizer/checks.yaml"
+    why: the gate itself - a severity lowered or a check deleted here weakens every later run, and the diff looks ordinary
+
+  - tier: red
+    glob: ".claude/sdlc/checks.yaml"
+    why: the same gate under the path it used before the rename; history has to classify, not go grey
+
+  - tier: red
+    glob: ".claude/productizer/config.json"
+    why: bindings - which repo is the spec home, which model runs which stage, whether Jira is bound; every one of those is a decision and none of them is code
+
+  - tier: red
+    glob: ".claude/productizer/risk-tiers.yaml"
+    why: this file. A policy that does not classify itself can be weakened by the agent it governs, in a diff that reads as configuration
+
+  - tier: red
+    glob: ".claude/settings.json"
+    why: permissions and hooks - what an agent is allowed to run without being asked
+
+  - tier: red
+    glob: ".claude/hooks/**"
+    why: the publish and artifact gates; a hook edited to return early is a gate that reports nothing and blocks nothing
+
+  - tier: red
+    glob: ".github/workflows/**"
+    why: what CI actually executes. A step removed here is a check that stops existing while checks.yaml still declares it
+
+  - tier: red
+    glob: "plugins/*/skills/*/templates/publish-gate.sh"
+    why: a gate shipped to other repositories, where a weakening is inherited by every install
+
+  - tier: red
+    glob: "plugins/*/skills/*/templates/production-gate.sh"
+    why: as publish-gate.sh - a gate, not a script
+
+  - tier: red
+    glob: ".claude-plugin/marketplace.json"
+    why: what the marketplace offers strangers
+
+  - tier: red
+    glob: "LICENSE"
+    why: the terms under which everything else here was published
+
+  - tier: red
+    glob: "evals/hard-preregistration.md"
+    why: >-
+      a pre-registration is expectations recorded BEFORE the runs. Editing it
+      after a run is how a corpus comes to agree with its result, and the edit
+      is indistinguishable from a clarification in the diff
+
+  # --- amber: shipped machinery ----------------------------------------------
+  - tier: amber
+    glob: "plugins/*/.claude-plugin/plugin.json"
+    why: >-
+      the published surface and the version other people install against. RED IN
+      THE FIRST DRAFT, AND THE MEASUREMENT MOVED IT - see the second calibration
+      note at the foot of this file. It is touched by 106 of 121 commits because
+      the version is bumped before every one, and red that fires on almost
+      everything is red that says nothing
+
+  - tier: amber
+    glob: "plugins/*/skills/*/fixtures/**/expect"
+    why: >-
+      a fixture's expectation is what makes its check falsifiable. Weakened, the
+      check still runs and still passes and has stopped proving anything. Listed
+      ABOVE the blue fixtures rule on purpose - first match wins
+
+  - tier: amber
+    glob: "plugins/*/skills/*/fixtures/**"
+    why: >-
+      NOT blue, and not red either. A fixture tree is the corpus a check is
+      falsified against; editing the corpus is editing the evidence, but a
+      fixture is also where most legitimate churn lives
+
+  - tier: amber
+    glob: "plugins/*/skills/*/scripts/**"
+    why: these run on other people's machines, and an unquoted expansion there is their problem
+
+  - tier: amber
+    glob: "plugins/*/skills/*/templates/**"
+    why: shipped content another repository installs and then inherits, including the checks.yaml template
+
+  - tier: amber
+    glob: "plugins/*/skills/*/SKILL.md"
+    why: the instructions a model loads and acts on; wrong here is wrong behaviour, not wrong prose
+
+  - tier: amber
+    glob: "plugins/*/commands/**"
+    why: a slash command is an entry point with a tool grant attached
+
+  - tier: amber
+    glob: "scripts/**"
+    why: this repository's own gate wrappers - the hygiene gate that stands between a private name and a public repo
+
+  - tier: amber
+    glob: "evals/*.py"
+    why: corpus validators and probes; a wrong one reports a corpus as sound
+
+  - tier: amber
+    glob: "evals/*.sh"
+    why: as evals/*.py
+
+  - tier: amber
+    glob: ".gitignore"
+    why: the line between what is published and what is not; one removed entry publishes a private file
+
+  - tier: amber
+    glob: ".gitattributes"
+    why: how git treats the tree, including anything marked not-exported
+
+  - tier: amber
+    glob: ".github/ISSUE_TEMPLATE/**"
+    why: the shape an intent arrives in, which the lifecycle then parses
+
+  # --- blue: autonomous-safe -------------------------------------------------
+  - tier: blue
+    glob: "plugins/*/skills/*/references/**"
+    why: reference prose. Wrong here misleads a reader, who can disagree with it
+
+  - tier: blue
+    glob: ".claude/productizer/backlog.md"
+    why: >-
+      nothing in the backlog is agreed, and the file says so. Reordering it is
+      an ordinary edit by the backlog's own rule
+
+  - tier: blue
+    glob: ".claude/productizer/classifications/**"
+    why: recorded classification provenance - append-only records of what was decided, not decisions
+
+  - tier: blue
+    glob: ".claude/productizer/checks-result.json"
+    why: >-
+      written by the runner on every run. See the CALIBRATION NOTE below: this
+      was red in the first draft of this file and the measurement moved it
+
+  - tier: blue
+    glob: ".claude/sdlc/checks-result.json"
+    why: the same generated artifact under the pre-rename path
+
+  - tier: blue
+    glob: ".claude/productizer/*.tsv"
+    why: recorded measurement rows and baselines; a baseline moves in a reviewed commit and the review is the control, not the tier
+
+  - tier: blue
+    glob: "evals/cases/**"
+    why: the eval corpus
+
+  - tier: blue
+    glob: "evals/hard-cases/**"
+    why: the harder eval corpus
+
+  - tier: blue
+    glob: "evals/fixtures/**"
+    why: trees the eval cases are run against
+
+  - tier: blue
+    glob: "evals/hard-fixtures/**"
+    why: as evals/fixtures/**
+
+  - tier: blue
+    glob: "README.md"
+    why: prose
+
+  - tier: blue
+    glob: "GUIDE.md"
+    why: prose, and generated from the references by build-guide.sh
+
+  - tier: blue
+    glob: "CONTRIBUTING.md"
+    why: prose
+
+  - tier: blue
+    glob: "KNOWN_LIMITATIONS.md"
+    why: prose, and the place limitations are supposed to be written down rather than fixed quietly
+
+  - tier: blue
+    glob: "evals/*.md"
+    why: prose about the corpora, except the pre-registration, which is claimed red above
+
+# CALIBRATION NOTE - `checks-result.json`, and why it is blue.
+#
+# The first draft of this file put it in red, on the argument that the recorded
+# result of the gate is evidence and a hand-edited result file is a forged
+# measurement. The argument is sound and the tier was still wrong, and the
+# measurement is what said so: the file appears in 43 of this repository's 121
+# commits, because the runner rewrites it every time it runs. Red would then
+# have fired on 35% of all commits, and `red` would have come to mean
+# "regenerated" more often than "decided something" - a tier nobody reads is
+# worse than no tier.
+#
+# THE HOLE THIS LEAVES IS REAL AND IS NOT CLOSED HERE: a result file edited BY
+# HAND, to turn a fail into a pass, is classified blue by this policy. Nothing
+# in this file distinguishes a regenerated artifact from a forged one, because a
+# path cannot. What would close it is a check comparing the committed result
+# file against a fresh run, which is a different mechanism and is not proposed
+# here.
+#
+# SECOND CALIBRATION NOTE - `plugin.json`, and the number that moved it.
+#
+# The first draft put `plugins/*/.claude-plugin/plugin.json` in red, on the
+# sound-sounding argument that the published surface and the installed version
+# are decisions. `classify-change-risk.sh --calibrate` over all 121 commits then
+# said, verbatim:
+#
+#     red                         210   13.6%
+#     commits by their highest tier
+#       red                                  111   91.7%
+#
+# 111 of 121 commits red. The cause is mechanical: the version is bumped before
+# every commit, so `plugin.json` is touched by 106 of 121 commits, and 56 of them
+# were red for NO OTHER REASON than that bump. A tier reached by 92% of commits
+# directs attention nowhere; it is a second word for "a commit".
+#
+# The rule moved to amber and the same command now reports:
+#
+#     red                         104    6.7%
+#     commits by their highest tier
+#       red                                   55   45.5%
+#       amber                                 62   51.2%
+#       blue                                   4    3.3%
+#
+# 45.5% red is still high, and that is a fact about this repository rather than
+# about this policy: its product IS the governance layer, so the spec, the gate
+# and the workflow are what it spends its commits on.
+#
+# THE HOLE, NAMED: a `plugin.json` whose DESCRIPTION, declared skills or declared
+# commands change - a real change to the published surface - now reads amber,
+# because a path cannot tell that edit from a version bump. What would close it
+# is a rule reading the FIELD that changed, which is a different mechanism and is
+# not proposed here.

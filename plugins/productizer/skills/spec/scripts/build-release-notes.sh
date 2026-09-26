@@ -13,6 +13,13 @@
 # is named as missing rather than quietly omitted, so the writer knows what
 # they are working without.
 #
+# All three sources are bounded by the SAME range. A merged pull request belongs
+# to this release when the commit it merged as is one of the commits in the
+# range, so the section cannot credit another release's work to this one; and
+# when tags exist but none is reachable from HEAD, so there is no previous
+# release to bound the range with, stdout names that rather than presenting the
+# whole history as if it were one release's worth.
+#
 # EXIT CODES ARE THE CONTRACT.
 #   0  the evidence was assembled and printed - including the sections that
 #      honestly read "none" or "unknown" - or --help was asked for.
@@ -84,13 +91,31 @@ if [ "$SELFTEST" -eq 1 ]; then
     p="$(type -P "$t")" || { echo "build-release-notes: $t is not on PATH, so the self-test cannot build its sandbox" >&2; exit 2; }
     ln -s "$p" "$NOGH/$t"; ln -s "$p" "$WITHGH/$t"
   done
-  {
-    echo '#!/bin/sh'
-    echo 'case "${GH_STUB:-}" in'
-    echo '  prs)  echo "  - #7 fixture pull request" ;;'
-    echo '  fail) echo "gh stub: authentication failed" >&2; exit 1 ;;'
-    echo 'esac'
-  } > "$WITHGH/gh"
+  # The stub answers in the shape the real `--jq` asks for - a merge-commit oid,
+  # then the line - and it reads the oids out of the repository it is standing
+  # in, so the fixtures are REAL commits on real sides of the range. `scoped`
+  # therefore asserts that the tool applied the range; it cannot pass because the
+  # stub happened to know one.
+  cat > "$WITHGH/gh" <<'GHSTUB'
+#!/bin/sh
+case "${GH_STUB:-}" in
+  prs)  echo "$(git rev-parse HEAD) #7 fixture pull request" ;;
+  fail) echo "gh stub: authentication failed" >&2; exit 1 ;;
+  scoped)
+    echo "$(git rev-parse HEAD) #7 fixture PR merged inside the range"
+    echo "$(git rev-parse 'v1.1.0^{commit}') #9 fixture PR merged earlier in the range"
+    echo "$(git rev-parse 'v1.0.0^{commit}') #5 fixture PR merged AS the range start"
+    echo "0000000000000000000000000000000000000000 #6 fixture PR merged on another branch"
+    echo "unplaceable #4 fixture PR with no merge commit"
+    ;;
+  flood)
+    i=1
+    while [ "$i" -le 50 ]; do
+      echo "$(git rev-parse HEAD) #$i fixture PR at the cap"
+      i=$((i + 1))
+    done ;;
+esac
+GHSTUB
   chmod +x "$WITHGH/gh"
 
   commit() { # commit <repo> <subject>
@@ -119,6 +144,18 @@ if [ "$SELFTEST" -eq 1 ]; then
   git init -q "$UNTAGGED"
   echo "one" > "$UNTAGGED/a.txt"; commit "$UNTAGGED" "v0.1.0 - untagged start"
   echo "two" > "$UNTAGGED/a.txt"; commit "$UNTAGGED" "v0.2.0 - untagged follow-up"
+
+  # repo-tag-unreachable: one tagged commit, then an orphan root. `git tag -l` is
+  # not empty, so describe runs, and it fails with `No tags can describe` - the
+  # state where the range silently became the whole history.
+  UNREACHABLE="$SCRATCH/repo-tag-unreachable"
+  mkdir -p "$UNREACHABLE"
+  git init -q "$UNREACHABLE"
+  echo "tagged" > "$UNREACHABLE/a.txt"; commit "$UNREACHABLE" "v1.0.0 - the tagged commit"
+  git -C "$UNREACHABLE" tag -a v1.0.0 -m "v1.0.0 - the tagged commit"
+  git -C "$UNREACHABLE" checkout -q --orphan work-on-a-new-root
+  git -C "$UNREACHABLE" rm -q -f a.txt
+  echo "orphan" > "$UNREACHABLE/b.txt"; commit "$UNREACHABLE" "v0.0.1 - on a root no tag names"
 
   EMPTY="$SCRATCH/repo-no-commit"
   git init -q "$EMPTY"
@@ -181,13 +218,45 @@ The spec exists but no requirement changed in this range.
 !(since
 There is no living spec at
 2 commit(s):
-  - v0.1.0 - untagged start' "$UNTAGGED"
+  - v0.1.0 - untagged start
+!which release this follows
+!could not name one that is reachable' "$UNTAGGED"
+
+  # B72. The range reads `HEAD` here exactly as it does above, and the reason is
+  # not the same one: there the whole history IS the range, here the range could
+  # not be found. stdout has to carry that difference, not only stderr.
+  drive tag-unreachable 0 "$NOGH" "" 'Range: `HEAD`
+!(since
+**Unknown — which release this follows. This repository has tags, but `git
+describe` could not name one that is reachable from HEAD, so the range above
+Pass `--since` to bound the range.**
+1 commit(s):
+  - v0.0.1 - on a root no tag names' "$UNREACHABLE"
 
   drive empty-range 0 "$NOGH" "" 'Range: `HEAD..HEAD`
 is empty' "$TAGGED" --since HEAD
 
   drive gh-lists-prs 0 "$WITHGH" prs '  - #7 fixture pull request
 !is not installed
+!None found' "$UNTAGGED"
+
+  # B71. Five merged pull requests come back: two on commits `v1.0.0..HEAD`
+  # contains, one on the range's own start commit which the range EXCLUDES, one
+  # on a commit this repository does not have, and one GitHub reports no merge
+  # commit for. Only the first two belong in these notes, and the last is named
+  # rather than dropped.
+  drive gh-scopes-prs 0 "$WITHGH" scoped '  - #7 fixture PR merged inside the range
+  - #9 fixture PR merged earlier in the range
+**Unknown for 1 of them — GitHub reported no merge commit, so whether they
+!#5 fixture PR merged AS the range start
+!#6 fixture PR merged on another branch
+!None found' "$TAGGED" --since v1.0.0
+
+  # The cap is GitHub's and is applied before the range filter, so a range that
+  # fills it is a range this cannot claim to have read all of.
+  drive gh-at-the-cap 0 "$WITHGH" flood '**Possibly incomplete — the read is capped at 50 merged pull requests and
+returned 50, so one in this range but older than those is not listed here.**
+  - #1 fixture PR at the cap
 !None found' "$UNTAGGED"
 
   drive gh-finds-none 0 "$WITHGH" "" '**None found.**
@@ -244,7 +313,7 @@ is empty' "$TAGGED" --since HEAD
     "every-documented-exit-code-reached" "$NDOC" "$((NDOC - $(printf '%s' "$MISSING" | wc -w | tr -d ' ')))" "$CODE_VERDICT"
   [ -z "$MISSING" ] || echo "build-release-notes: documented exit code(s) never reached by any case:$MISSING" >&2
 
-  printf '    NOT ASSERTED: the PR section is a stub, never a real gh call, so the shape of real gh output is not tested here; the self-test own exit 2 is a guard no case drives; a tag present but unreachable from HEAD is not a case.\n'
+  printf '    NOT ASSERTED: the PR section is a stub, never a real gh call, so the shape of real gh output is not tested here - that `mergeCommit.oid` is a full 40-character sha was read from a real repository out of band, and no case would notice if GitHub stopped sending it; a squash and a rebase merge are asserted only through the oid the stub hands back, never against a repository that merged either way; the self-test own exit 2 is a guard no case drives.\n'
 
   [ "$CASE_VERDICT" = "held" ] && [ "$CODE_VERDICT" = "held" ] || exit 1
   exit 0
@@ -263,11 +332,18 @@ fi
 # tags at all - normal before a first release. Ask whether a tag exists first, so describe only
 # runs when it can succeed and a failure it does report (tags present, none reachable from HEAD)
 # is a real one worth reading.
+NO_TAG_REACHABLE=0
 if [ -z "$SINCE" ] && [ -n "$(git tag -l)" ]; then
   SINCE="$(git describe --tags --abbrev=0 || echo "")"
+  # Tags exist and describe still could not name one: none of them is reachable
+  # from HEAD. Its reason is on stderr, and stdout has to say it too, or every
+  # section below reads exactly like a bounded range that happens to be long.
+  # Not an error - the evidence is still assembled, with the gap named.
+  [ -n "$SINCE" ] || NO_TAG_REACHABLE=1
 fi
 RANGE="${SINCE:+$SINCE..}HEAD"
 SPEC=".claude/productizer/spec.md"
+PR_LIMIT=50
 
 say() { printf '%s\n' "$*"; }
 
@@ -275,6 +351,13 @@ say "# Release notes — evidence"
 say ""
 say "Range: \`${RANGE}\`${SINCE:+  (since $SINCE)}"
 [ -n "$VERSION" ] && say "Version: \`$VERSION\`"
+if [ "$NO_TAG_REACHABLE" -eq 1 ]; then
+  say ""
+  say "**Unknown — which release this follows. This repository has tags, but \`git"
+  say "describe\` could not name one that is reachable from HEAD, so the range above"
+  say "is the whole history and not one release's worth of it. describe's own reason"
+  say "is on stderr. Pass \`--since\` to bound the range.**"
+fi
 say ""
 
 # --- source 1: the spec ------------------------------------------------------
@@ -310,14 +393,58 @@ if ! command -v gh >/dev/null 2>&1; then
 else
   # A gh auth or network failure also comes back empty. Reading the exit code keeps it from
   # reaching the "None found" branch, which would announce an absence that was not an absence.
-  if prs="$(gh pr list --state merged --limit 50 --json number,title,mergedAt \
-           --jq '.[] | "  - #\(.number) \(.title)"')"; then
-    if [ -z "$prs" ]; then
+  if raw="$(gh pr list --state merged --limit "$PR_LIMIT" --json number,title,mergeCommit \
+           --jq '.[] | "\(.mergeCommit.oid // "unplaceable") #\(.number) \(.title)"')"; then
+    # The range is applied HERE, by commit, and not by date. GitHub's `merged:`
+    # search qualifiers do filter correctly - measured against a real repository:
+    # `merged:>` is strict, `merged:<=` is inclusive, and a stamp's offset is
+    # honoured rather than ignored - but their bounds would have to be the
+    # range's commit dates, and in THIS repository those are equal: v4.59.0 and
+    # v4.60.0 both read 2026-09-14T07:00:00-04:00, so the window for
+    # `v4.59.0..HEAD` is empty and every pull request in it would come back as
+    # "None found". An absence that was not an absence is the one thing this
+    # section must never print, so the bound that decides is the range's own
+    # commit list. `mergeCommit` is the commit a PR merged as under all three
+    # merge strategies - a merge commit, a squash's single commit, or the tip of
+    # a rebase - and the job that calls this checks out the full history, so the
+    # oid is there to test. A pull request GitHub reports no merge commit for
+    # cannot be placed either way and is counted, never dropped in silence.
+    fetched=0; unplaceable=0; kept=""
+    range_commits="$(git rev-list "$RANGE")"
+    while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      fetched=$((fetched + 1))
+      oid="${row%% *}"
+      if [ "$oid" = unplaceable ]; then
+        unplaceable=$((unplaceable + 1))
+        continue
+      fi
+      printf '%s\n' "$range_commits" | grep -qxF "$oid" || continue
+      kept="$kept  - ${row#* }
+"
+    done <<PULLS
+$raw
+PULLS
+    # The read is capped, and the cap is applied by GitHub BEFORE this filter
+    # runs. A repository that merges more than the cap between releases would
+    # have the older half of its range cut off by the cap rather than by the
+    # range, and a short list would look like a complete one.
+    if [ "$fetched" -ge "$PR_LIMIT" ]; then
+      say "**Possibly incomplete — the read is capped at $PR_LIMIT merged pull requests and"
+      say "returned $fetched, so one in this range but older than those is not listed here.**"
+      say ""
+    fi
+    if [ "$unplaceable" -gt 0 ]; then
+      say "**Unknown for $unplaceable of them — GitHub reported no merge commit, so whether they"
+      say "belong to this range could not be decided. They are neither listed nor dismissed.**"
+      say ""
+    fi
+    if [ -z "$kept" ]; then
       say "**None found.** Either nothing was merged through a PR in this range, or"
       say "the work went straight to the branch. If it went straight to the branch,"
       say "the notes have no PR to trace a claim to and should say so."
     else
-      printf '%s\n' "$prs"
+      printf '%s' "$kept"
     fi
   else
     say "**Unknown — \`gh pr list\` failed, so no PR could be read.**"

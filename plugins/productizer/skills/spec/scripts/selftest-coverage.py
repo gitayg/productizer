@@ -14,9 +14,15 @@ and the CI workflow - and answers two questions over the tools they name:
 R39.b is COUNTED, never enforced. A self-test that emits no declaration has not
 been shown incomplete; it has not been asked. That reads `not asked`, never 0.
 
-Renders four states apart and never collapses them into a zero: a count is a
+Renders five states apart and never collapses them into a zero: a count is a
 count, `n/a` is a guard that does not apply, `-` is never run, `?` is
-unreadable.
+unreadable, `absent` is an argv naming a file that is not in the work tree.
+
+The tool set is built over what the suite EXERCISES. A check with
+`enabled: false` never runs, so its tool is neither counted with the rest nor
+dropped: it is a third figure on its own line. A repo-local path that is not on
+disk is an absent tool, never a third party.
+
 
 stdout: bare relative paths, unindented, for every file the verdict rests on;
 everything else indented. Exit 0 all held, 1 a finding, 2 could not measure.
@@ -47,6 +53,27 @@ DISPATCH = (
 FLAG_RE = re.compile(r"--self[-_]?test\b")
 REJECTED_RE = re.compile(r"unknown (option|argument|flag)", re.I)
 PLACEHOLDER_RE = re.compile(r"[{}]")
+
+# THREE KINDS OF TOOL, AND WHY THE THIRD ONE HAD TO EXIST. An argv token that
+# names no file on disk used to fall into one bucket with `shellcheck`, `npm`
+# and `gitleaks`, and that bucket is printed under the sentence "third-party
+# tools, which nobody here can add a self-test to". `./scripts/check-pii-logging.sh`
+# is named in this repository's own checks.yaml and exists nowhere in the tree,
+# so the sentence is false about it - and the false reading is the reassuring
+# one. A repo-local path that is not there is an ABSENT tool: a measured fact
+# about this work tree, not a boundary of ownership. It gets its own kind, its
+# own line, and - when an ENABLED check names it - its own finding.
+#
+# The test is on SHAPE, because an argv carries nothing else. A token beginning
+# `./` or `../`, or ending `.sh` or `.py`, is this repository naming a file of
+# its own; a bare `semgrep` is a program name that resolves through PATH and is
+# nobody's file here. A misread in this direction over-reports absence, which is
+# the safe side: it names a path and asks for it, rather than telling the reader
+# nobody could have written a self-test for it.
+KIND_REPO = "repo"
+KIND_ABSENT = "absent"
+KIND_EXTERNAL = "external"
+REPO_SHAPED = re.compile(r"^\.{1,2}/|\.(sh|py)$")
 
 # --- the R39.b declaration protocol ----------------------------------------
 # One line, any indent, on stdout or stderr:
@@ -95,12 +122,15 @@ def rel(root, path):
 
 
 def resolve_tool(root, argv):
-    """The program an argv actually runs.
+    """The program an argv actually runs, and which of the three kinds it is.
 
     Left to right, the first token that is a real file under the root. That
     skips interpreters (`python3 foo.py`) and option values that happen to name
     a file (`--config config.json` never wins, because the script it configures
     came first). A token carrying a `{files}` placeholder is not a path.
+
+    Nothing resolved: the argv's head is classified by SHAPE. A repo-local path
+    that is not on disk is KIND_ABSENT and is never reported as a third party.
     """
     for tok in argv:
         if not isinstance(tok, str) or not tok:
@@ -109,9 +139,13 @@ def resolve_tool(root, argv):
             continue
         cand = os.path.normpath(os.path.join(root, tok))
         if os.path.isfile(cand):
-            return rel(root, cand), True
+            return rel(root, cand), KIND_REPO
     first = argv[0] if argv and isinstance(argv[0], str) else None
-    return first, False
+    if first is None:
+        return None, KIND_EXTERNAL
+    if REPO_SHAPED.search(first):
+        return first, KIND_ABSENT
+    return first, KIND_EXTERNAL
 
 
 def scan_dispatch(path):
@@ -311,9 +345,9 @@ def main():
     # rel path (or external name) -> record
     tools = {}
 
-    def note(name, local, source, argv=None, check=None, line=None):
+    def note(name, kind, source, argv=None, check=None, line=None):
         rec = tools.setdefault(name, {
-            "local": local, "sources": [], "checks": [], "wf_lines": [],
+            "kind": kind, "sources": [], "checks": [], "wf_lines": [],
             "disabled": True,
         })
         if source not in rec["sources"]:
@@ -337,10 +371,10 @@ def main():
         argv = [t for t in cmd if isinstance(t, str)]
         if not argv:
             continue
-        name, local = resolve_tool(root, argv)
+        name, kind = resolve_tool(root, argv)
         if name is None:
             continue
-        rec = note(name, local, "checks.yaml", argv=argv,
+        rec = note(name, kind, "checks.yaml", argv=argv,
                    check={"id": cid, "argv": argv,
                           "exit_codes": chk.get("exit_codes")})
         # `enabled: false` is a shut guard, not a tool with no self-test.
@@ -355,17 +389,28 @@ def main():
             cand = os.path.normpath(os.path.join(root, tok))
             if not os.path.isfile(cand):
                 continue
-            rec = note(rel(root, cand), True, args.workflow.replace(os.sep, "/"),
-                       line=line)
+            rec = note(rel(root, cand), KIND_REPO,
+                       args.workflow.replace(os.sep, "/"), line=line)
             rec["disabled"] = False
 
     # --- measure ----------------------------------------------------------
     unreadable = []
     for name, rec in tools.items():
-        if not rec["local"]:
+        if rec["kind"] == KIND_EXTERNAL:
             rec["flags"] = None                     # external: n/a, not zero
             rec["answered"] = NA
             rec["codes"] = {"state": NA, "detail": "third-party"}
+            continue
+        if rec["kind"] == KIND_ABSENT:
+            # Absence is MEASURED - the path was resolved and there is no file
+            # there - so this is not `?`. It is also not a tool anybody could
+            # have written a self-test for, so the self-test column reads
+            # `absent` rather than `none`: `none` would be a count of zero
+            # self-tests in a file, and there is no file.
+            rec["flags"] = None
+            rec["answered"] = NA
+            rec["codes"] = {"state": NA,
+                            "detail": "no such file in this work tree"}
             continue
         flags, bad = scan_dispatch(os.path.join(root, name))
         if bad:
@@ -442,23 +487,47 @@ def main():
     # --- report -----------------------------------------------------------
     for p in (checks_rel, workflow_rel):
         out(p)
-    local_names = sorted(n for n, r in tools.items() if r["local"])
+    local_names = sorted(n for n, r in tools.items() if r["kind"] == KIND_REPO)
     for name in local_names:
         out(name)
 
-    external = sorted(n for n, r in tools.items() if not r["local"])
+    absent_names = sorted(n for n, r in tools.items()
+                          if r["kind"] == KIND_ABSENT)
+    external = sorted(n for n, r in tools.items()
+                      if r["kind"] == KIND_EXTERNAL)
+
+    # WHAT THE SUITE EXERCISES, AND WHAT IT ONLY DECLARES. A check with
+    # `enabled: false` never runs, so its tool's self-test is not part of what
+    # the suite exercises and does not belong in R39's or R40's denominator: an
+    # obligation nobody is under is not a shortfall.
+    #
+    # DROPPING IT ALTOGETHER WOULD BE THE OTHER ERROR. A check is switched back
+    # on by editing one line, and a tool sitting behind a disabled check with no
+    # self-test is a finding held in escrow - invisible is exactly how it gets
+    # forgotten. So the switched-off tools are neither counted with the rest nor
+    # discarded: they are a THIRD FIGURE, named on their own line, never added
+    # to the other two. That is the treatment this file already gives
+    # third-party tools, for the stated reason that figures which mean different
+    # things are never added together.
+    exercised = [n for n in local_names if not tools[n]["disabled"]]
+    switched_off = [n for n in local_names if tools[n]["disabled"]]
 
     out("  tool set: %d invoked by %s or %s - %d in this repository, %d "
-        "third-party" % (len(tools), checks_rel, workflow_rel,
-                         len(local_names), len(external)))
+        "third-party, %d named by an argv and absent from this work tree; %d "
+        "of them reached only by a check with `enabled: false`"
+        % (len(tools), checks_rel, workflow_rel, len(local_names),
+           len(external), len(absent_names),
+           sum(1 for r in tools.values() if r["disabled"])))
     out("  %-58s %-12s %-10s %-10s %s"
         % ("tool", "self-test", "answered", "codes", "run by"))
-    for name in local_names + external:
+    for name in local_names + absent_names + external:
         rec = tools[name]
-        if rec.get("disagreed"):
+        if rec["kind"] == KIND_ABSENT:
+            flag = "absent"
+        elif rec.get("disagreed"):
             flag = "none"
         elif rec["flags"] is None:
-            flag = NA if not rec["local"] else UNREADABLE
+            flag = NA if rec["kind"] == KIND_EXTERNAL else UNREADABLE
         elif rec["flags"]:
             flag = ",".join(rec["flags"])
         else:
@@ -471,11 +540,9 @@ def main():
                rec.get("codes", {}).get("state", UNREADABLE), reached))
 
     findings = []
-    for name in local_names:
+    for name in exercised:
         rec = tools[name]
         if rec.get("unreadable"):
-            continue
-        if rec["disabled"]:
             continue
         if not rec.get("flags"):
             extra = ""
@@ -483,7 +550,19 @@ def main():
                 extra = (" - its source reads as if it dispatches on one and "
                          "its parser rejected the flag (%s)" % rec["disagreed"])
             findings.append("R39: %s carries no self-test%s" % (name, extra))
-    for name in local_names:
+    # An argv naming a file that is not there. A finding when a check that RUNS
+    # names it; when only a switched-off check does, it is reported on the absent
+    # line and left there, for the same reason the R39 shortfall is.
+    for name in absent_names:
+        rec = tools[name]
+        if rec["disabled"]:
+            continue
+        ids = ", ".join(sorted({c["id"] for c in rec["checks"]})) or "a check"
+        findings.append("R39: %s is named by %s and no such file exists in this "
+                        "work tree, so there is nothing here that could carry a "
+                        "self-test - a missing repo-local tool, not a third "
+                        "party" % (name, ids))
+    for name in exercised:
         rec = tools[name]
         if not rec.get("flags"):
             continue
@@ -494,15 +573,43 @@ def main():
             findings.append("R40: %s's self-test runs but %s, so its failure "
                             "cannot set the run's exit code" % (name, why))
 
-    carried = sum(1 for n in local_names if tools[n].get("flags"))
-    run_by = sum(1 for n in local_names if tools[n].get("reached")
-                 and isinstance(tools[n]["reached"], list))
-    out("  R39: %d of %d repository check tools carry a self-test that answers."
-        % (carried, len(local_names)))
+    carried = sum(1 for n in exercised if tools[n].get("flags"))
+    invoked = [n for n in exercised
+               if isinstance(tools[n].get("reached"), list)
+               and tools[n]["reached"]]
+    swallowed_names = [n for n in invoked if tools[n].get("swallowed")]
+    out("  R39: %d of %d check tools the suite exercises carry a self-test that "
+        "answers." % (carried, len(exercised)))
     out("  R40: %d of %d self-tests found are invoked by a declared check or by "
-        "the workflow." % (run_by, carried))
+        "the workflow." % (len(invoked), carried))
+    # THE SUMMARY MAY NOT DISAGREE WITH THE FINDINGS. One `|| true` on a
+    # workflow line used to leave this block reporting `36 of 36 are invoked`
+    # while a FINDING below said that call's failure could not set the run's exit
+    # code - both true, and the reader believes the summary. "Invoked" and "able
+    # to fail the run" mean different things, so they are not merged into one
+    # number; they are printed one under the other, and R40 rests on the second.
+    out("  R40 propagation: %d of those %d can still set the run's exit code; "
+        "%d run with their failure swallowed, each one a finding below."
+        % (len(invoked) - len(swallowed_names), len(invoked),
+           len(swallowed_names)))
+    if switched_off:
+        off_carried = [n for n in switched_off if tools[n].get("flags")]
+        out("  switched off: %d repo-local tool(s) reached only by checks with "
+            "`enabled: false`, counted here and in neither figure above - %d of "
+            "them carry a self-test. A check that never runs does not exercise "
+            "its tool, and a tool nobody exercises is not a shortfall: %s"
+            % (len(switched_off), len(off_carried), ", ".join(switched_off)))
+    else:
+        out("  switched off: 0 repo-local tools are reached only by checks with "
+            "`enabled: false`, so neither figure above is measured over a tool "
+            "that cannot run.")
     out("  third-party tools, which nobody here can add a self-test to: %s"
         % (", ".join(external) if external else "none"))
+    out("  named by an argv and absent from this work tree - a missing "
+        "repo-local tool, never a third party: %s (%d of them named only by a "
+        "check that is switched off)"
+        % (", ".join(absent_names) if absent_names else "none",
+           sum(1 for n in absent_names if tools[n]["disabled"])))
     if args.probe:
         out("  probe: %d self-test(s) executed with the flag their source "
             "dispatches on." % probed)
@@ -511,7 +618,7 @@ def main():
             "run - and is never read as a 0." % NEVER_RUN)
     # --- R39.b: the second clause, counted and never enforced --------------
     by_state = {}
-    for name in local_names:
+    for name in exercised:                          # the same set `carried` is over
         if not tools[name].get("flags"):
             continue                                # no self-test: n/a, not 0
         by_state.setdefault(tools[name]["codes"]["state"], []).append(name)

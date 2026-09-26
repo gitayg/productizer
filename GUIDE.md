@@ -411,7 +411,7 @@ are added and tells you nothing.
 
 The chart under it is there because a POLICY CHANGE SHOULD BE VISIBLE AS A SHAPE. Walking this
 repository's history: eleven days flat at 2 to 4 self-tested tools while the tool count climbed to
-29, then one commit to 32 of 32. You can see the day it started mattering without reading a
+29, then one commit to 32 of 32, and 43 of 43 once the v4.61.0 tools were declared. You can see the day it started mattering without reading a
 commit message.
 
 Hovering a point prints the QUOTIENT, not only its two inputs - a tooltip that shows 31 and 3 and
@@ -428,11 +428,72 @@ the last on 2026-09-02, and none of the 23 commits since, which includes the ste
 about. A line drawn from that would stop before the thing the page is showing you, so the row
 renders the has-not-run glyph and says why instead.
 
+## The config that decides what is checked is now itself checked
+
+Loosening a check used to be an ordinary diff that nothing read. Measured on this repository at
+v4.60.0, five ways - deleting a check from `checks.yaml`, flipping its `severity: block` to
+`advise`, adding `enabled: false`, replacing `always: true` with a glob that matches nothing, and
+deleting a tool's `--selftest` line from the workflow - each committed on its own clone and each run
+through the whole suite. **All five exited 0 PASS.** The gate over the publish hook was real; the
+file that decides which gates exist was read by nothing.
+
+Two checks close that, and they are deliberately not one. `governance-weakening` ADVISES over the
+whole surface, because most weakenings are deliberate and a blocking sweep over a file people edit
+every day would be switched off inside a week; it reports what moved and what it was, for example
+`WEAKENED: checks[secret-scan].severity (effective)  was 'block'  is now 'advise'`, and leaves the
+judgement to a person. `governance-self-footing` BLOCKS, and asserts only this pair's own
+declaration: a diff that switches off the check watching for switched-off checks is the one move
+that cannot be left to advice.
+
+The surface is named FIELDS, not text. A comment, a `why:`, a `limitations:` entry and a reflow are
+outside it on purpose - that is where the reasoning lives, it changes constantly, and a rule that
+went red on rewrapped prose teaches people to ignore it. Effective severity is resolved rather than
+read, because lowering `defaults.severity` weakens every check that never mentions severity and no
+check's own line moves.
+
+## Risk tiers, and what a check must prove before it may block
+
+Not every change deserves the same attention, so `classify-change-risk.sh` reports a tier per
+changed path and the rule that decided it, against `.claude/productizer/risk-tiers.yaml`. Two
+things about it are deliberate and both are refusals to invent:
+
+A path no rule covers reads `unclassified` and exits 1. There is no catch-all rule, because a
+catch-all makes every path added tomorrow low-risk on the day nobody has looked at it - the
+fabricated zero of R26, in words rather than in numbers. And COMPLEXITY prints `unmeasured` on every
+single run: no path predicts how much planning a change needs, and deriving it from the tier would
+print the tier twice under two names.
+
+The policy was calibrated before it shipped, and one rule moved because of the number. The first
+draft put **111 of 121 commits** in the top tier, because `plugin.json` is touched by 106 of 121 -
+the version is bumped before every commit. A tier reached by 92% of commits is a second word for "a
+commit", so that rule moved down; it now reads 55 of 121, which is what this repository is rather
+than what the policy is.
+
+`measure-check-overfire.sh` replays a check over merged history and computes the rate that would let
+it earn `severity: block`: at least 20 commits returning a VERDICT, every fire in that window ruled
+by a person, and the ruled FALSE-POSITIVE count at or below 10%. Two measurements changed that rule
+while it was being written. Capping the RAW rate at 10% would have demoted `stderr-suppression`, a
+correct blocking check, for doing its job at 11.8% - so the clause counts ruled false positives, of
+which it has none. And a fixed 30-commit window is too narrow for a path-scoped check: 13 of 30
+commits touch no shell at all, so that check reaches 17 verdicts and not 30, which is why the window
+is the movable part. **No check in this repository has yet been shown to satisfy the rule** -
+`stderr-suppression` clears the ruling and false-positive clauses and misses the 20-verdict floor at
+17 - and the rule is documented rather than enforced, which is recorded as B76.
+
 ## Every check tool tests itself, and the suite runs those tests
 
 R39 obliges a check tool to carry a self-test that reaches each exit code it can return. R40
-obliges the suite to run it. Both read **32 of 32** as of 2026-09-06; 28 of those self-tests were
+obliges the suite to run it. Both read **43 of 43** as of 2026-09-26 (32 of 32 on 2026-09-06); 28 of those self-tests were
 written in one pass, and every one was seen FAILING on a deliberate break before it was believed.
+
+A third figure sits beside those two and is never added to them: whether each self-test SAYS which
+exit codes it drove. `43 of 43` declare, and `43 of 43` drove every code they document. That figure
+is counted and not enforced, because a declaration is the self-test's own account of itself rather
+than an observation - but it is the line that caught `spec-requirements.sh` printing a tally and no
+declaration at all. Its contract documents an exit 3 for a disagreeing case, which no ordinary case
+can reach, so it now drives 3 by breaking a COPY of itself on purpose and asserting that the break
+applied. Trimming 3 out of the documented list would have been the other way to make the figure go
+green, and it would have made the contract a description of the self-test instead of the reverse.
 
 The self-tests build fixtures under `mktemp -d` and never touch the repository. Two of them cannot
 reach their exit 1 from fixtures at all - for `check-missing-tool` and `check-no-fabricated-zero`,
@@ -711,7 +772,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Thirty-five requirements are active**, and they are the whole of what has
+**Forty-three requirements are active**, and they are the whole of what has
 been agreed.
 
 Six more are superseded and none withdrawn, and neither kind is listed here.
@@ -720,7 +781,8 @@ years ago still leads somewhere — but a guide is read by someone deciding what
 to do next, and a superseded sentence gives them no sign it stopped being
 true.
 
-**Always, with no trigger.** Six requirements hold whatever else is happening:
+**Always, with no trigger.** Seven requirements hold whatever else is
+happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
 - **R2** — The lifecycle shall keep requirement ids permanent: never reused,
@@ -732,8 +794,10 @@ true.
   to count.
 - **R39** — Every check tool shall carry a self-test that reaches each exit
   code it can return.
+- **R48** — Every commit record shall name each path that commit's diff
+  touches.
 
-**When something arrives.** Nine things happen on a discrete trigger:
+**When something arrives.** Twelve things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -754,8 +818,14 @@ true.
   reason.
 - **R40** — When the check suite runs, the lifecycle shall run the self-test
   of every check tool it invokes.
+- **R42** — When a change set is classified, the lifecycle shall report the
+  risk tier of each path it touches and the rule that decided it.
+- **R47** — When a check declaration moves between a base and the working
+  tree, the lifecycle shall report which declaration moved and what it was.
+- **R49** — When a published view draws a state, the lifecycle shall make that
+  state distinguishable from every other state without colour.
 
-**For as long as a state lasts.** Three requirements are true for the duration
+**For as long as a state lasts.** Four requirements are true for the duration
 of a state, not at a moment inside it:
 
 - **R12** — While a contradiction is unruled, the lifecycle shall merge no
@@ -764,8 +834,10 @@ of a state, not at a moment inside it:
   lifecycle shall report that check as missing rather than skipped.
 - **R38** — While a failing check is overridden, the lifecycle shall render it
   as failed and waived, and never as passed.
+- **R45** — While a change's risk tier is reported, the lifecycle shall report
+  that change's complexity as unmeasured.
 
-**When something goes wrong.** Thirteen defences, written as `If … then`
+**When something goes wrong.** Sixteen defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -796,6 +868,12 @@ because a designed path and a defended one are not the same thing:
 - **R41** — If an active requirement's sentence was rewritten in place, then
   the lifecycle shall report as suspect every artifact citing that requirement
   whose own line has not changed since that rewrite.
+- **R43** — If a changed path matches no risk rule, then the lifecycle shall
+  report that path as unclassified.
+- **R44** — If a changed path matches no risk rule, then the lifecycle shall
+  not report that path as a risk tier.
+- **R46** — If a change's complexity was not measured, then the lifecycle
+  shall not derive it from that change's risk tier.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

@@ -29,11 +29,32 @@
 # out of the denominator and out of the numerator, and the shortfall would look
 # smaller than it is.
 #
+# A SWITCHED-OFF CHECK DOES NOT EXERCISE ITS TOOL, AND IS A THIRD FIGURE. A
+# check with `enabled: false` never runs, so its tool's self-test is not part of
+# what the suite exercises and does not belong in R39's or R40's denominator: an
+# obligation nobody is under is not a shortfall, and counting it made the
+# figures answer a question nobody asked. DROPPING IT ALTOGETHER WOULD BE THE
+# OTHER ERROR - a check is switched back on by editing one line, and a tool
+# sitting behind a disabled check with no self-test is a finding held in escrow.
+# So those tools are neither counted with the rest nor discarded: they are a
+# THIRD FIGURE, named on their own line, never added to the other two. Same
+# treatment as externals, for the same reason.
+#
 # A TOOL THIS REPOSITORY DID NOT WRITE IS `n/a`, NOT A FINDING. `shellcheck` is
 # a check tool the suite invokes and nobody here can add a self-test to it. It
 # is counted, named, and rendered `n/a` with that reason, which is a shut guard
 # and not a measurement of zero. Externals are reported separately from the
 # repo-local shortfall so neither number contaminates the other.
+#
+# A REPO-LOCAL PATH THAT IS NOT THERE IS A MISSING TOOL, NOT A THIRD PARTY. An
+# argv token naming no file used to land in the externals bucket, printed under
+# "third-party tools, which nobody here can add a self-test to" -
+# `./scripts/check-pii-logging.sh` sat there beside `shellcheck`, `semgrep`,
+# `npm` and `gitleaks`, and that sentence is false about a path in this
+# repository's own namespace. It is now its own kind, `absent`, with its own
+# line, and it is a FINDING when a check that RUNS names it. When only a
+# switched-off check does - which is the case here - it is named on the absent
+# line and left there, because the check that names it cannot run either.
 #
 # HOW "CARRIES A SELF-TEST" IS MEASURED, AND WHAT THAT MEASUREMENT IS WORTH.
 # Structurally, on the tool's own source: a non-comment line that DISPATCHES on
@@ -107,12 +128,25 @@
 # `exit_codes.pass`; for the workflow, no `continue-on-error` and no `|| ` on
 # the invoking line.
 #
+# AND THE SUMMARY SAYS SO. Being invoked and being able to fail the run are two
+# different things, so they are two figures printed one under the other and
+# never merged. Before that, one `|| true` on a workflow line left the summary
+# reading `36 of 36 self-tests are invoked` - true - while a FINDING underneath
+# said that call's failure could not set the run's exit code. Both lines were
+# right and they disagreed, and a reader believes the summary. R40 rests on the
+# second figure.
+#
 # FOUR RENDERINGS, KEPT APART. `0` is a measured count. `n/a` is a guard that
 # does not apply - an external tool, or an answered/reached column for a tool
 # with no self-test to answer or reach. `-` is never run - the probe was
 # switched off with --no-probe. `?` is unreadable - a file that could not be
 # read, or a probe that timed out. None of them is written as a zero, because a
 # tool nobody could read is not a tool with no self-test.
+#
+# `absent` IS A FIFTH, AND IT IS A MEASUREMENT. The self-test column reads
+# `absent` for an argv naming a file that is not in the work tree. That is not
+# `?` - the path was resolved and there is nothing there - and it is not `none`,
+# which would be a count of zero self-tests in a file, when there is no file.
 #
 # THIS FILE IS MEASURED LIKE EVERY OTHER, AND IT CARRIES NO SELF-EXEMPTION. It
 # has a `--selftest`, and the check declared over it in checks.yaml invokes the
@@ -336,6 +370,18 @@ fi
 exit 0
 TOOL
 
+  # carries a self-test and is named ONLY by a check with `enabled: false`. The
+  # switched-off figure has to be able to hold a tool that DOES carry one, or a
+  # denominator change that quietly dropped it would look identical to one that
+  # kept it apart.
+  cat > "$d/tools/off-selftest.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest) printf '  fixture self-test held\n'; exit 0 ;;
+esac
+exit 0
+TOOL
+
   # answers the flag, slowly. Drives the ? rendering against --probe-timeout.
   cat > "$d/tools/slow-selftest.sh" <<'TOOL'
 #!/usr/bin/env bash
@@ -378,8 +424,10 @@ TOOL
 
   chmod +x "$d/tools/with-selftest.sh" "$d/tools/mention-only.sh" \
            "$d/tools/rejects-flag.sh" "$d/tools/slow-selftest.sh" \
+           "$d/tools/off-selftest.sh" \
            "$d/tools/codes-complete.sh" "$d/tools/codes-missing.sh" \
            "$d/tools/codes-malformed.sh"
+  # NOTHING CREATES tools/gone.sh. The `absent` cases name it deliberately.
   printf 'name: fixture\njobs:\n  checks:\n    steps:\n      - run: |\n          echo nothing\n' \
     > "$d/.github/workflows/checks.yml"
 }
@@ -489,6 +537,68 @@ checks:
     command: [./tools/codes-malformed.sh, --selftest]
 CFG
 
+# switchedoff: two repo-local tools named ONLY by checks with `enabled: false` -
+# one carrying a self-test and one carrying none. Neither may reach R39's or
+# R40's denominator, and neither may vanish: the case asserts the third figure
+# names both and that the run is still exit 0, because a check that cannot run
+# has not failed to run its tool's self-test.
+mk_case switchedoff
+cat > "$SB/switchedoff/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-selftest
+    command: [./tools/with-selftest.sh, --selftest]
+  - id: fixture-off-nothing
+    enabled: false
+    command: [./tools/mention-only.sh]
+  - id: fixture-off-carries
+    enabled: false
+    command: [./tools/off-selftest.sh]
+CFG
+
+# absenttool: an ENABLED check names a repo-local path that is not in the tree.
+# It is a finding about a missing tool, and it must NOT be reported as a
+# third-party nobody here could have written a self-test for. NOT named `absent`:
+# that name is already taken above by the tree with no checks.yaml at all, and
+# reusing it silently restored that case's premise - caught by running this, not
+# by reading it.
+mk_case absenttool
+cat > "$SB/absenttool/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-selftest
+    command: [./tools/with-selftest.sh, --selftest]
+  - id: fixture-absent
+    command: [./tools/gone.sh, "{file}"]
+CFG
+
+# absentoff: the same missing path, named only by a switched-off check - the
+# shape this repository actually has. Not a finding, still not a third party,
+# and still named.
+mk_case absentoff
+cat > "$SB/absentoff/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-selftest
+    command: [./tools/with-selftest.sh, --selftest]
+  - id: fixture-absent-off
+    enabled: false
+    command: [./tools/gone.sh, "{file}"]
+CFG
+
+# wfswallow: the workflow is the ONLY thing that invokes the self-test, and it
+# guards the call with `||`. The finding already existed; what this case asserts
+# is that the SUMMARY no longer contradicts it.
+mk_case wfswallow
+cat > "$SB/wfswallow/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-measure-only
+    command: [./tools/with-selftest.sh]
+CFG
+printf 'name: fixture\njobs:\n  checks:\n    steps:\n      - run: |\n          bash tools/with-selftest.sh --selftest || true\n' \
+  > "$SB/wfswallow/.github/workflows/checks.yml"
+
 FAILED=0
 CASES=0
 # Every exit code a case actually produced, one per line. The R39.b line this
@@ -567,6 +677,16 @@ drive noprobe     0 "probe: not run"                                     --no-pr
 drive codes       0 "R39.b: 2 of 4 check tools carrying a self-test declare"
 drive codes       0 "codes-missing.sh documents 0 1 2 and never reached 2"
 drive codes       0 "1 emit a line this protocol could not parse"
+
+# The tool set this check builds. Each of these three asserts a SENTENCE, not
+# only an exit code: all four cases below would keep their exit code under the
+# defect they were written for.
+drive switchedoff 0 "R39: 1 of 1 check tools the suite exercises carry a self-test"
+drive switchedoff 0 "switched off: 2 repo-local tool(s) reached only by checks with"
+drive absenttool  1 "tools/gone.sh is named by fixture-absent and no such file exists"
+drive absenttool  1 "third-party tools, which nobody here can add a self-test to: none"
+drive absentoff   0 "never a third party: ./tools/gone.sh (1 of them named only by"
+drive wfswallow   1 "R40 propagation: 0 of those 1 can still set the run's exit code"
 
 printf '  cases driven: %d. Cases that did not hold: %d\n' "$CASES" "$FAILED"
 
