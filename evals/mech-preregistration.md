@@ -496,4 +496,73 @@ cd evals && find mech-cases mech-fixtures -type f | LC_ALL=C sort \
 
 ## Amendments
 
-None.
+### A1 — 2026-09-27: stage 0 ran, semantics A holds, and one open design question
+
+Recorded before stage 1, as *Run plan* requires. Nothing above this heading was
+edited; this section is the only change to the document since registration.
+
+**Registration version.** This document says `4.61.2 at registration`. It was
+written against 4.61.2 and committed in 4.62.0 (`7c083eb`); the plugin the smoke
+run loaded was **4.62.0**. The prose that reaches the plugin arm at that commit:
+`SKILL.md` `a9f60820…c85d`, `references/rulings.md` `32165fa0…2d29`,
+`references/ears.md` `fc18d486…a1b`. Corpus fingerprint `93208dbb…4021`,
+unchanged.
+
+**The run.** From a throwaway clone at `7c083eb`, exactly the stage-0 command
+above, plus output paths outside the repository and `--max-cost-usd 1.00` as a
+hard bound. The enablement variable `plugin eval` needs in CLI 2.1.265 was set
+inline on that one invocation, with the maintainer's explicit approval for this
+corpus, and written to no settings file. Harness exit 1, which is its "a case
+scored below 1.0" code, as in every b18-hard run; no load error and no
+`scaffold failed` line. **$0.3721 in total**: plugin arm $0.2538 in 9 turns, bare
+arm $0.1183 in 4.
+
+**Unverified before stage 1, item 1 — settled: the last row of the table.**
+`00-scaffold-present` passed in **both** arms, and both kept run directories hold
+`home/cwd/.claude/productizer/spec.md` and `constitution.md` whose sha256 equal
+`evals/mech-fixtures/` exactly (`e2c787cf…6b86`, `17c74802…f60b`). The value is a
+path, run in the model's working directory, and it runs in the bare arm too.
+
+**Item 2 — settled.** The harness loaded a case directory holding both
+`case.yaml` and `prompt.md` without complaint.
+
+**Item 3 — settled, each checked against the trace by hand.**
+
+- `input_match` sees Read's arguments: `90-spec-read` passed in both arms, and
+  the traces show one Read of the spec each — by a relative path in the plugin arm
+  (`.claude/productizer/spec.md`) and by an absolute one in the bare arm. The
+  grader matched both forms.
+- Glob lists a dot-directory. The bare arm's FIRST call was `Glob **/*`, and its
+  next was a Read of the spec by absolute path, so the glob returned it. Bare
+  discovery is not a tool artefact.
+- No permission prompt interrupted a Read under `.claude/` in either arm.
+
+Tool calls, verbatim order — plugin: `Skill`, `Glob .claude/productizer/**`,
+`Glob **/spec.md`, `Read spec.md`, `Read constitution.md`,
+`Glob .claude/productizer/**/*`, `Grep waitlist`. Bare: `Glob **/*`,
+`Read spec.md`, `Read constitution.md`. `92-rulings-read` and `93-ears-read`: 0 in
+the plugin arm. Both arms answered CONTRADICT; both scored 0.964.
+
+**Re-costing, as *Run plan* requires.** One run per arm on one case is not an
+estimate of a mean, and is recorded only as the first figure there is: bare
+$0.1183, plugin $0.2538 — the plugin arm now costs **2.1×** the bare arm, where
+b18-hard's cost 1.12×, because the mechanism fires. At those two figures stage 1
+(280 bare runs) is about $33 and stage 2 (280 per arm) about $104, so stages 1
+and 2 together run to about **$137**, above b18-hard's $88 and above the $120
+ceiling b18-hard ran under. A spend for stage 1 has to be approved against this
+figure, not the $87.57 in section 5.
+
+**Open before stage 1 — not decided here, because it is a design change and
+belongs to the maintainer.** The scaffold writes the spec and the constitution
+into an otherwise EMPTY working directory, so the bare arm's `Glob **/*` returned
+nothing but the two files the corpus is testing whether it will find. That is
+not the situation the product claims to help with, where the spec is two files
+among hundreds. Stop rule 3 ("the relocation did nothing") is therefore likely to
+fire for a reason that is a property of the empty workspace rather than of the
+model, and a stage 1 that stops on it would have measured the scaffold, not the
+plugin. One run cannot show the rate; it shows the route, and the route is
+exactly the one an empty directory makes free. The candidate amendment is to
+scaffold a realistic repository around the spec — the same tree in every case,
+and a fixture of its own — which would change `scaffold.sh`, the fixtures, and
+the fingerprint, and so has to be registered as a new amendment with its own
+fingerprint before stage 1 runs.
