@@ -123,6 +123,13 @@ rules:
     why: what CI actually executes. A step removed here is a check that stops existing while checks.yaml still declares it
 
   - tier: red
+    glob: ".github/tools/**"
+    why: >-
+      lockfiles for what CI installs and then runs. A version or integrity hash
+      loosened here changes the code CI executes without touching a line of the
+      workflow, which is the file a reviewer is looking at
+
+  - tier: red
     glob: "plugins/*/skills/*/templates/publish-gate.sh"
     why: a gate shipped to other repositories, where a weakening is inherited by every install
 
@@ -145,7 +152,29 @@ rules:
       after a run is how a corpus comes to agree with its result, and the edit
       is indistinguishable from a clarification in the diff
 
+  - tier: red
+    glob: "evals/*-preregistration.md"
+    why: >-
+      as the hard corpus's pre-registration above, for every corpus after it.
+      Added when the mechanism corpus's pre-registration landed and read BLUE
+      through `evals/*.md`, whose own reason says the pre-registration is
+      claimed red - only the first one was
+
   # --- amber: shipped machinery ----------------------------------------------
+
+  - tier: amber
+    glob: "evals/mech-cases/*/scaffold.sh"
+    why: >-
+      the only code in any corpus, and `plugin eval --scaffold` runs it as the
+      maintainer. `check-mech-corpus.py` pins its exact text, so a change here is
+      a change to what executes on this machine, not to eval prose
+
+  - tier: amber
+    glob: "evals/mech-cases/*/case.yaml"
+    why: >-
+      a case.yaml can carry `execution.prompt`, `env` or `add_dirs`, any of which
+      could put the spec back in front of the model or widen what runs - the
+      exact defect the mechanism corpus exists to remove
   - tier: amber
     glob: "plugins/*/.claude-plugin/plugin.json"
     why: >-
@@ -252,6 +281,14 @@ rules:
 
   - tier: blue
     glob: "evals/hard-fixtures/**"
+    why: as evals/fixtures/**
+
+  - tier: blue
+    glob: "evals/mech-cases/**"
+    why: the mechanism eval corpus, whose spec lives on disk rather than in the prompt
+
+  - tier: blue
+    glob: "evals/mech-fixtures/**"
     why: as evals/fixtures/**
 
   - tier: blue

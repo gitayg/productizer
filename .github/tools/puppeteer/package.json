@@ -1,0 +1,8 @@
+{
+  "name": "productizer-ci-puppeteer",
+  "private": true,
+  "description": "The one browser driver CI installs, for the declared view-rendered check. Installed with npm ci from the lockfile beside this file, so every transitive package is pinned by integrity hash.",
+  "dependencies": {
+    "puppeteer": "24.40.0"
+  }
+}
