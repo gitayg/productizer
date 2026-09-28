@@ -18,17 +18,22 @@ the corpus, and must come back red there with its reason before it is believed.
 
   inlined      each prompt contains exactly one `*-spec.md` and exactly one
                `*-constitution.md` from hard-fixtures/, byte for byte
-  graders      a must-not-halt case carries 01-no-false-halt.md (see NOTE)
+  graders      a must-not-halt case carries 01-no-false-halt.md, a must-halt
+               case carries 02-work-halted.md beside 01-contradiction-detected.md
+  files        every case has a prompt.md and a graders/ directory
+  both classes the corpus holds at least one must-halt and one must-not-halt
+               case, or recall or precision has nothing to measure
   plugins      each prompt's `plugins: ["<path>"]` names a directory that
                exists, resolved from the case directory; checked only once
                the two above hold
   recall       with --recall, every case in the result document has a `with`
                arm carrying a detection grader result
 
-NOTE. check-corpus.py records a must-not-halt case with no 01-no-false-halt.md
-as a problem and then opens that file to read its weight, so on a
-case-sensitive filesystem the run ends in a FileNotFoundError traceback before
-the problem sentence is printed. The exit is 1 either way.
+NOTE. Each of those is a sentence naming the case (or the corpus directory)
+and what is missing, at exit 1. Until B82 a missing grader, prompt.md or
+graders/, or an empty class, ended in a Python traceback instead, also exit 1.
+A grader counts as present only under its exact name, so a case-only rename is
+a finding on macOS as it is on Linux.
 
 Usage:
     check-hard-corpus.py
@@ -36,8 +41,8 @@ Usage:
     check-hard-corpus.py --selftest
 
 Exit: 0 clean · 1 an assertion above failed, or the checker crashed with a
-      Python traceback (a file a case needs is missing, an unreadable result
-      document), or a self-test case failed · 2 bad usage, rejected by
+      Python traceback (an unreadable result document, a missing
+      hard-fixtures/), or a self-test case failed · 2 bad usage, rejected by
       check-corpus.py's argument parser
 """
 
@@ -109,6 +114,13 @@ def _swap_plugins_for_file(E):
     _write(target, "not a directory\n")
 
 
+def _drop_class(E, grader):
+    base = os.path.join(E, "hard-cases")
+    for d in os.listdir(base):
+        if grader in os.listdir(os.path.join(base, d, "graders")):
+            shutil.rmtree(os.path.join(base, d))
+
+
 def _aggregate(E, cases):
     path = os.path.join(E, "aggregate-result.json")
     _write(path, json.dumps({"cases": cases}))
@@ -150,7 +162,9 @@ def _cases():
     H02 = "H02-far-waitlist-hold-respected"
     H03 = "H03-constitution-sync-cancel-keeps-deposit"
     H05 = "H05-superseded-cited-by-id-second-reminder"
+    H04 = "H04-constitution-sync-cancel-refunds"
     H06 = "H06-superseded-cited-by-id-no-conflict"
+    H01 = "H01-far-waitlist-hold-public-search"
     H14 = "H14-joint-no-show-warning"
     PLUG = 'plugins: ["../../../plugins/productizer"]\n'
     return [
@@ -179,11 +193,34 @@ def _cases():
          1, "stderr",
          [f"{H03}: expected exactly one spec and one constitution inlined verbatim, "
           "found ['booking-spec.md'] and ['booking-constitution.md', 'extra-constitution.md']"]),
-        ("a must-not-halt case loses 01-no-false-halt.md (ends in a traceback, see NOTE)",
+        ("a must-not-halt case loses 01-no-false-halt.md",
          lambda E: (os.rename(os.path.join(_case(E, 2), "graders", "01-no-false-halt.md"),
                               os.path.join(_case(E, 2), "graders", "01-renamed.md")), [])[1],
          1, "stderr",
-         ["FileNotFoundError", f"{H02}/graders/01-no-false-halt.md"]),
+         [f"  {H02}: neither 01-contradiction-detected nor 01-no-false-halt present"]),
+        ("a must-halt case loses 02-work-halted.md",
+         lambda E: (os.remove(os.path.join(_case(E, 1), "graders", "02-work-halted.md")), [])[1],
+         1, "stderr",
+         [f"  {H01}: must-halt case has 01-contradiction-detected.md but no 02-work-halted.md"]),
+        ("a case loses prompt.md",
+         lambda E: (os.remove(os.path.join(_case(E, 3), "prompt.md")), [])[1],
+         1, "stderr",
+         [f"  {H03}: no prompt.md, so no fixture can be checked as inlined"]),
+        ("a case loses its graders/ directory",
+         lambda E: (shutil.rmtree(os.path.join(_case(E, 4), "graders")), [])[1],
+         1, "stderr",
+         [f"  {H04}: no graders/ directory, so the case is neither must-halt nor must-not-halt "
+          "and is not counted"]),
+        ("every must-halt case removed",
+         lambda E: (_drop_class(E, "01-contradiction-detected.md"), [])[1],
+         1, "stderr",
+         ["  hard-cases: no must-halt case (none carries 01-contradiction-detected.md), "
+          "so recall has nothing to measure"]),
+        ("every must-not-halt case removed",
+         lambda E: (_drop_class(E, "01-no-false-halt.md"), [])[1],
+         1, "stderr",
+         ["  hard-cases: no must-not-halt case (none carries 01-no-false-halt.md), "
+          "so precision has nothing to measure"]),
         ("a plugins path one level short",
          lambda E: (_edit(os.path.join(_case(E, 5), "prompt.md"), PLUG,
                           'plugins: ["../../plugins/productizer"]\n'), [])[1],
@@ -279,8 +316,8 @@ def selftest() -> int:
     codes = sorted(set(c for c in reached if c >= 0))
     print(f"    exit codes reached: {' '.join(str(c) for c in codes)}   "
           f"documented: {' '.join(str(c) for c in DOCUMENTED)}")
-    print("    NOT ASSERTED: that a must-not-halt case missing 01-no-false-halt.md is caught by its own "
-          "sentence - it is caught by a traceback (see NOTE in the header). The shape figures the "
+    print("    NOT ASSERTED: that every missing file is a named finding - a missing hard-fixtures/ "
+          "still ends in a traceback (exit 1). The shape figures the "
           "pristine run prints are compared with the real corpus's, never with a recorded value, so "
           "only the case count is pinned. No `claude plugin eval` result format is read beyond the "
           "fields --recall uses.")

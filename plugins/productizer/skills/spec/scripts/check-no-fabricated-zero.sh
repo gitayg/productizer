@@ -30,6 +30,19 @@
 #   ONE CHECK'S OWN COVERAGE. The declared tool is absent, so the check never
 #   ran. Its coverage block must be ABSENT from the row.
 #
+# AND THIS SCRIPT ADDS A THIRD ROW, IN THE SANDBOX ONLY. The absent tool sends
+# the runner to `continue` before any coverage block is assembled, so that row
+# cannot carry a count whatever the runner does after it - and on that row
+# alone assertion 7 swept a set in which a kept count could never appear.
+# Measured (B87): a runner that kept the coverage count on every row that
+# reached no verdict was caught 0 of 10. So the SANDBOX copy of the config -
+# never the committed fixture - gets one more check, `refused-after-running`,
+# whose tool is `false` and whose config declares that tool's exit 1 as
+# `refused` (not `sh -c`: the runner refuses a shell as a command). That row
+# is built through the coverage block and only then loses its verdict, which
+# is the one place a kept count can be written. Its status coming back
+# `refused` is a premise, like the two above, and not an assertion.
+#
 # ABSENT, NULL AND ZERO ARE THREE STATES, and collapsing them is the whole
 # defect. Every field below is classified into one of them and the
 # classification is printed, so a failure says which state the field is in
@@ -55,7 +68,12 @@
 #      accepted either would not notice the two being swapped.
 #   7  a sweep over EVERY check row whose status means it could not run: none
 #      of them records a coverage count. Assertion 6 names the one row this
-#      fixture creates; this one holds for rows a later runner adds.
+#      fixture creates; this one holds for rows a later runner adds, and for
+#      `refused-after-running`, the row that makes the sweep non-empty. Each
+#      offender is a FINDING sentence naming the row, its status and the
+#      number it records. A coverage key in ANY form counts - an object, a
+#      bare 0, a null - because the runner's convention for such a row is
+#      absence, and a sweep that skipped a non-object would pass a bare 0.
 #
 # THE PREMISES ARE CHECKED FIRST AND ARE NOT ASSERTIONS. If the fixture's tool
 # turns out to be installed, or its absent spec turns out to be readable, then
@@ -81,6 +99,13 @@
 # every downstream "n of m covered" line divides by. The change is verified to
 # have applied before the case is driven; a patch that matched nothing would
 # otherwise turn into a second copy of the clean case.
+#
+# A SECOND COPY FALSIFIES ASSERTION 7 THE WAY B87 PLANTED IT: the line that
+# deletes the coverage block from a row that reached no verdict becomes
+# `pass`, so `refused-after-running` keeps its count. A THIRD COPY is its
+# control - the same line in the same place, changed only by a trailing
+# comment - and must stay clean: a row with the same status and no number is
+# not a finding.
 #
 # NOTHING IN THIS REPOSITORY IS EDITED. The fabrication lives in a temporary
 # copy that is removed on every exit path, signal included.
@@ -180,6 +205,28 @@ if [ "$MODE" = "selftest" ]; then
     die_unmeasured "the deliberate fabrication changed nothing in the copied runner - the unmeasured \`units_total\` initialiser is no longer where this self-test looks for it. The fabricated case would have been a second copy of the clean one, which is unmeasured, not a pass"
   fi
 
+  # B87's PLANT AND ITS CONTROL, each in a whole copy of the scripts directory.
+  # The sed is scoped to the line after the CANNOT_RUN guard, so it can only
+  # touch the deletion that guard makes.
+  plant_runner() {
+    PDIR="$SELFWORK/$1"; PWHAT="$2"; PNEW="$3"
+    mkdir -p "$PDIR" \
+      || die_unmeasured "could not make a directory for the $PWHAT case"
+    cp -R "$HERE" "$PDIR/scripts" \
+      || die_unmeasured "could not copy the scripts directory, so the $PWHAT case could not be built"
+    [ -f "$PDIR/scripts/run-checks.sh" ] \
+      || die_unmeasured "the copy for the $PWHAT case has no run-checks.sh"
+    sed -e '/^    if row\["status"\] in CANNOT_RUN:$/{' -e 'n' \
+        -e "s/^        del row\\[\"coverage\"\\]\$/$PNEW/" -e '}' \
+      "$SELFWORK/run-checks.before" > "$PDIR/scripts/run-checks.sh" \
+      || die_unmeasured "the edit for the $PWHAT case could not be written"
+    if cmp -s "$SELFWORK/run-checks.before" "$PDIR/scripts/run-checks.sh"; then
+      die_unmeasured "the edit for the $PWHAT case changed nothing in the copied runner - the deletion of a no-verdict row's coverage block is no longer on the line after the CANNOT_RUN guard. The case would have been a copy of the clean one, which is unmeasured, not a pass"
+    fi
+  }
+  plant_runner keeps-count "kept-count" "        pass"
+  plant_runner keeps-control "kept-count control" '        del row["coverage"]  # planted note'
+
   # A FIXTURE WHOSE PREMISE FAILS: the declared tool is `sh`, which is
   # installed, so the check ran and its coverage was measurable after all.
   cp -R "$FIXTURE" "$SELFWORK/present-tool" \
@@ -199,6 +246,15 @@ if [ "$MODE" = "selftest" ]; then
   # 1 - the defect itself: the denominator nobody could derive, recorded as 0.
   drive fabricates-zero 1 "a copied runner whose unmeasured units_total is 0 rather than null" \
     "$SELFWORK/scripts/${0##*/}" --fixture "$FIXTURE"
+
+  # 1 - B87's plant: every row that reached no verdict keeps its coverage
+  # count, and `refused-after-running` is one that has a count to keep.
+  drive keeps-void-count 1 "a copied runner that keeps the coverage block on a row that reached no verdict" \
+    "$SELFWORK/keeps-count/scripts/${0##*/}" --fixture "$FIXTURE"
+
+  # 0 - its control: the same status, the same line edited, and no number.
+  drive void-row-no-count 0 "the same edit reduced to a comment: a no-verdict row with no count stays clean" \
+    "$SELFWORK/keeps-control/scripts/${0##*/}" --fixture "$FIXTURE"
 
   # 2 - the premise. A tool that turns out to be installed means the check ran
   # and nothing about it was unmeasurable.
@@ -226,7 +282,7 @@ if [ "$MODE" = "selftest" ]; then
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '    NOT ASSERTED: ONE of the seven assertions is falsified - assertion 1, units_total. The other six are not driven red here, so this says the check catches a fabricated denominator and not that it catches a fabricated counts object, units list, satisfied flag or coverage block\n'
+  printf '    NOT ASSERTED: TWO of the seven assertions are falsified - assertion 1, units_total, and assertion 7, a coverage count kept on a row that reached no verdict. The other five are not driven red here, so this says nothing about a fabricated counts object, units list, satisfied flag, spec_units_unsatisfied, or a coverage block on the absent-tool row\n'
   [ "$CASES" = "$UPHELD" ] || exit 1
   # A documented code nothing drove is the gap R39.b exists to make visible, so
   # it ends the run rather than being printed past.
@@ -287,6 +343,30 @@ trap 'rm -rf "$TMP"' EXIT
 SANDBOX="$TMP/repo"
 mkdir -p "$SANDBOX"
 cp "$FIXTURE/checks.yaml" "$FIXTURE/changed.txt" "$SANDBOX/"
+# The row that ran and then lost its verdict. Appended to the sandbox copy, so
+# the committed fixture is unchanged; see the header for why the absent-tool
+# row alone could never show a kept count.
+VOID_AFTER_RUN="refused-after-running"
+cat >> "$SANDBOX/checks.yaml" <<'VOIDCFG'
+  - id: refused-after-running
+    why: its tool runs and refuses, so the row passes through the coverage block and then reaches no verdict - the one place a kept count can be written
+    when:
+      always: true
+    severity: block
+    requires: ["false"]
+    version_command: [printf, "false, the refusing stub\n"]
+    mode: batch
+    command: ["false"]
+    exit_codes:
+      pass: [0]
+      fail: [3]
+      refused: [1]
+    coverage:
+      from: stdout_paths
+      pattern: '^(\S+)$'
+      must_cover: none
+      min_covered: 1
+VOIDCFG
 if [ -e "$SANDBOX/$DECLARED_SPEC" ]; then
   die_unmeasured "the fixture's spec path exists in the sandbox, so the coverage denominator was derivable and an unmeasured denominator was never tested. The premise failed; this is unmeasured, not a pass"
 fi
@@ -314,7 +394,7 @@ neither of which is ever reported as a pass.
 import json
 import sys
 
-result_path, err_path, check_id = sys.argv[1:4]
+result_path, err_path, check_id, void_after_run = sys.argv[1:5]
 out = sys.stdout
 ok = True
 
@@ -417,8 +497,15 @@ if row.get("status") not in VOID_RUN:
                    "something and its coverage was not unmeasurable"
                    % (check_id, row.get("status")))
 
-out.write("  premises held: the denominator is %r (not measured) and `%s` is %r (no verdict).\n"
-          % (sc.get("status"), check_id, row.get("status")))
+ran = rows.get(void_after_run)
+if ran is None or ran.get("status") != "refused":
+    premise_failed("`%s` came back %r, not 'refused'; without a row that passed through the "
+                   "coverage block and then reached no verdict, assertion 7 sweeps only rows that "
+                   "cannot carry a count" % (void_after_run, None if ran is None else ran.get("status")))
+
+out.write("  premises held: the denominator is %r (not measured), `%s` is %r and `%s` is %r "
+          "(no verdict).\n" % (sc.get("status"), check_id, row.get("status"),
+                              void_after_run, ran.get("status")))
 
 # What R25 did with the same run, reported and NOT asserted. If this says the
 # printed line reads UNMEASURED while an assertion below fails, that is the
@@ -453,14 +540,24 @@ for label, _c, _k, want in fields:
 # Assertion 7: the same rule over every row a later runner might add, not only
 # the one this fixture creates.
 offenders = []
+swept = []
 for c in doc.get("checks") or []:
     if c.get("status") not in VOID_RUN:
         continue
-    cov = c.get("coverage")
-    if not isinstance(cov, dict):
+    swept.append("%s (%s)" % (c.get("id"), c.get("status")))
+    if "coverage" not in c:
         continue
-    obs = cov.get("observed") or {}
-    offenders.append("%s records covered=%r" % (c.get("id"), obs.get("covered")))
+    cov = c["coverage"]
+    if isinstance(cov, dict):
+        obs = cov.get("observed") if isinstance(cov.get("observed"), dict) else {}
+        number = "coverage.observed.covered = %s" % json.dumps(obs.get("covered"))
+    else:
+        number = "coverage = %s" % json.dumps(cov)
+    out.write("  FINDING: row `%s` is `%s` - it reached no verdict - yet records %s. A number "
+              "beside a check that never ran is a fabricated measurement.\n"
+              % (c.get("id"), c.get("status"), number))
+    offenders.append("%s records %s" % (c.get("id"), number))
+out.write("  swept %d no-verdict row(s): %s\n" % (len(swept), ", ".join(swept) or "none"))
 say(not offenders,
     "no check that reached no verdict records a coverage count%s"
     % ("" if not offenders else "; offenders: " + ", ".join(offenders)))
@@ -470,7 +567,7 @@ sys.exit(0 if ok else 1)
 PY
 
 ARC=0
-python3 "$TMP/assert.py" "$TMP/result.json" "$TMP/runner.err" unmeasurable || ARC=$?
+python3 "$TMP/assert.py" "$TMP/result.json" "$TMP/runner.err" unmeasurable "$VOID_AFTER_RUN" || ARC=$?
 
 case "$RC" in
   3) : ;;

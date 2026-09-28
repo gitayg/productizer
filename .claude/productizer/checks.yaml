@@ -2678,7 +2678,7 @@ checks:
     timeout_seconds: 60
     exit_codes:
       pass: [0]
-      fail: [1]        # a fixture not inlined exactly once, a plugins path that does not resolve - or a traceback, which also exits 1
+      fail: [1]        # a fixture not inlined exactly once, a plugins path that does not resolve, or a case missing a file its class needs - each named in a sentence
       refused: [2]     # bad usage, rejected by check-corpus.py's argument parser
     coverage:
       # The case count the structural pass prints; a deleted case drops it below the floor.
@@ -2686,7 +2686,7 @@ checks:
       pattern: '^cases\s+:\s+([0-9]+)'
       min_covered: 14
     limitations:
-      - A crash - a case missing a file the checker opens - exits 1 and reads as a finding, not as could-not-run. On a case-sensitive filesystem a must-not-halt case missing 01-no-false-halt.md is caught that way, by a traceback, and never by its own sentence.
+      - A missing `hard-fixtures/` still ends in a traceback at exit 1, so it reads as a finding rather than as could-not-run. Every missing file INSIDE a case is now a named finding (B82): a missing prompt.md, graders/, 01-no-false-halt.md or 02-work-halted.md, and a class with no cases at all.
       - It checks structure only. Recall needs a real `claude plugin eval` result and is not part of this check.
 
   - id: mech-corpus
@@ -2710,3 +2710,53 @@ checks:
     limitations:
       - The off-prompt signal is a VERBATIM 10-word run. A paraphrase of the spec pasted into a prompt passes it.
       - It pins what the scaffold and case.yaml SAY. What the harness does with them was measured once, by the stage-0 smoke run recorded as amendment A1, and nothing here re-measures it.
+
+# --- the two validations CI ran and the local suite did not ----------------
+#
+# B81. The workflow's EARS step runs `validate-spec.py --repo .`, and nothing
+# declared here did. v4.61.0 added eight requirements, left the spec header
+# saying `35 active`, passed the whole local suite, and failed CI on
+# `COUNT_MISMATCH: header declares 35 active, the file holds 43`. The backlog
+# validation had the same gap. Declared so the local run and CI ask the same
+# question. Blocking, because CI already blocks on both: an advisory copy of a
+# blocking CI step is a local run that says yes to something CI says no to.
+
+  - id: spec-valid
+    why: CI validated the spec's EARS grammar, id permanence and header counts and the local suite did not, so a stale header count passed locally and failed on main
+    when:
+      always: true
+    severity: block
+    requires: [python3]
+    version_command: [python3, --version]
+    mode: batch
+    command: [python3, plugins/productizer/skills/spec/scripts/validate-spec.py, --repo, .]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # at least one ERROR
+      refused: [2, 4]  # usage error; NOT MEASURED - a file unreadable, its kind unknown, or nothing in it to check
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) file\(s\) checked'
+      min_covered: 1
+    limitations:
+      - It runs exactly what CI's EARS step runs, and no more. Anything that step does not check, this does not either.
+
+  - id: backlog-valid
+    why: CI validated the backlog's ids and header counts and the local suite did not; a stale id counter once went four releases unnoticed
+    when:
+      always: true
+    severity: block
+    requires: [python3]
+    version_command: [python3, --version]
+    mode: batch
+    command: [python3, plugins/productizer/skills/spec/scripts/validate-spec.py, --kind, backlog, .claude/productizer/backlog.md]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2, 4]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) file\(s\) checked'
+      min_covered: 1

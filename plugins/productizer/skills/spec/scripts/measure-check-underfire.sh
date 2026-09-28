@@ -217,6 +217,7 @@ def pem():
 TOKENS = {
     "@@DROP@@":      lambda: "2>" + "/dev/" + "null",
     "@@DEVNULL@@":   lambda: "/dev/" + "null",
+    "@@PYDROP@@":    lambda: "stderr=subprocess." + "DEVNULL",
     "@@HOMEMAC@@":   lambda: "/" + "Us" + "ers/" + "alice-planted/projects",
     "@@HOMELINUX@@": lambda: "/" + "ho" + "me/" + "alice-planted/projects",
     "@@HOMEWIN@@":   lambda: "C:" + "\\" + "Us" + "ers" + "\\" + "alice-planted",
@@ -290,7 +291,7 @@ P.append(plant("stderr-suppression", "indirect: the sink held in a variable",
 P.append(plant("stderr-suppression", "indirect: python stderr discarded inside a shell script",
     new_file(SCR + "/zz-planted.sh",
              SH_HEAD + "python3 -c \"import subprocess; subprocess.run([\x27ls\x27, \x27/x\x27])\"\n",
-             SH_HEAD + "python3 -c \"import subprocess; subprocess.run([\x27ls\x27, \x27/x\x27], stderr=subprocess.DEVNULL)\"\n",
+             SH_HEAD + "python3 -c \"import subprocess; subprocess.run([\x27ls\x27, \x27/x\x27], @@PYDROP@@)\"\n",
              exe=True)))
 P.append(plant("stderr-suppression", "literal redirection in a workflow run: block",
     line_in(".github/workflows/checks.yml", "# planted: ls /nonexistent-planted || true",

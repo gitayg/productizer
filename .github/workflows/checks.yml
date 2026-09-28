@@ -418,6 +418,7 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/spec-requirements.sh --selftest
           bash plugins/productizer/skills/spec/scripts/upgrade-drift.sh --selftest
           bash scripts/check-hygiene.sh --selftest
+          python3 scripts/replay-ci.py --selftest
 
       - name: Acceptance rows — check-acceptance-rows self-test
         # R40 obliges the suite to RUN the self-tests R39 obliges tools to carry.

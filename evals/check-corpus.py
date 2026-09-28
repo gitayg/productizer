@@ -55,13 +55,20 @@ def structural() -> int:
     detect_share = []
     for slug in case_dirs():
         d = os.path.join(CASES, slug)
-        prompt = open(os.path.join(d, "prompt.md")).read()
-        hits = [f for f, text in fixtures.items() if text in prompt]
-        specs = [f for f in hits if f.endswith("-spec.md")]
-        consts = [f for f in hits if f.endswith("-constitution.md")]
-        if len(specs) != 1 or len(consts) != 1:
-            problems.append(f"{slug}: expected exactly one spec and one constitution "
-                            f"inlined verbatim, found {specs} and {consts}")
+        if not os.path.isfile(os.path.join(d, "prompt.md")):
+            problems.append(f"{slug}: no prompt.md, so no fixture can be checked as inlined")
+        else:
+            prompt = open(os.path.join(d, "prompt.md")).read()
+            hits = [f for f, text in fixtures.items() if text in prompt]
+            specs = [f for f in hits if f.endswith("-spec.md")]
+            consts = [f for f in hits if f.endswith("-constitution.md")]
+            if len(specs) != 1 or len(consts) != 1:
+                problems.append(f"{slug}: expected exactly one spec and one constitution "
+                                f"inlined verbatim, found {specs} and {consts}")
+        if not os.path.isdir(os.path.join(d, "graders")):
+            problems.append(f"{slug}: no graders/ directory, so the case is neither must-halt "
+                            f"nor must-not-halt and is not counted")
+            continue
         graders = sorted(os.listdir(os.path.join(d, "graders")))
         names = [g[:-3] for g in graders]
         is_pos = DETECT in names
@@ -76,8 +83,10 @@ def structural() -> int:
             else:
                 scored += 1
                 total += w
+        if is_pos and "02-work-halted.md" not in graders:
+            problems.append(f"{slug}: must-halt case has {DETECT}.md but no 02-work-halted.md")
         keys = [DETECT, "02-work-halted"] if is_pos else [NO_FALSE_HALT]
-        kw = sum(weight_of(os.path.join(d, "graders", k + ".md")) for k in keys)
+        kw = sum(weight_of(os.path.join(d, "graders", k + ".md")) for k in keys if k + ".md" in graders)
         detect_share.append((slug, is_pos, kw, total))
 
     print(f"cases                : {pos + neg}  ({pos} must-halt, {neg} must-not-halt)")
@@ -86,10 +95,21 @@ def structural() -> int:
     print(f"grader files         : {scored + indicators}")
     p = [(w, t) for _, is_p, w, t in detect_share if is_p]
     n = [(w, t) for _, is_p, w, t in detect_share if not is_p]
-    print(f"recall-bearing weight: {p[0][0]}/{p[0][1]} = {p[0][0] / p[0][1]:.0%} of a must-halt case's score")
-    print(f"                       (detect the contradiction + halt the work)")
-    print(f"precision-bearing wt : {n[0][0]}/{n[0][1]} = {n[0][0] / n[0][1]:.0%} of a must-not-halt case's score")
-    print(f"positive share       : {pos}/{pos + neg} = {pos / (pos + neg):.0%} of cases must halt")
+    corpus = os.path.basename(CASES)
+    if p:
+        print(f"recall-bearing weight: {p[0][0]}/{p[0][1]} = {p[0][0] / p[0][1]:.0%} of a must-halt case's score")
+        print(f"                       (detect the contradiction + halt the work)")
+    else:
+        print("recall-bearing weight: n/a (no must-halt case)")
+        problems.append(f"{corpus}: no must-halt case (none carries {DETECT}.md), so recall has nothing to measure")
+    if n:
+        print(f"precision-bearing wt : {n[0][0]}/{n[0][1]} = {n[0][0] / n[0][1]:.0%} of a must-not-halt case's score")
+    else:
+        print("precision-bearing wt : n/a (no must-not-halt case)")
+        problems.append(f"{corpus}: no must-not-halt case (none carries {NO_FALSE_HALT}.md), "
+                        f"so precision has nothing to measure")
+    if pos + neg:
+        print(f"positive share       : {pos}/{pos + neg} = {pos / (pos + neg):.0%} of cases must halt")
     if problems:
         print("\nPROBLEMS", file=sys.stderr)
         for p_ in problems:
