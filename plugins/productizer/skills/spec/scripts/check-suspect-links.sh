@@ -52,6 +52,16 @@
 # a downstream requirement's sentence, a change-log row and a reference doc
 # are all citations that go stale the same way.
 #
+# ONE REGION IS NOT A CITATION: the generated requirement index between its
+# begin and end markers, in its own file beside the spec
+# (.claude/productizer/requirement-index.md - moved out of the spec because
+# inline it made every requirement lookup read its index row too). Its rows
+# hold no sentence and cannot be cleared by hand, so counting them made every
+# in-place rewrite of an indexed requirement one guaranteed, unclearable
+# finding. Honoured only when that file's markers are well formed; a malformed
+# index is scanned like any other line, and markers in any other file,
+# the spec included, skip nothing.
+#
 # TWO TREES ARE EXCLUDED, AND THE REASON IS MEASURED, NOT ASSUMED. Any path
 # with a `fixtures/` or `evals/` component holds its OWN example specs, with
 # their own R-numbering. An `R3` in a fixture spec is a different requirement
@@ -266,6 +276,43 @@ SPEC
 SPEC
   }
 
+  # The agreed spec with its generated requirement index in its OWN file
+  # beside it, laid out as build-requirement-index.sh lays it out. $2 is R1's
+  # sentence; $3 and $4 are the index's opening and closing marker lines, so a
+  # case can duplicate or drop one. The index row for R1 is a citation-shaped
+  # line that holds no sentence. The spec's own index section is a pointer and
+  # carries no id and no marker.
+  indexed_spec() {
+    {
+      printf '# Requirement index\n\nGenerated. Do not edit by hand.\n\n'
+      printf '%b' "$3"
+      printf '| Id | Pattern | Status | Verified by |\n|---|---|---|---|\n'
+      printf '| R1 | ubiquitous | active | `spec-home` |\n'
+      printf '| R2 | ubiquitous | active | `spec-integrity` |\n'
+      printf '%b' "$4"
+    } > "$1/.claude/productizer/requirement-index.md"
+    {
+      printf '# Living spec — sandbox\n\n## Requirement index\n\nGenerated into requirement-index.md.\n'
+      printf '\n## Requirements\n\n- **R1** — %s\n' "$2"
+      printf -- '- **R2** — The lifecycle shall keep requirement ids permanent, never reused.\n'
+      printf '\n## Acceptance criteria\n\n| requirement | asserted by |\n| --- | --- |\n'
+      printf '| R1 | spec-home |\n| R2 | spec-integrity |\n'
+    } > "$1/.claude/productizer/spec.md"
+  }
+  IDX_B='<!-- productizer:requirement-index:begin -->\n'
+  IDX_E='<!-- productizer:requirement-index:end -->\n'
+  R1_AGREED='The lifecycle shall hold exactly one living spec per product.'
+  R1_REWRITTEN='The lifecycle should usually prefer at most one living spec.'
+  # $1 case, $2 opening, $3 closing: an agreed indexed spec and the dependant
+  # committed, then R1 rewritten in place under the same index.
+  indexed_case() {
+    new_repo "$SB/$1"
+    indexed_spec "$SB/$1" "$R1_AGREED" "$2" "$3"
+    agreed_dependant "$SB/$1"
+    commit_all "$SB/$1" "an indexed spec and one dependant citing R1"
+    indexed_spec "$SB/$1" "$R1_REWRITTEN" "$2" "$3"
+  }
+
   FAILED=0
   DRIVEN=0
   # R39.b: the reached half of the declaration below is ACCUMULATED here, one
@@ -351,6 +398,36 @@ SPEC
 | R2 | spec-integrity |
 SPEC
 
+  # index-skipped: R1 rewritten under a well-formed generated index. The index
+  # row must NOT be a dependant; the acceptance row and notes.md still must.
+  # Counted without the skip it is 3 cited, 3 left suspect.
+  indexed_case index-skipped "$IDX_B" "$IDX_E"
+
+  # index-two-begins / index-no-end: the same rewrite under a MALFORMED index.
+  # The row is reported, so a broken index never silences the check.
+  indexed_case index-two-begins "$IDX_B$IDX_B" "$IDX_E"
+  indexed_case index-no-end "$IDX_B" ''
+
+  # index-markers-in-spec: the OLD layout - a well-formed marker pair and its
+  # rows left inside the spec, and no index file. The skip belongs to the
+  # index file only, so the spec's row is reported: a table left behind in the
+  # spec is one nothing regenerates, and silencing it would hide that.
+  new_repo "$SB/index-markers-in-spec"
+  inline_indexed_spec() {
+    {
+      printf '# Living spec — sandbox\n\n## Requirement index\n\n%b' "$IDX_B"
+      printf '| R1 | ubiquitous | active | `spec-home` |\n%b' "$IDX_E"
+      printf '\n## Requirements\n\n- **R1** — %s\n' "$2"
+      printf -- '- **R2** — The lifecycle shall keep requirement ids permanent, never reused.\n'
+      printf '\n## Acceptance criteria\n\n| requirement | asserted by |\n| --- | --- |\n'
+      printf '| R1 | spec-home |\n| R2 | spec-integrity |\n'
+    } > "$1/.claude/productizer/spec.md"
+  }
+  inline_indexed_spec "$SB/index-markers-in-spec" "$R1_AGREED"
+  agreed_dependant "$SB/index-markers-in-spec"
+  commit_all "$SB/index-markers-in-spec" "an inline index left in the spec"
+  inline_indexed_spec "$SB/index-markers-in-spec" "$R1_REWRITTEN"
+
   # base-unresolvable: a ref that names no commit.
   base_repo base-unresolvable
 
@@ -409,6 +486,10 @@ SPEC
   drive supersede            0 'status changed: 1'
 
   drive suspect              1 'dependants: 2 cited, 0 re-read (their line moved too), 2 left suspect'
+  drive index-skipped        1 'dependants: 2 cited, 0 re-read (their line moved too), 2 left suspect'
+  drive index-two-begins     1 'SUSPECT .claude/productizer/requirement-index.md:[0-9]*  requirement-index row'
+  drive index-no-end         1 'SUSPECT .claude/productizer/requirement-index.md:[0-9]*  requirement-index row'
+  drive index-markers-in-spec 1 'SUSPECT .claude/productizer/spec.md:[0-9]*  requirement-index row'
 
   drive base-unresolvable    2 'does not resolve to a commit' --root "$SB/base-unresolvable" --base no-such-ref
   drive shallow              2 'the clone is SHALLOW'         --root "$SB/shallow" --base HEAD~1
@@ -470,6 +551,9 @@ case "$ROOT/" in
   *) die_unmeasured "--root $ROOT resolves outside its own git top level $TOP" ;;
 esac
 SPECGIT="${SPEC#"$TOP"/}"
+IDXREL=".claude/productizer/requirement-index.md"
+IDX="$ROOT/$IDXREL"
+IDXGIT="${IDX#"$TOP"/}"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/check-suspect-links.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
@@ -627,11 +711,66 @@ label_for() {  # <file> <line>
         "Design")               printf 'design note' ;;
         *)                      printf 'spec prose' ;;
       esac ;;
+    "$IDXREL") printf 'requirement-index row' ;;
     *checks.yaml) printf 'check declaration' ;;
     */classifications/*) printf 'classification record - provenance, so a flag here says the decision was made against different words, not that the file should be edited' ;;
     *) printf 'cites it' ;;
   esac
 }
+
+# --- the generated requirement index -----------------------------------------
+#
+# The rows between these two markers are written by build-requirement-index.sh
+# and carry an id, a pattern, a status and check ids - never the sentence. A
+# row there cites every indexed id, and no person can clear it by re-reading:
+# it is regenerated, and a hand edit is reported as drift. Measured before this
+# skip existed, rewriting R2's sentence in place on a clone of this repository
+# gave, on every such rewrite, one guaranteed and unclearable finding:
+#   SUSPECT .claude/productizer/spec.md:96  requirement-index row ... The file
+#   WAS edited in this change and this line was not, so read this one first.
+# The index has since moved out of the spec into $IDXREL, so the skip reads
+# the markers there and applies to that file ONLY. Markers anywhere else -
+# the spec included - skip nothing.
+#
+# The index is honoured ONLY when that file holds exactly one begin marker and
+# exactly one end marker, begin first. Missing, duplicated or reversed markers
+# skip nothing, and the rows count as citations like any other line. A
+# malformed index must fail toward reporting, never toward silence. Counted per
+# occurrence, not per line, as build-requirement-index.sh counts them. No index
+# file at all skips nothing either.
+IDX_BEGIN_MARK='<!-- productizer:requirement-index:begin -->'
+IDX_END_MARK='<!-- productizer:requirement-index:end -->'
+: > "$WORK/idx.begin"
+: > "$WORK/idx.end"
+if [ -f "$IDX" ]; then
+  irc=0
+  grep -n -o -F -- "$IDX_BEGIN_MARK" "$IDX" > "$WORK/idx.begin" || irc=$?
+  [ "$irc" -le 1 ] || die_unmeasured "grep failed reading $IDXREL for the requirement-index begin marker; which lines are generated is unknown"
+  irc=0
+  grep -n -o -F -- "$IDX_END_MARK" "$IDX" > "$WORK/idx.end" || irc=$?
+  [ "$irc" -le 1 ] || die_unmeasured "grep failed reading $IDXREL for the requirement-index end marker; which lines are generated is unknown"
+fi
+n_idx_begin="$(wc -l < "$WORK/idx.begin" | tr -d ' ')"
+n_idx_end="$(wc -l < "$WORK/idx.end" | tr -d ' ')"
+# 0 and 0 skip nothing: no line number is both above 0 and below 0.
+idx_begin_ln=0
+idx_end_ln=0
+if [ "$n_idx_begin" -eq 1 ] && [ "$n_idx_end" -eq 1 ]; then
+  b="$(cut -d: -f1 "$WORK/idx.begin")"
+  e="$(cut -d: -f1 "$WORK/idx.end")"
+  if [ "$b" -lt "$e" ]; then idx_begin_ln="$b"; idx_end_ln="$e"; fi
+fi
+if [ "$idx_end_ln" -gt 0 ]; then
+  printf 'requirement index: %s lines %s-%s are generated by build-requirement-index.sh and hold no sentence, so they are not counted as citations\n' \
+    "$IDXREL" "$((idx_begin_ln + 1))" "$((idx_end_ln - 1))"
+elif [ ! -f "$IDX" ]; then
+  printf 'requirement index: no %s, so nothing is skipped\n' "$IDXREL"
+elif [ "$n_idx_begin" -eq 0 ] && [ "$n_idx_end" -eq 0 ]; then
+  printf 'requirement index: no markers in %s, so nothing is skipped\n' "$IDXREL"
+else
+  printf 'requirement index: MALFORMED in %s (%s begin marker(s), %s end marker(s), exactly one of each with begin first is required), so every line in it is counted as a citation\n' \
+    "$IDXREL" "$n_idx_begin" "$n_idx_end"
+fi
 
 # --- per suspect requirement -------------------------------------------------
 printf '\n'
@@ -670,6 +809,7 @@ while IFS="$(printf '\t')" read -r kind id line status; do
   re="(^|[^A-Za-z0-9_])${id}([^0-9A-Za-z_]|\$)"
   deps=0
   cleared=0
+  idx_skipped=0
   : > "$WORK/hits.txt"
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue
@@ -682,6 +822,16 @@ while IFS="$(printf '\t')" read -r kind id line status; do
       # The requirement's own definition line is where the sentence lives, not
       # a citation of it. Everything else in the file is.
       if [ "$rel" = "$SPECGIT" ] && [ "$ln" = "$line" ]; then continue; fi
+      # A generated requirement-index row, strictly between well-formed
+      # markers in the index file: it holds no sentence and nobody can clear it
+      # by hand, so it would be one unclearable SUSPECT on every rewrite
+      # (measured: spec.md:96 for R2, before the index left the spec; see the
+      # index block above). Skipped BEFORE hits.txt, so it is neither a
+      # dependant nor a reason to list the index file as a citing file.
+      if [ "$rel" = "$IDXGIT" ] && [ "$ln" -gt "$idx_begin_ln" ] && [ "$ln" -lt "$idx_end_ln" ]; then
+        idx_skipped=$((idx_skipped + 1))
+        continue
+      fi
       printf '%s\t%s\n' "$rel" "$ln" >> "$WORK/hits.txt"
     done < "$WORK/g.out"
   done < "$WORK/text.txt"
@@ -710,6 +860,9 @@ while IFS="$(printf '\t')" read -r kind id line status; do
 
   printf '    dependants: %s cited, %s re-read (their line moved too), %s left suspect\n' \
     "$deps" "$cleared" "$((deps - cleared))"
+  if [ "$idx_skipped" -gt 0 ]; then
+    printf '    generated requirement-index rows citing %s, not counted as dependants: %s\n' "$id" "$idx_skipped"
+  fi
   if [ "$deps" -eq 0 ]; then
     printf '    nothing in scope cites %s. Not a finding, and not a clean bill either: a requirement nothing cites is one no artifact was traced to.\n' "$id"
   fi

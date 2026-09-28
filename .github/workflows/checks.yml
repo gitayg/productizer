@@ -374,10 +374,13 @@ jobs:
         # already run it for.
         run: |
           set -euo pipefail
+          python3 evals/check-hard-corpus.py --selftest
+          python3 evals/check-mech-corpus.py --selftest
           python3 evals/solver-probe.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
           bash plugins/productizer/skills/help/scripts/list-commands.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/build-requirement-index.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-release-notes.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-cannot-run-coverage.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-changelog-row.sh --selftest
@@ -408,6 +411,7 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/check-waiver-rendering.sh --selftest
           bash plugins/productizer/skills/spec/scripts/classify-change-risk.sh --selftest
           bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/measure-check-underfire.sh --selftest
           bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
           bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
           bash plugins/productizer/skills/spec/scripts/spec-doctor.sh --selftest

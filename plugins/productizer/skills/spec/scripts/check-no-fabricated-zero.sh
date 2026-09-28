@@ -327,8 +327,11 @@ EVALUATED = 0
 # whose entire scope was deleted invoked no tool, so any zero it appears to
 # carry was fabricated by the absence rather than measured. This set is a SECOND
 # COPY of the runner's own and they must be changed together.
+# `no_base` added 2026-09-28 with the runner's `{base}` placeholder: a check
+# that needed a base the run did not have invoked no tool, so any zero beside
+# it was fabricated by the absence. Changed together with the runner's set.
 VOID_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit",
-            "nothing_to_examine"}
+            "nothing_to_examine", "no_base"}
 
 MISSING = object()
 

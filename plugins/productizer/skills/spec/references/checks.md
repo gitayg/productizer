@@ -79,6 +79,35 @@ the root — held throughout. They were simply anchored to the wrong root.
 And `--changed README.md` from a subdirectory reported the file as not existing
 while it sat at the repository root.
 
+### What the runner substitutes into a `command`
+
+A `command` is an argv list the runner hands to a tool as it stands, with three
+exceptions, and nothing else is ever rewritten:
+
+| Placeholder | Becomes | Where it is allowed |
+|---|---|---|
+| `{file}` | one path from the change set; the tool runs once per path | `mode: per_file`, in `command` |
+| `{files}` | every path in the change set, one argument each | `mode: batch`, in `command` |
+| `{base}` | the full SHA of the commit the change is measured against — the merge base the result file records as `change.base`, never the ref that was typed | `command` only, never as the program |
+
+**`{base}` exists because a check cannot see what changed unless it is told.**
+The two governance checks compared the working tree against `HEAD`, were
+declared with no base, and the runner passes a check nothing but its argv. On a
+clean CI checkout the working tree *is* `HEAD`, so they could not fire: a
+weakening of `secret-scan` committed and run through the runner read `PASS` on
+both, while the same tool given `--base HEAD~1` named it. Found by measuring
+recall on planted defects, not by reading the code.
+
+It is data, not a program. It is refused in `command[0]`, in the script an
+interpreter is handed, and in `version_command`, `requires` and the coverage
+commands, where nothing would substitute it and the literal text would reach a
+tool. The value is checked to be 40 hex digits before it is used.
+
+**A run with no base does not guess one.** Under `--changed`, which names paths
+and no commit, a check whose command takes `{base}` is never invoked and reads
+`no_base` — a status that blocks at any severity, like `missing_tool`, because a
+check that compares against a base measures nothing without one.
+
 ### Testing this class of bug
 
 Two ways a test can agree with itself while all of the above is live, both

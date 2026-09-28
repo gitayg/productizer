@@ -2433,7 +2433,7 @@ checks:
       - git
     version_command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh, --version]
     mode: batch
-    command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh]
+    command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh, --base, "{base}"]
     timeout_seconds: 180
     exit_codes:
       pass: [0]
@@ -2473,7 +2473,7 @@ checks:
       - git
     version_command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh, --version]
     mode: batch
-    command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh, --self-only, --self-id, governance-weakening]
+    command: [./plugins/productizer/skills/spec/scripts/check-governance-weakening.sh, --self-only, --self-id, governance-weakening, --base, "{base}"]
     timeout_seconds: 180
     exit_codes:
       pass: [0]
@@ -2602,3 +2602,111 @@ checks:
       - Colour is deliberately not asserted, because a reader who cannot use hue must still tell the states apart. Contrast RATIOS are not measured either - the ones behind the prefers-contrast block were computed by hand and written into the template beside the tokens.
       - Of the two contrast modes only `prefers-contrast` has a case that goes red when its block is removed: deleting the `forced-colors` block leaves the states distinct in this browser because the hatch is discarded by the browser, not by the rule.
       - It refuses loudly (exit 2) when node is absent rather than skipping, so an environment without node reports unmeasured instead of green.
+
+# --- the requirement index, generated rather than maintained --------------
+#
+# B75. The index carried the template's three example rows while the spec held
+# 43 active requirements, two of them stating a status the spec denies (R2
+# "superseded by R41", R3 "withdrawn"), and nothing compared the table with the
+# requirements. It is now generated between markers by
+# build-requirement-index.sh and this asserts it is current - the same shape as
+# guide-current, and blocking for the same reason: a table that looks
+# authoritative and is not is worse than no table.
+#
+# NO spec_units. No active requirement obliges the index to exist or be current;
+# twelve other declared checks here claim none either. If coverage is wanted, a
+# requirement comes first (next id R50).
+
+  - id: requirement-index-current
+    why: the requirement index carried the template's three example rows while the spec held 43 active requirements, two of them stating a status the spec denies, and nothing compared the table with the requirements
+    when:
+      always: true
+    severity: block
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/build-requirement-index.sh
+      - ./plugins/productizer/skills/spec/scripts/spec-requirements.sh
+      - python3
+    version_command: [./plugins/productizer/skills/spec/scripts/build-requirement-index.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/build-requirement-index.sh, --check]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # the table between the markers differs from a fresh render of the spec
+      refused: [2, 3]  # the index file missing or unreadable, its markers missing, duplicated or reversed, --index naming the spec, or a marker left in the spec; or a spec that could not be read into an index
+    coverage:
+      # Printed only after the markers are validated and every requirement is
+      # classified; a run that indexed none exits 3 instead, so a zero here is
+      # impossible rather than unlikely.
+      from: stdout_count
+      pattern: '([0-9]+) requirement\(s\) indexed'
+      min_covered: 1
+    limitations:
+      - It compares the rows with the spec. It does not assert that a cited check is declared, enabled or claims the requirement - check-acceptance-rows.sh asserts that - nor that a requirement's pattern heading agrees with its sentence, which validate-spec.py reads.
+      - The rule that picks check ids out of an acceptance row is a COPY of check-acceptance-rows.sh's rule, agreeing with it today on all 26 pairs. Nothing asserts that parity on every run, so if that rule changes the two drift apart silently.
+
+# --- the two eval corpora, kept valid ---------------------------------------
+#
+# B79. Neither corpus checker was declared, so nothing stopped a later edit
+# re-inlining the spec into a mechanism prompt - the exact defect that corpus
+# exists to remove - or breaking the hard corpus that B18's published result
+# stands on. Both are deterministic, stdlib-only and pass on the real corpora
+# today. Blocking, as solver-corpus and guide-current are: a corpus checker that
+# only advises is one a corrupting edit walks straight past, and the results
+# already published from these corpora are what it would corrupt.
+#
+# `always`, not `paths`: each also depends on the plugin path its cases name
+# resolving, and a move under plugins/ breaks that without touching evals/. Each
+# costs well under a second.
+#
+# `requires` names python3 alone. The two .py files are not executable, and
+# `requires` asks whether a tool can be EXECUTED - listing them reported
+# `missing_tool` for the last file declared that way. The command runs them
+# through python3, and each refuses by itself if it cannot read what it needs.
+#
+# NO spec_units: no requirement in the spec is about an eval corpus.
+
+  - id: hard-corpus
+    why: the b18-hard corpus is pre-registered and fingerprinted and B18's published result stands on it, and nothing stopped a later edit un-inlining a fixture or breaking a plugins path, which silently turns the plugin arm into a second bare arm
+    when:
+      always: true
+    severity: block
+    requires: [python3]
+    version_command: [python3, --version]
+    mode: batch
+    command: [python3, evals/check-hard-corpus.py]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a fixture not inlined exactly once, a plugins path that does not resolve - or a traceback, which also exits 1
+      refused: [2]     # bad usage, rejected by check-corpus.py's argument parser
+    coverage:
+      # The case count the structural pass prints; a deleted case drops it below the floor.
+      from: stdout_count
+      pattern: '^cases\s+:\s+([0-9]+)'
+      min_covered: 14
+    limitations:
+      - A crash - a case missing a file the checker opens - exits 1 and reads as a finding, not as could-not-run. On a case-sensitive filesystem a must-not-halt case missing 01-no-false-halt.md is caught that way, by a traceback, and never by its own sentence.
+      - It checks structure only. Recall needs a real `claude plugin eval` result and is not part of this check.
+
+  - id: mech-corpus
+    why: the mechanism corpus exists to keep the spec OFF the prompt, and nothing stopped a later edit pasting it back in - which would silently rebuild the defect that made B18's mechanism test void
+    when:
+      always: true
+    severity: block
+    requires: [python3]
+    version_command: [python3, --version]
+    mode: batch
+    command: [python3, evals/check-mech-corpus.py]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a prompt that shares a 10-word run with a fixture, a scaffold or case.yaml that differs from the pinned text, a broken twin pair, a tag outside mech-cases
+      refused: [2]     # could not run - bad usage, or a corpus or fixture it could not read
+    coverage:
+      from: stdout_count
+      pattern: '^cases\s+:\s+([0-9]+)'
+      min_covered: 14
+    limitations:
+      - The off-prompt signal is a VERBATIM 10-word run. A paraphrase of the spec pasted into a prompt passes it.
+      - It pins what the scaffold and case.yaml SAY. What the harness does with them was measured once, by the stage-0 smoke run recorded as amendment A1, and nothing here re-measures it.

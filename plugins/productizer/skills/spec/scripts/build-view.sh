@@ -814,7 +814,11 @@ VZ_ARCH_STATES = ('measured', 'never_ran', 'void', 'guard_shut', 'missing')
 # of that result did not mark. Both are checked, and either one is enough.
 VZ_ARCH_VOID_RUN = frozenset((
     'missing_tool', 'timeout', 'no_version', 'refused', 'unmapped_exit',
-    'fail', 'hollow', 'nothing_to_examine', 'disabled'))
+    'fail', 'hollow', 'nothing_to_examine', 'no_base', 'disabled'))
+# `no_base` here is the RUNNER'S check status (added 2026-09-28): a check whose
+# command takes {base} in a run that had none. Not the same thing as the spec
+# delta's `state: no_base` further down, which is a view of the spec with no
+# recorded base. Same word, two namespaces; neither reads the other.
 
 # `python3 contradiction-check.py` runs contradiction-check.py. Naming that
 # check's tool `python3` would collapse it onto every other python check and

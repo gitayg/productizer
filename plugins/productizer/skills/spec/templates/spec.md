@@ -65,21 +65,11 @@ Out of scope
 
 ## Requirement index
 
-Maintain this once the spec passes roughly thirty requirements — it is how the
-file stays skimmable at two hundred. One row per requirement, in id order.
-The table starts empty: add a row when you write the requirement it indexes.
-
-| Id | Area | Pattern | Status | Verified by |
-|---|---|---|---|---|
-<!-- EXAMPLE:BEGIN — a shape to copy, not agreed content.
-     Scaffolding DELETES this block: a placeholder row reads as real content,
-     and it gets cited before anyone notices it was a sample. -->
-```text
-| R1 | <area> | ubiquitous | active | `<test name>` |
-| R2 | <area> | event | superseded by R41 | — |
-| R3 | <area> | state | withdrawn | — |
-```
-<!-- EXAMPLE:END -->
+Generated into `requirement-index.md`, beside this file, by
+`build-requirement-index.sh` once the spec passes roughly thirty requirements —
+it is how the spec stays skimmable at two hundred. Not kept here: inline, every
+lookup for one id also reads its table row and the rows around it, which cost
+this plugin's own spec 32% more retrieval.
 
 ## Requirements
 <!-- EXAMPLE:BEGIN — worked examples, not agreed content.

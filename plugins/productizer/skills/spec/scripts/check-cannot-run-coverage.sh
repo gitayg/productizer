@@ -288,8 +288,11 @@ import sys
 # It is a run that could not happen, not a run that found nothing. This set is a
 # SECOND COPY of the runner's own - they must be changed together, and a status
 # the runner can emit that is missing here reads as "ran" to this check.
+# `no_base` added 2026-09-28 with the runner's `{base}` placeholder: a check
+# whose command takes the base, in a run started with --changed that names no
+# commit, is never invoked. Same reason as the two above, same obligation.
 CANNOT_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit",
-              "nothing_to_examine"}
+              "nothing_to_examine", "no_base"}
 
 out = sys.stdout
 try:

@@ -7,6 +7,7 @@ nothing, and that ordering is the point rather than an unfinished state.
 |---|---|---|---|
 | Risk tiers by path | `.claude/productizer/risk-tiers.yaml` | `scripts/classify-change-risk.sh` | no |
 | Over-fire before blocking | nothing yet — the rule is proposed below | `scripts/measure-check-overfire.sh` | no |
+| Under-fire: recall on planted defects | the plant catalogue inside the script | `scripts/measure-check-underfire.sh` | no |
 
 ## Part 1 · Risk tiers, so review attention is not flat
 
@@ -267,6 +268,12 @@ says so on every run.
 `measure-check-overfire.sh --list` computes this rather than asserting it.
 Measured on this machine, over the 38 checks in `checks.yaml`:
 
+> **Re-measured 2026-09-27 (B77).** `checks.yaml` now declares **46** checks (43
+> when that work began; three more landed while it ran). `--list` reads **34 of 46**
+> measurable under the default and **43 of 46** under `--history clone`, which
+> gives a history-reading check the real history — see B77 below. The table that
+> follows is the 38-check measurement, kept as it was taken.
+
 **30 of 38 measurable. 8 not, for three reasons:**
 
 | Check | Why not |
@@ -297,6 +304,8 @@ rather than a worse one.
 30-commit replay is 30 suite runs. A 30-commit replay of `unmeasured-report` was
 started and abandoned after minutes without finishing a single figure, and those
 six have **no rate here** — a rate nobody waited for is a fabricated one.
+**Superseded by B77 below: all six now have a rate, and the cost was never what
+stopped them — a replay printed nothing until it finished.**
 
 The bound is not the technique, though: `untrusted-execution` also runs the runner
 and came back at `0/30 = 0.0%` inside a 25-second-per-commit cap. `--list` computes
@@ -366,7 +375,8 @@ from the denominator. The nine not replayed are the six that run the whole runne
 per commit — `missing-tool-reported`, `no-fabricated-zero`, `cannot-run-coverage`,
 `declared-scope`, `unmeasured-report`, `waiver-rendering` — plus
 `view-publish-refused`, `dependency-audit` and `sast`, whose replay was simply not
-attempted. None of those nine has a figure here.
+attempted. None of those nine has a figure here. **B77 below gives each of the
+nine a figure, or `n/a` with the reason.**
 
 | Check | Window | Fire rate | Excluded | Note |
 |---|---|---|---|---|
@@ -505,8 +515,125 @@ contradicted an earlier draft:
 (0/17) and misses the 20-verdict floor at 17. The **fourteen** checks that read
 `0/30 = 0.0%` satisfy the floor and the false-positive clause trivially and have
 no fire to rule, which is the vacuous case the maintainer has to decide about.
+**Part 3 now splits those fourteen:** seven (`hygiene`, `spec-home`,
+`guide-current`, `template-frontmatter`, `installed-copies`, `secret-scan`,
+`untrusted-execution`) caught a planted defect of their own kind, so for those
+kinds their zero is not vacuous; `publish-gate-decides` refused on its plant
+rather than returning a verdict; and six (`ruling-requested`, `jira-unbound`,
+`import-marking`, `view-read-only`, `nothing-merged`, `solver-corpus`) have no
+plant, and their zero still proves nothing.
 `selftest-coverage`, `classification-provenance` and `spec-home-stop` are not in
 the running: 1, 0 and 0 verdicts respectively.
+
+### B77 — the nine without a figure, and the five added since
+
+Measured 2026-09-27 on this machine. Every figure is `fires / verdicts`; a replay
+that refused, timed out or found no tool is excluded and counted, never passed.
+The empty-history window is the 30 commits ending `7c083eb` (v4.62.0); the clone
+window is the 30 ending `835edd8` (v4.62.2) back to `8b34b18`. Wall time is the
+whole 30-commit replay with ten replays running in parallel, so it overstates a
+lone replay.
+
+| Check | History | Fire rate | Excluded | Wall, 30 commits | Note |
+|---|---|---|---|---|---|
+| `missing-tool-reported` | empty | **0/30 = 0.0%** | — | 42s | |
+| `no-fabricated-zero` | empty | **0/30 = 0.0%** | — | 29s | |
+| `cannot-run-coverage` | empty | **0/30 = 0.0%** | — | 190s | |
+| `declared-scope` | empty | **0/30 = 0.0%** | — | 132s | |
+| `unmeasured-report` | empty | **0/30 = 0.0%** | — | 324s | the replay abandoned in the first measurement |
+| `waiver-rendering` | empty | **0/30 = 0.0%** | — | 545s | re-run over the clone window: 2.3-2.4s on the 6 commits from v4.61.0, 22.0-22.1s on the 24 before it |
+| `view-publish-refused` | empty | **0/30 = 0.0%** | — | 90s | |
+| `dependency-audit` | empty | **`n/a`, exit 4** | triggered on 0 of 30 | 1s | no commit here has ever touched a root `package.json` or lockfile |
+| `sast` | empty | **0/16 = 0.0%** | 14 not triggered | 83s | `p/default` is fetched from the Semgrep registry, so this needs the network |
+| `risk-tier-classified` | clone | **1/6 = 16.7%** | 24 tool absent | 14s | the fire is **ruled genuine**, below |
+| `governance-weakening` | clone | **0/6 = 0.0%** | 24 tool absent | 16s | **it cannot fire here or in CI** - Part 3 |
+| `governance-self-footing` | clone | **0/6 = 0.0%** | 24 tool absent | 16s | same |
+| `diff-paths-named` | clone | **0/6 = 0.0%** | 24 tool absent | 14s | |
+| `view-rendered` | empty | **0/4 = 0.0%** | 26 tool absent | 117s | |
+
+The four new checks that declare `git` were unmeasurable under the default, so
+they were replayed with `--history clone`. The five older history-readers, and two
+checks that read history **without declaring it**, were replayed the same way:
+
+| Check | History | Fire rate | Excluded | Note |
+|---|---|---|---|---|
+| `superseded-text` | clone | **0/30 = 0.0%** | — | first rate: it declares `git` |
+| `pending-ruling-scope` | clone | **0/30 = 0.0%** | — | first rate |
+| `spec-integrity` | clone | **0/30 = 0.0%** | — | first rate |
+| `changelog-row` | clone | **0/30 = 0.0%** | — | first rate |
+| `suspect-links` | clone | **0/27 = 0.0%** | 3 tool absent | first rate |
+| `classification-provenance` | clone | **0/30 = 0.0%** | — | was `n/a` - 30 of 30 refused under the default |
+| `import-marking` | clone | **0/30 = 0.0%** | — | the default's 0/30 was taken with one of its four sources dark |
+
+**The `risk-tier-classified` fire is genuine.** At `7c083eb` (v4.62.0) the commit
+added `evals/mech-cases/**`, and replaying the check on that commit's files in a
+clone prints `grey    no rule` for every one of them. A new directory nobody
+had classified is exactly what the check exists to report. Ruled false-positive
+rate: **0/6**.
+
+**`import-marking` had been reporting a source it never read.** In a tree with an
+empty repository it prints `source B - commits introducing one of them: — (git
+could not be walked: fatal: your current branch 'main' does not have any commits
+yet)` and then, in the same run, `Four sources were read and none records an
+import` and exits 0. It declares no `git`, so `--list` called it measurable and
+its first 0/30 was taken that way. That is a wording overclaim in the check, not
+fixed here (the check is not this work's file); `--history clone` gives it source
+B and the rate is unchanged at 0/30.
+
+### Why a whole-runner replay was slow — measured, not assumed
+
+Three separate costs, each measured:
+
+- **At HEAD, one replay of `unmeasured-report` took 16.51s**, and 14.2s of it
+  (86%) was its four `build-view.sh` builds at 3.2-3.7s each. The two whole-runner
+  calls took 0.17s each - the runner was never the cost. Profiled with `cProfile`,
+  3.15s of a 3.23s build is **4556 `re.search` calls** in the architecture panel,
+  which tests every script in `scripts/` against every other script's name to
+  draw call edges: quadratic in the scripts directory, and nothing
+  `unmeasured-report` asserts.
+- **Before v4.61.0 the runner charged a second per tool.** `run_limited` in
+  `run-checks.sh` polled the child with `sleep 1`, so every invocation inside a
+  fixture run cost at least one second, and version probing another.
+  `waiver-rendering` drives the runner ten times per replay: **22.1s a commit on
+  every tree before v4.61.0, 2.3-2.4s on every tree from it on** - measured per
+  commit by the new progress lines, with a trace of one old tree putting 21.3s of
+  its 22.0s in those ten runner calls, each about 1.01s in `grep --version` and
+  1.01s in `sleep 1`.
+- **The replay was silent.** The first instrument printed nothing until all 30
+  commits were done. The whole 30-commit replay of `unmeasured-report` took 324s
+  here - five and a half minutes of no output, which is what "abandoned after
+  minutes without producing one figure" was. It now prints one progress line per
+  commit on stderr.
+
+The other five whole-runner checks cost 0.2-3.5s a commit at HEAD, and all nine
+ran in parallel in about ten minutes. No cheaper replay was needed; waiting was.
+
+### `--history clone`, and why it is opt-in
+
+The default gives an extracted tree an EMPTY repository, so a history-reading check
+refuses rather than answers, and `--list` refuses to call a check declaring `git`
+measurable. `--history clone` instead builds, per commit, a repository whose
+object store borrows this one's through `objects/info/alternates` (read-only;
+nothing is written into this `.git`), with one branch `main` at that commit and
+the work tree checked out there. It carries **no tags and no remote-tracking
+refs**, because at every commit replayed, the branch tip is the future; a check
+reading tags or `origin/*` therefore sees none. The self-test asserts the no-
+future property (a fixture that fires when `rev-list --all` exceeds what HEAD
+reaches reads 0/5) and that the history is real rather than synthetic (a fixture
+reading the last commit fires on exactly the one commit that added its file).
+
+### Every child's TMPDIR is the instrument's own
+
+Each replay runs with `TMPDIR` inside the instrument's scratch directory, so a
+check killed with SIGKILL on timeout leaves nothing behind once the instrument
+exits. **One limit, measured:** macOS `/usr/bin/mktemp -d` with no template
+IGNORES `TMPDIR` on this machine and writes to the per-user temp directory
+whatever it says. So a check script's own bare `mktemp -d` is not contained, and a
+killed replay of one can still leave an empty directory there. Both instruments
+therefore create their own scratch with an explicit `"${TMPDIR:-/tmp}/..."`
+template, and their fixtures do the same - with a bare `mktemp -d`, the containment
+cases passed vacuously while leaking into the system temp directory, which is how
+this was found.
 
 ### Where the two mechanisms meet
 
@@ -514,6 +641,175 @@ A check's severity and a change's tier are different decisions and must not be
 collapsed. A `blue` change can still fail a blocking hygiene check, and it
 should. What the tier changes is **whose attention** a change needs; what the
 calibration changes is **which checks are allowed to stop it**.
+
+## Part 3 · Recall — does a check fire when the defect is there
+
+### The gap
+
+An over-fire rate cannot see a check that fires at nothing. Fourteen checks read
+`0/30 = 0.0%` over merged history, and that figure is equally consistent with a
+check that correctly never fired and with one that cannot fire at all. Merged
+history does not come with a defect known to be in it, so
+`measure-check-underfire.sh` PLANTS one.
+
+### The method
+
+For one check, over a window of real merged commits:
+
+1. Take the tree at the commit - extracted with an empty repository, or a clone
+   with the real history when the plant says `history: clone`.
+2. Apply a **control** edit and replay the check. The control is the same file,
+   the same place, a neutral line.
+3. Apply the **defect** edit to a fresh copy of the same tree - the line the
+   check's own `why:` says it exists to catch - and replay again.
+4. Every edit is **read back** before the replay. An edit that did not land is a
+   plant that did not happen.
+
+A catch counts only when the control **passed** and the defect **fired**.
+
+| Bucket | Means | Counted as |
+|---|---|---|
+| caught | control passed, defect fired | the numerator |
+| missed | control passed, defect passed | under the line |
+| out of scope | the defect is outside the check's `when:` | excluded, printed as a SCOPE finding |
+| plant failed | the edit could not be applied, or did not read back | excluded, its own figure |
+| control fired | the neutral edit already fired | excluded - a fire would not be the plant's |
+| control / planted no verdict | refused, timed out, undeclared exit, tool absent | excluded, broken down by cause |
+
+**recall = caught / (caught + missed)**, printed per kind of defect and per
+check. A recall over nothing planted is `n/a`.
+
+A plant with a clone history also names its **stage**: `worktree` leaves the
+defect uncommitted (what a pre-commit run sees), `committed` amends it into the
+commit, keeping the commit's own message (what CI sees). The same defect at the
+two stages is two kinds.
+
+Planted credentials are FAKE: random characters in the shape the scanner knows,
+generated at run time, written only into trees under the instrument's own
+temporary directory, never printed. The instrument refuses to run with its
+temporary directory inside the repository. The defect texts a check of this
+repository would catch - a stderr redirection, a home-directory path, a credential
+shape - are assembled at run time, so the script does not carry them:
+`check-hygiene.sh`, `check-stderr.sh` and `gitleaks` all read it clean.
+
+### What it measured
+
+Window: the ten commits `835edd8` (v4.62.2) back to `9f757e4`. **The ten trees are
+near-identical, so a kind's `10/10` is one observation repeated, not ten
+independent ones.** What the repetition does show is that no result depended on
+which tree it was planted into.
+
+| Check | Recall | By kind |
+|---|---|---|
+| `secret-scan` | **90/90 = 100.0%** | nine credential shapes, each 10/10 |
+| `hygiene` | **100/130 = 76.9%** | home paths (macOS, linux, windows), `.local` hostname, github, aws, private key, slack, stripe, npm: each 10/10. **GitLab token 0/10, SendGrid key 0/10, generic assigned secret 0/10** |
+| `stderr-suppression` | **30/50 = 60.0%** | literal redirection in a new script, inside `run-checks.sh`, and `exec` of the whole script: each 10/10. **The sink held in a variable 0/10. Python `stderr=subprocess.DEVNULL` inside a shell script 0/10.** 10 out of scope |
+| `shell-lint` | **30/40 = 75.0%** | SC2046, SC2155, SC2034: each 10/10. **An unquoted variable (SC2086) 0/10** |
+| `sast` | **40/50 = 80.0%** | `shell=True`, `eval`, `pickle.loads`, JS `child_process.exec`: each 10/10. **`os.system("ls " + argv)` 0/10.** 10 out of scope, 10 control fired |
+| `dependency-audit` | **10/10 = 100.0%** | a critical advisory in a locked dependency. The unlocked variant: control fired 10 of 10 |
+| `acceptance-rows` | **20/20 = 100.0%** | a requirement with no row; a row naming a check and a script that do not exist |
+| `template-frontmatter` | **20/20 = 100.0%** | an undocumented key; `tools:` misspelled `tool:` |
+| `guide-current` | **20/20 = 100.0%** | a hand edit inside the generated section; prose outside it naming an undefined id |
+| `installed-copies` | **20/20 = 100.0%** | the hook drifted from its template; the hook lost its executable bit |
+| `spec-home` | **10/10 = 100.0%** | the declared home is outside the product |
+| `retrieval-budget` | **10/10 = 100.0%** | twelve prompt-matching lines ahead of R26 took `unmeasured-zero` from 592 to 1732 characters |
+| `missing-tool-reported` | **10/10 = 100.0%** | the runner records a missing tool as `pass` |
+| `cannot-run-coverage` | **10/10 = 100.0%** | a row that reached no verdict keeps its coverage count |
+| `no-fabricated-zero` | **0/10 = 0.0%** | the same coverage defect 0/10; the missing-tool defect: **refused** 10 of 10, no verdict |
+| `untrusted-execution` | **10/10 = 100.0%** | the publish gate allows everything, both copies |
+| `publish-gate-decides` | **`n/a`, exit 4** | the same defect: **refused** 10 of 10, no verdict |
+| `view-publish-refused` | **10/10 = 100.0%** | the artifact gate allows everything, both copies |
+| `view-rendered` | **6/6 = 100.0%** | the `prefers-contrast` block no longer matches. 4 plant failed: the block did not exist at those commits |
+| `risk-tier-classified` | **6/6 = 100.0%** | a path under a directory no rule covers. 4 tool absent |
+| `diff-paths-named` | **6/6 = 100.0%** | a file swept into the commit, unnamed, committed. 4 tool absent |
+| `governance-weakening` | **12/24 = 50.0%** | **uncommitted: 12/12. Committed: 0/12** |
+| `governance-self-footing` | **6/12 = 50.0%** | **uncommitted: 6/6. Committed: 0/6** |
+
+Twenty-three of the 46 checks carry plants, and 22 of them have a recall figure -
+`publish-gate-decides` refused instead. Twenty have a recorded reason for having
+none, and three - added to `checks.yaml` while this ran - have neither, which
+`--list` prints as `NO PLANT AND NO REASON`.
+
+### What it found
+
+**The governance pair cannot fire in CI.** Both checks compare the working tree
+against `HEAD` unless given `--base`, their `checks.yaml` command gives none, and
+`run-checks.sh` passes a check nothing but its declared argv. CI checks out a
+clean tree, so `HEAD` and the work tree are the same bytes. Confirmed through the
+real runner, not only the replay: a clone at `835edd8` with one commit on top that
+lowers `hygiene` to `advise` and sets `enabled: false` on `governance-weakening`,
+run as CI runs it (`run-checks.sh --base HEAD~1`, config trimmed to the two
+governance checks), prints `PASS      governance-weakening advise exit 0` and
+`PASS      governance-self-footing block  exit 0`; the same tool run directly with
+`--base HEAD~1` exits 1 and prints `WEAKENED: checks[governance-weakening].enabled`
+and `SELF WEAKENED: self.enabled`. So the blocking self-footing check blocks
+nothing that has been committed, and the measurement that motivated both checks -
+a committed weakening run through the runner against a base - still reads PASS. Over-fire alone read `0/6` for both and
+could not have shown it. What would close it: a base the runner hands the check -
+a `{base}` placeholder, or an environment variable - so the check compares the
+change, not the checkout.
+
+**`hygiene` is not a secret scanner, and `secret-scan` is.** Three shapes gitleaks
+knows - GitLab, SendGrid, a generic assigned secret - pass `hygiene` every time.
+Its header lists credential shapes among its generic rules, and six of the nine
+credential kinds planted are among them. `secret-scan` caught all nine.
+
+**`stderr-suppression` catches the literal forms only.** Every spelling of a
+redirection to `/dev/null` - `2>`, `&>`, `2>&-`, `>/dev/null 2>&1`, `exec 2>` - is
+caught (the first three kinds, plus hand probes). A sink held in a variable, and
+Python discarding stderr inside a shell script, are missed on every tree. And a
+redirection in a workflow `run:` block is outside its `when:` entirely.
+
+**`shell-lint` runs below the severity its own `why:` names.** The `why:` is an
+unquoted expansion; `--severity=warning` hides SC2086, which is `info`. An unquoted
+COMMAND substitution (SC2046) is a warning and is caught.
+
+**`sast` misses a command injection from `argv`,** and flags the safe form of
+another. `os.system("ls " + argv)` inside a function passes `p/default` on every
+tree; the same call fed from a Flask request is caught (hand probe) - so the rules
+key on a web source, and this plugin's inputs are command lines. The `tarfile`
+control, `extractall(..., filter="data")` - the documented safe form - fired on
+every tree, which is an over-fire of `sast`, not a catch. And most Python this
+plugin runs lives inside shell heredocs, which `sast`'s `when:` never hands it.
+
+**`dependency-audit` maps a refusal to a fire.** `npm audit` with no lockfile exits
+1 with `ENOLOCK This command requires an existing lockfile.` - verified by hand on
+a clean one-dependency manifest - and 1 is the check's only `fail` code. A root
+`package.json` landing without a lockfile will read as a finding against a clean
+dependency tree.
+
+**A refusal is not a catch, and it still stops the merge.** `publish-gate-decides`
+and `no-fabricated-zero` each REFUSED on a defect of their kind (exit 2, a premise
+that did not hold) rather than failing. In the runner a refused blocking check
+refuses the stage, so neither defect would have merged; but a refusal names no
+defect, and it is excluded from recall and printed as its own line.
+
+**`no-fabricated-zero` cannot see a cannot-run row's coverage, and
+`cannot-run-coverage` can.** Its fixture yields only a `missing_tool` row, which
+never carries coverage - the empty sweep `cannot-run-coverage`'s header records.
+The plant reproduces that division exactly: 0/10 for one, 10/10 for the other.
+
+### Five plants were wrong first, and the controls or a hand check caught each
+
+| First plant | What was wrong | First figure, now withdrawn |
+|---|---|---|
+| `view-publish-refused` given a disarmed `publish-gate.sh` | the check drives `artifact-gate.sh` | 0/10 |
+| `shell-lint` given `cd` with no `|| exit` (SC2164) | under `set -e` shellcheck correctly does not raise it | 0/10 |
+| `retrieval-budget` given a spec grown at its END | cost is candidate lines BEFORE the target; 39696 to 71297 bytes stayed green, correctly | 0/10 |
+| `cannot-run-coverage` given "missing tool recorded as pass" | not its defect: it asserts no-verdict rows carry no coverage | 0/10 |
+| `guide-current` control naming `R999` in prose | the control was itself a defect the check catches | control fired 10/10 |
+
+Each would have published a recall of zero for a check that was fine. The
+catalogue is the weakest part of this instrument, and that is why.
+
+### A proposed amendment to the block-earning rule
+
+Not implemented, for the same reason the rule is not: it changes what blocks a
+merge. **A window of zero fires counts toward `block` only for a check that caught
+a planted defect of its own kind; a check with no plant, or with recall 0 on every
+kind planted, earns the same `limitations` entry as one that cannot be measured.**
+Without it, the fourteen vacuous zeros above satisfy the rule as easily as the
+seven that are known to see something.
 
 ## Running them
 
@@ -535,6 +831,17 @@ bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh --list
 # one check's fire rate over the last 30 commits, which is the default window
 bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh \
   --check acceptance-rows
+
+# a check that reads history, replayed against the real history at each commit
+bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh \
+  --check spec-integrity --history clone
+
+# which checks have plants, and why the rest have none
+bash plugins/productizer/skills/spec/scripts/measure-check-underfire.sh --list
+
+# one check's recall on planted defects over the last 10 commits
+bash plugins/productizer/skills/spec/scripts/measure-check-underfire.sh \
+  --check stderr-suppression
 ```
 
 ### Exit codes
@@ -557,6 +864,15 @@ bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh \
 | 3 | this check cannot be measured over history — disabled, no command, reads git history, or its tool is absent here. Rate prints `n/a` or `?` |
 | 4 | measured nothing — it never triggered, or it triggered and returned a verdict on none of them. Rate prints `n/a` |
 
+`measure-check-underfire.sh`
+
+| Code | Means |
+|---|---|
+| 0 | measured — at least one plant reached a verdict under a passing control; recall printed, whatever its value. `--list` too |
+| 2 | could not run — bad usage, `--list` with `--check`, `--commits` with `--since`, no config, unparseable config, an unreadable or malformed plants file, no `python3`/`yaml`, not a git work tree, a shallow clone, an unknown check id, a temporary directory inside the repository |
+| 3 | this check cannot be measured here — disabled, no command, its command passes `--base`, its tool is absent, no plant written for it, or every plant needs a history it would not have. Recall prints `n/a` or `?` |
+| 4 | measured nothing — every plant was out of scope, failed, or got no verdict under a passing control. Recall prints `n/a` |
+
 ### Not proven
 
 - **`--calibrate` and `--base` have no self-test case.** Neither the history
@@ -567,16 +883,29 @@ bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh \
 - **The 10% threshold and the 20-verdict floor are not derived.** No measurement
   here says what false-positive rate makes a gate get routed around, and the floor
   is borrowed from the A/B harness's `--min-n` rather than computed.
-- **Under-firing is not measured by anything here.** A check that never fires
-  scores a perfect 0% and may be proving nothing. R39's falsification requirement
-  is the instrument for that; this one is blind to it.
+- **A recall on planted defects says nothing about defects of a kind nobody
+  planted.** Part 3 measures each check against a catalogue, and the catalogue is
+  one person's guess at what the defect looks like; five of its first plants were
+  wrong. A check at 100% here can miss every real defect shaped differently.
+- **Recall replays the check's exit code only.** The runner's coverage layer,
+  which can turn a passing exit into `hollow`, is not replayed, and a `{files}`
+  check is handed only the planted paths, not the rest of the change set.
+- **The ten trees behind each recall figure are near-identical.** `10/10` is one
+  observation that did not depend on the tree, not ten independent ones.
+- **Twenty-four checks have no recall figure**: twenty with a recorded reason,
+  three with none, and `publish-gate-decides`, which refused. Most are tool self-tests whose defect is a mutation of the tool
+  they drive, and nobody wrote that mutation.
+- **`sast` and `dependency-audit` depend on the network** (the Semgrep registry,
+  the npm advisory endpoint), so their figures are figures on the day they ran.
 - **The undeclared-exit bucket is read from the source, not driven by a case.**
   Every fixture tool returns a code its own config declares.
-- **The group kill on timeout is exercised but its EFFECT is not asserted.** The
-  hanging fixture leaves a grandchild that exits by itself after five seconds, so a
-  child-only kill still reaches exit 4 and still reports four timeouts — it only
-  makes the run take 24.8s instead of about 4s. The twenty-minute observation on
-  real data is its evidence.
+- **The group kill on timeout is now asserted, in both instruments.** Its fixture
+  grandchild sleeps 30s under a token unique to the self-test, and the case fails
+  when a process carrying that token is still alive after the replay. Replacing
+  the group kill with a child-only kill turns it red in both (`2 alive`).
+- **A killed replay of a check using a bare `mktemp -d` can still leave an empty
+  directory in the system temp directory on macOS**, because that `mktemp` ignores
+  `TMPDIR`. The containment covers everything that honours `TMPDIR`.
 - **`selftest-coverage`'s single fire is NOT ruled.** It is called an anachronism
   above from reading the commit subject, which is a guess, not the file-level check
   that was done for `stderr-suppression`'s two fires.
@@ -588,8 +917,14 @@ bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh \
 - **The rulings are in prose in this file, not in any machine-readable place.**
   Nothing re-checks them, and nothing would notice if the window moved and they
   went stale.
-- **Six measurable checks have no rate** because replaying them means running the
-  whole runner per commit. They are named above, not estimated.
+- **`--history clone` carries no tags and no remote-tracking refs**, deliberately,
+  and checks out a branch named `main` rather than CI's detached merge commit. A
+  check reading tags, `origin/*` or a PR merge commit is not replayed as CI saw it.
+  The CURRENT versions of the eleven clone-replayed scripts carry no git call
+  reading tags, remotes or the branch name - found by grep, not by a case, and
+  not checked in their older versions.
+- **`diff-paths-named` in CI reads GitHub's merge commit on a pull request**, not
+  the authored commit this replay reads. Its CI behaviour is not measured here.
 - **One whole-suite run failed transiently and was not traced.** A run of
   `run-checks.sh --base <root commit>` during this work exited 3 on
   `REFUSED: shell-lint (fail)`, while eight other agents were editing shell
@@ -600,7 +935,7 @@ bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh \
   blocking check ran, covered what it declared, and found nothing."* So the suite
   is green with this work present, and the earlier failure was not reproduced and
   not attributed.
-- **`check-selftest-coverage.sh` reports 38 of 38 tools, and neither of these two
-  is among them.** They are undeclared, so R39 and R40 cannot see their
-  self-tests, and they read as **uncounted** rather than as covered until a
-  `checks.yaml` entry and a workflow line name them.
+- **Neither instrument is declared in `checks.yaml` or run by the workflow.** So
+  R39 and R40 cannot see their self-tests, which read as **uncounted** rather than
+  covered until an entry and a workflow line name them. This work was not allowed
+  to write either file; the proposed lines are in its report.

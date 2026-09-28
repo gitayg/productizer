@@ -260,6 +260,13 @@ rules:
       was red in the first draft of this file and the measurement moved it
 
   - tier: blue
+    glob: ".claude/productizer/requirement-index.md"
+    why: >-
+      GENERATED from the spec by build-requirement-index.sh. A hand edit here is
+      not a decision anybody made - it is drift, and requirement-index-current
+      fails on it as a blocking check. The risk lives in spec.md, which is red
+
+  - tier: blue
     glob: ".claude/sdlc/checks-result.json"
     why: the same generated artifact under the pre-rename path
 

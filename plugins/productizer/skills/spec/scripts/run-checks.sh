@@ -32,6 +32,17 @@
 #                    The result records `change.base_ref` (REF as typed) and
 #                    `change.base` (the full id of the merge base the diff was
 #                    taken from). Under --changed both are null.
+#                    A check's `command` may take that commit as `{base}`: it
+#                    is replaced by the SAME full id `change.base` records -
+#                    the merge base, never REF as typed - so a check and the
+#                    result always agree on what "base" meant, and it is
+#                    checked to be 40 hex digits before it is substituted.
+#                    `{base}` is data: it is refused in any position that
+#                    selects a program, and in every argv but `command`,
+#                    where nothing would replace it. A run with no base -
+#                    `--changed` - does not run a check that takes one, with
+#                    an empty value or a guessed one: its row is `no_base`,
+#                    which cannot run and so blocks whatever its severity.
 #   --tags LIST      comma-separated requirement tags carried by this change
 #   --root DIR       repo root the checks run in, and what every relative path
 #                    inside the config resolves against. Default: the git work
@@ -111,7 +122,7 @@
 #   but a failure rendered green because somebody said so is a judgment
 #   wearing a measurement's clothes.
 #
-#   ONLY A `fail` IS WAIVABLE. `missing_tool`, `timeout`, `no_version`,
+#   ONLY A `fail` IS WAIVABLE. `missing_tool`, `timeout`, `no_version`, `no_base`,
 #   `refused`, `unmapped_exit` and `hollow` are ABSENCES of measurement, and a
 #   person cannot decide an absence away. A waiver naming one of those - or a
 #   check that passed, or a disabled one, or one this change did not trigger -
@@ -311,6 +322,18 @@ done
 #   all-gone-and-no-tool
 #                 the same, with the tool absent too: the absent
 #                 tool is the fact that must be reported               -> 3
+#   base-substituted
+#                 a check taking `{base}`, in a third repository whose
+#                 --base ref has moved past the fork point: the tool
+#                 is handed the MERGE BASE that change.base records,
+#                 never the ref and never `rev-parse` of it            -> 0
+#   base-in-argv0 `{base}` as the program: refused when loaded         -> 2
+#   base-in-version-command
+#                 `{base}` in an argv nothing substitutes: refused     -> 2
+#   base-without-base
+#                 the same check as base-substituted under --changed,
+#                 which has no base: recorded `no_base`, the tool
+#                 never invoked, and blocking although `advise`        -> 3
 #
 # IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
 # writes over `policy.output`, so a self-test that did it would be slower than
@@ -681,6 +704,91 @@ SELFTEST_CFG_GONE_NO_TOOL
     self_unmeasured "git does not report the rename fixture's two commits as a rename even with detection explicitly on, so there is no rename collapse for the runner to be asked about. Unmeasured, not a pass"
   fi
 
+  # A THIRD GIT REPOSITORY, for `{base}`, whose --base ref has MOVED PAST THE
+  # FORK POINT. Commit 1 on main; a side branch adds a commit on top of it;
+  # main adds commit 2. Asked for `--base side`, the runner diffs against the
+  # merge base - commit 1 - and records it as `change.base`, and that is the
+  # commit a check taking `{base}` must be handed: not the word `side`, and not
+  # `git rev-parse side`, which is the side commit. Against a ref that IS an
+  # ancestor of HEAD all three name one commit, and handing over the wrong one
+  # would pass unseen - which is why this is a repository of its own.
+  fixture_base_git() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      git -C "$SB/repo-diverged" -c user.name=selftest -c user.email=selftest@example.invalid \
+      -c commit.gpgsign=false -c init.defaultBranch=main "$@" >> "$SB/repo-diverged-build.log" 2>&1
+  }
+  mkdir -p "$SB/repo-diverged/fixture"
+  { fixture_base_git init -q &&
+    printf 'the fork point\n' > "$SB/repo-diverged/fixture/base-probe.txt" &&
+    fixture_base_git add fixture/base-probe.txt &&
+    fixture_base_git commit -q -m fork-point &&
+    fixture_base_git checkout -q -b side &&
+    printf 'only on the side branch\n' > "$SB/repo-diverged/fixture/side.txt" &&
+    fixture_base_git add fixture/side.txt &&
+    fixture_base_git commit -q -m side &&
+    fixture_base_git checkout -q main &&
+    printf 'the fork point\nand a change on main after it\n' > "$SB/repo-diverged/fixture/base-probe.txt" &&
+    fixture_base_git add fixture/base-probe.txt &&
+    fixture_base_git commit -q -m main; } ||
+    self_unmeasured "the diverged fixture git repository could not be built, so the {base} cases were never driven. Unmeasured, not a pass"
+  DIV_BASE_REF="side"
+  DIV_MERGE_BASE="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-diverged" merge-base "$DIV_BASE_REF" HEAD)" ||
+    self_unmeasured "the diverged fixture has no merge base between $DIV_BASE_REF and HEAD, so there is no base to hand a check. Unmeasured, not a pass"
+  DIV_REF_SHA="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-diverged" rev-parse --verify "$DIV_BASE_REF^{commit}")" ||
+    self_unmeasured "the diverged fixture has no $DIV_BASE_REF, so the ref the case names does not exist. Unmeasured, not a pass"
+  # PREMISE: the ref and the merge base are DIFFERENT commits. If they are one
+  # commit, handing a tool `rev-parse <ref>` instead of the merge base reads
+  # identically and the case stops being able to see it.
+  if [ "$DIV_MERGE_BASE" = "$DIV_REF_SHA" ]; then
+    self_unmeasured "in the diverged fixture $DIV_BASE_REF and its merge base with HEAD are the same commit, so the tool being handed the wrong one would be invisible. Unmeasured, not a pass"
+  fi
+  printf 'fixture/base-probe.txt\n' > "$SB/changed-diverged.txt"
+
+  # A stub that prints its argv between bars, so the result file shows exactly
+  # what the runner put where `{base}` was - as a whole argument and inside a
+  # longer one. `advise` on purpose: the run without a base must block anyway.
+  cat > "$SB/checks-base.yaml" <<'SELFTEST_CFG_BASE'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  mode: batch
+  severity: advise
+checks:
+  - id: base-stub
+    why: "a stub that prints its argv between bars, so the result shows exactly what the runner handed it in place of {base}"
+    when:
+      always: true
+    severity: advise
+    requires: [printf]
+    version_command: [printf, "printf, the argv-echo stub\n"]
+    mode: batch
+    command: [printf, "%s|", "{base}", "--base={base}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: stdout_paths
+      pattern: '^([0-9a-f]{40})\|'
+      must_cover: none
+      min_covered: 1
+SELFTEST_CFG_BASE
+  # The same config with ONE line changed each, so that the config the
+  # `base-substituted` case shows loading cleanly is the control for both.
+  sed 's/^    command: \[printf, /    command: ["{base}", /' "$SB/checks-base.yaml" > "$SB/checks-base-argv0.yaml"
+  sed 's/^    version_command: .*/    version_command: [printf, "{base}"]/' "$SB/checks-base.yaml" > "$SB/checks-base-version.yaml"
+  # PREMISE: each variant really is the control plus `{base}` in the one place.
+  grep -q '^    command: \["{base}", ' "$SB/checks-base-argv0.yaml" ||
+    self_unmeasured "the argv[0] variant of the {base} config does not put {base} first, so the refusal would be of some other config. Unmeasured, not a pass"
+  grep -q '^    version_command: \[printf, "{base}"\]' "$SB/checks-base-version.yaml" ||
+    self_unmeasured "the version_command variant of the {base} config does not carry {base}, so the refusal would be of some other config. Unmeasured, not a pass"
+  # The sentence a `no_base` row carries, pinned here rather than read back and
+  # believed, followed by the one every advisory could-not-run row gets.
+  NO_BASE_DETAIL='its command takes {base}, the commit this change is measured against, and this run has none: it was started with --changed, which hands over a list of paths and names no commit. No base was guessed and the tool was not invoked. Not a pass - a check that compares against a base measures nothing without one. Run it under --base REF. Declared `advise`, but blocking anyway: a check that could not run has no findings to soften.'
+
   SELF_CASES=0
   SELF_FAILED=0
   # Assertions read off a RESULT FILE rather than off an exit code. Counted
@@ -785,6 +893,49 @@ SELFTEST_ASSERT_CHANGE
       printf '  held:    assert %-20s %s\n' "change.$_key" "$_what"
     else
       printf '  FINDING: assert %-20s %s - %s\n' "change.$_key" "$_what" "$_got"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  # $1 result file, $2 key that must NOT be on the first check row, $3 what
+  # that asserts. `exit_code` and `output_tail` are written only by a row whose
+  # tool was invoked, so their absence is the result file saying it was not.
+  self_assert_nokey() {
+    _file="$1"; _key="$2"; _what="$3"
+    SELF_ASSERTS=$((SELF_ASSERTS + 1))
+    _got="$(python3 - "$_file" "$_key" <<'SELFTEST_ASSERT_NOKEY'
+import json, sys
+path, key = sys.argv[1:3]
+try:
+    doc = json.load(open(path))
+except (OSError, ValueError) as exc:
+    print("the result file could not be read: %s" % exc)
+    raise SystemExit(0)
+rows = doc.get("checks") or []
+if not rows:
+    print("the result holds no check rows at all")
+    raise SystemExit(0)
+print("held" if key not in rows[0]
+      else "the row carries `%s` = %s, which only a run of the tool writes" % (key, json.dumps(rows[0][key])))
+SELFTEST_ASSERT_NOKEY
+)"
+    if [ "$_got" = "held" ]; then
+      printf '  held:    assert %-20s %s\n' "no $_key" "$_what"
+    else
+      printf '  FINDING: assert %-20s %s - %s\n' "no $_key" "$_what" "$_got"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  # $1 captured stderr, $2 a phrase it must hold, $3 what that asserts. An exit
+  # 2 alone says a config was refused, not WHICH rule refused it.
+  self_assert_err() {
+    _file="$1"; _want="$2"; _what="$3"
+    SELF_ASSERTS=$((SELF_ASSERTS + 1))
+    if grep -qF -- "$_want" "$_file"; then
+      printf '  held:    assert %-20s %s\n' "stderr" "$_what"
+    else
+      printf '  FINDING: assert %-20s %s - stderr does not say: %s\n' "stderr" "$_what" "$_want"
       SELF_FAILED=$((SELF_FAILED + 1))
     fi
   }
@@ -931,6 +1082,50 @@ SELFTEST_ASSERT_CHANGE
   self_assert "$SB/gone-no-tool.json" status '"missing_tool"' \
     "an absent tool outranks an empty file list - R13 is stated over the tool, and a drop that reported itself first took R13 red once already"
 
+  # `{base}`, DRIVEN. The tool is handed the commit the result records, and
+  # nothing else: not the ref, not rev-parse of the ref, not the literal.
+  self_drive base-substituted 0 \
+    "a check taking {base}, run under --base naming a branch that moved past the fork point: the tool is handed the merge base, which is the commit change.base records" \
+    --config "$SB/checks-base.yaml" --root "$SB/repo-diverged" \
+    --base "$DIV_BASE_REF" --out "$SB/base.json"
+  self_assert "$SB/base.json" status '"pass"' \
+    "the stub ran"
+  self_assert "$SB/base.json" output_tail "\"$DIV_MERGE_BASE|--base=$DIV_MERGE_BASE|\"" \
+    "the tool received EXACTLY the merge base, as a whole argument and inside a longer one - not the ref as typed, not rev-parse of it, and not a literal {base}"
+  self_assert_change "$SB/base.json" base "\"$DIV_MERGE_BASE\"" \
+    "change.base is that same commit, so the check and the result agree on what base meant"
+  self_assert_change "$SB/base.json" base_ref "\"$DIV_BASE_REF\"" \
+    "change.base_ref is the ref as typed, which is what the tool was NOT handed"
+
+  self_drive base-in-argv0 2 \
+    "{base} as the program: a commit id is data, and a config position that selects what executes never takes one" \
+    --config "$SB/checks-base-argv0.yaml" --root "$SB/repo-diverged" \
+    --base "$DIV_BASE_REF" --out "$SB/base-argv0.json"
+  self_assert_err "$SB/base-in-argv0.err" "command[0] (the program) contains {base}" \
+    "the refusal is the {base} rule, naming the position, and not some other fault in the config"
+
+  self_drive base-in-version-command 2 \
+    "{base} in version_command, which the executor never substitutes: refused at load rather than handed to a tool as literal text" \
+    --config "$SB/checks-base-version.yaml" --root "$SB/repo-diverged" \
+    --base "$DIV_BASE_REF" --out "$SB/base-version.json"
+  self_assert_err "$SB/base-in-version-command.err" "version_command contains {base}" \
+    "the refusal is the {base} rule, naming the argv it was found in"
+
+  self_drive base-without-base 3 \
+    "the same {base} check under --changed, which names no commit: never run with an empty or guessed base, recorded as unable to run, and blocking although it is advise" \
+    --config "$SB/checks-base.yaml" --root "$SB/repo-diverged" \
+    --changed "$SB/changed-diverged.txt" --out "$SB/base-none.json"
+  self_assert "$SB/base-none.json" status '"no_base"' \
+    "the row says it could not run for want of a base - not pass, not refused, not nothing_to_examine"
+  self_assert "$SB/base-none.json" detail "\"$NO_BASE_DETAIL\"" \
+    "and says so in a sentence naming what was missing and how to supply it"
+  self_assert_nokey "$SB/base-none.json" exit_code \
+    "the tool was never invoked: no exit code was recorded because none existed"
+  self_assert_nokey "$SB/base-none.json" output_tail \
+    "and it printed nothing, because it never ran"
+  self_assert_change "$SB/base-none.json" base 'null' \
+    "the run records no base either, so the row and the result agree"
+
   printf '  self-test cases driven: %d, result-file assertions: %d. Cases and assertions that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_ASSERTS" "$SELF_FAILED"
 
@@ -942,11 +1137,12 @@ SELFTEST_ASSERT_CHANGE
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '  exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
-  printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The last five cases are the exception - twenty-four assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope`, `deleted-under-base` and `renamed-away` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'
+  printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The five cases from `deleted-in-scope` to `all-gone-and-no-tool` are the exception - twenty-four assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope`, `deleted-under-base` and `renamed-away` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` case alone proves only that an absent path was ACCEPTED, because the path it names falls outside the one check scope and no tool was asked to open it. `deleted-in-scope` puts an absent path INSIDE a per_file check scope, where the executor would have substituted it into argv, and five assertions read off the result file: the check ran, the scope is still 2, one path was handed over, the dropped one is named, and it is labelled absent and not deleted.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` LABEL, and the git query that produces it. `deleted-under-base` builds a two-commit git repository, deletes an in-scope path in the second commit and runs under --base HEAD~1; assertions read off the result file that git named both paths, one was handed over, the drop is labelled deleted and not absent, dropped_source names git and the ref, and change.base / change.base_ref record the commit and the ref. The --changed case asserts both are null.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: a deletion git reports as a RENAME. Both diffs this runner takes pass --no-renames, so the old path can no longer vanish from the accounting - the shape where --name-only lists only the new path, --diff-filter=D lists nothing, and the old one is neither handed over nor dropped nor labelled nor present in change.files. `renamed-away` builds a second git repository whose two commits git calls R100 - measured, with detection explicitly on, before the case runs - and six assertions read off the result file that the scope is still 2, one path was handed over, the drop is labelled deleted and not absent, and dropped_source names the query including the flag.\n'
-  printf '  NOT ASSERTED: a --base whose ref is NOT an ancestor of HEAD, where change.base (the merge base) and `git rev-parse <ref>` differ. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
+  printf '  NOW ASSERTED, and this line used to say it was not: a --base whose ref is NOT an ancestor of HEAD, where change.base (the merge base) and `git rev-parse <ref>` differ. `base-substituted` builds that repository, measures that the two commits differ before it runs, and asserts that change.base and the argv a `{base}` check received are both the merge base. `base-in-argv0`, `base-in-version-command` and `base-without-base` assert the refusals and the `no_base` row, reading stderr and the result file rather than the exit code alone.\n'
+  printf '  NOT ASSERTED: `{base}` in an interpreter program operand (refused by the same rule as argv[0], not driven here), and a base that resolved but is not 40 hex digits - a SHA-256 repository - whose row is `no_base` with a different sentence and is not driven here. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
     exit 1
@@ -1641,6 +1837,14 @@ def program_ref(where, elem, role):
     Only these positions are gated. A path sitting in an ordinary operand is
     data, which is what P4 already says it is; gating those would refuse
     `--config pyproject.toml` and teach people to switch the gate off."""
+    # `{base}` IS DATA, NEVER THE PROGRAM. It becomes a commit id, and a
+    # position that selects what executes is no place for one: `python3 {base}`
+    # would run whatever file in the work tree carries that name. Refused in
+    # every program position of every argv, before anything else is asked.
+    if "{base}" in elem:
+        bad("%s (%s) contains {base}. {base} is replaced by a commit id, which is data: it is "
+            "never the program and never the script an interpreter is handed. Put it in an "
+            "ordinary argument." % (where, role))
     if os.path.isabs(elem):
         real = os.path.realpath(elem)
         inside = real == ROOT_REAL or real.startswith(ROOT_REAL + os.sep)
@@ -1892,6 +2096,18 @@ for idx, chk in enumerate(checks):
 
     req = chk.get("requires")
     req = argv_of("%s.requires" % w, req) if req is not None else [cmd[0]]
+
+    # `{base}` IS REPLACED IN `command` AND NOWHERE ELSE. The executor
+    # substitutes the check's own argv; a version, rules or coverage argv is run
+    # as written, so `{base}` in one would reach a tool as the literal text -
+    # an argument nobody meant, and a check measuring something other than what
+    # its declaration reads as. Refused rather than quietly substituted in a
+    # second place nobody reads.
+    for _nm, _av in (("version_command", ver_argv), ("requires", req),
+                     ("coverage.command", cov_cmd), ("coverage.rules_command", rules_cmd)):
+        if _av and any("{base}" in a for a in _av):
+            bad("%s.%s contains {base}, and only `command` has {base} replaced. Anywhere else "
+                "it would reach a tool as literal text." % (w, _nm))
 
     # --- does this change attract it -------------------------------------
     reasons, matched = [], []
@@ -2349,6 +2565,19 @@ read_argv() {
 
 cd "$ROOT"
 
+# `{base}` IS THE COMMIT `change.base` RECORDS, and nothing else. BASE_SHA is the
+# merge base, resolved above by `rev-parse --verify` - never BASE_REF, the ref
+# as typed, which on a ref that moved past the fork point names a commit the
+# diff was never taken against. It is checked to be 40 hex digits HERE, where
+# it is about to become an argument, rather than trusted from where it was
+# made: a value that is not one is never substituted. Empty is the `--changed`
+# mode, which has no base at all.
+BASE_IS_SHA=0
+case "$BASE_SHA" in
+  *[!0-9a-f]*) ;;
+  *) [ "${#BASE_SHA}" -ne 40 ] || BASE_IS_SHA=1 ;;
+esac
+
 for idx in $TRIGGERED; do
   [ -n "$idx" ] || continue
   D="$WORK/run/$idx"
@@ -2371,6 +2600,25 @@ for idx in $TRIGGERED; do
   if [ -n "$MISSING" ]; then
     printf '%s\n' "${MISSING# }" > "$D/missing"
     printf 'missing_tool\n' > "$D/status_override"
+    continue
+  fi
+
+  # A CHECK THAT TAKES `{base}` IN A RUN WITHOUT ONE DOES NOT RUN. Not with an
+  # empty string, not with HEAD, not with the literal text: each of those runs
+  # the tool over a comparison nobody asked for and reads back as its verdict.
+  # `check-governance-weakening.sh` handed no base compares HEAD with the work
+  # tree, which on a clean checkout is nothing at all, and exits 0 - that is the
+  # blind spot `{base}` exists to close, and a guessed base reopens it. After the
+  # tool check, because an absent tool is true whatever the run was given;
+  # before the empty-scope one, because a missing base is true whatever the
+  # file list holds.
+  read_argv "$D/argv"
+  TAKES_BASE=0
+  for a in "${ARGV[@]}"; do
+    case "$a" in *'{base}'*) TAKES_BASE=1 ;; esac
+  done
+  if [ "$TAKES_BASE" -eq 1 ] && [ "$BASE_IS_SHA" -ne 1 ]; then
+    printf 'no_base\n' > "$D/status_override"
     continue
   fi
 
@@ -2435,6 +2683,9 @@ for idx in $TRIGGERED; do
       read_argv "$D/argv"
       CMD=()
       for a in "${ARGV[@]}"; do
+        # `{base}` BEFORE `{file}`, so a path that holds the text `{base}` is
+        # handed over as the path it is and never rewritten into a commit id.
+        a="${a//\{base\}/$BASE_SHA}"
         CMD+=("${a//\{file\}/$f}")
       done
       printf '\n===== %s\n' "$f" >> "$D/output"
@@ -2459,7 +2710,7 @@ for idx in $TRIGGERED; do
           CMD+=("$f")
         done < "$D/files"
       else
-        CMD+=("$a")
+        CMD+=("${a//\{base\}/$BASE_SHA}")
       fi
     done
     brc=0
@@ -2512,8 +2763,15 @@ results, blocking_failures, advisory_failures, triggered = [], [], [], 0
 # the check's scope is gone from the tree, so no tool was invoked and no
 # verdict exists. It is not a pass, and it is not `refused` either - nothing
 # refused anything, because nothing was asked.
+#
+# `no_base` is here for the same reason again: the check's command takes
+# `{base}` and this run has no base to give it, so the tool was never invoked.
+# A NEW STATUS AND NOT `nothing_to_examine`, because the two send a reader to
+# different places - that one to the deleted paths in the check's scope, this
+# one to how the runner was started - and a status that means two things is
+# read as whichever one the reader expected.
 CANNOT_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit",
-              "nothing_to_examine"}
+              "nothing_to_examine", "no_base"}
 
 
 def record_failure(row):
@@ -2568,6 +2826,23 @@ for c in plan["checks"]:
                          "this change, %d absent with nothing to say why), so nothing survives for a "
                          "tool to open and none was invoked. Not a pass: a check whose entire scope "
                          "vanished examined nothing." % (_nd + _na, _nd, _na))
+        row["tool"] = {"version": None}
+        results.append(row)
+        record_failure(row)
+        continue
+    if override == "no_base":
+        row["status"] = "no_base"
+        if plan["base"] is None:
+            row["detail"] = ("its command takes {base}, the commit this change is measured against, "
+                             "and this run has none: it was started with --changed, which hands over "
+                             "a list of paths and names no commit. No base was guessed and the tool "
+                             "was not invoked. Not a pass - a check that compares against a base "
+                             "measures nothing without one. Run it under --base REF.")
+        else:
+            row["detail"] = ("its command takes {base}, and the base this run resolved, %s, is not "
+                             "40 hex digits, so it was not substituted and the tool was not invoked. "
+                             "Not a pass - a check that compares against a base measures nothing "
+                             "without one." % plan["base"])
         row["tool"] = {"version": None}
         results.append(row)
         record_failure(row)
@@ -2841,7 +3116,7 @@ by_id = {r["id"]: r for r in results}
 # a verdict measured nothing. A disabled check is out of force entirely, n/a
 # included: a claim from something switched off covers nothing.
 VOID_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit", "fail", "hollow",
-            "nothing_to_examine"}
+            "nothing_to_examine", "no_base"}
 
 spec_report = {"mode": sc["mode"], "spec": sc["spec"], "status": sc["status"],
                "detail": sc["detail"], "enforced": sc["enforced"],

@@ -2,6 +2,7 @@
 # measure-check-overfire.sh [--config FILE] [--root DIR]
 #                          (--list | --check ID)
 #                          [--commits N | --since REF] [--per-run-timeout SECS]
+#                          [--history empty|clone]
 #                          [--version] [--help] [--selftest]
 #
 # --commits defaults to 30, the window the proposed block-earning rule uses.
@@ -57,6 +58,27 @@
 # the work tree or writes into `.git` would corrupt whatever else is running.
 # Nothing here writes inside the repository.
 #
+# --history clone IS THE SECOND WAY, AND IT IS OPT-IN. The default (`empty`)
+# gives the extracted tree an empty repository, so a check that reads history
+# refuses, and --list calls every check declaring `git` unmeasurable. That is the
+# conservative answer and it cost nine checks their rates. It also hid one: a
+# check that reads history WITHOUT declaring git - `import-marking` walks
+# `git log` for one of its four sources - gets no history, carries on with three,
+# and passes; its 0/30 was taken with a source dark. `--history clone` builds,
+# per commit, a repository whose object store BORROWS this one's through
+# `objects/info/alternates` (read-only; nothing is written into this `.git`),
+# with one branch `main` at that commit and the work tree checked out there. So
+# the check sees the REAL history up to that commit, as CI's full-depth checkout
+# does, and nothing after it: no remote-tracking refs and no tags are carried,
+# because the tip of this branch is the future at every commit replayed. A check
+# reading tags or `origin/*` therefore sees none, which the output says.
+#
+# EVERY CHILD'S TEMPORARY DIRECTORY IS OURS. Each replay runs with TMPDIR
+# pointed inside this tool's own scratch directory. A replay killed on timeout is
+# killed with SIGKILL, which runs no trap, so whatever the check had made under
+# TMPDIR used to stay in the system temp directory for good. Now it stays under
+# a directory this tool removes on exit.
+#
 # EXIT CODES ARE THE CONTRACT.
 #
 #   0  measured - the check triggered on at least one commit in the range, and a
@@ -72,6 +94,11 @@
 #      or it triggered and returned a VERDICT on none of them because every
 #      replay refused, timed out or found no tool. The rate prints as n/a in both
 #      cases, because a rate over zero examined commits is not a rate of zero
+#
+# Progress goes to stderr, one line per commit, as the replay runs. A 30-commit
+# replay of `unmeasured-report` was abandoned after minutes "without producing one
+# figure"; measured later, one commit costs about 16s, so the whole replay was
+# eight minutes of silence, not a hang - and nothing on the screen could say which.
 #
 # Under --selftest the same four mean: every case produced the code it declares
 # (0), at least one did not (1 - which is therefore reachable under --selftest
@@ -98,7 +125,7 @@
 #   is one commit in the count either way; this tool counts COMMITS, not files.
 set -euo pipefail
 
-VERSION="1.0"
+VERSION="1.1"
 
 CONFIG_REL=""
 ROOT=""
@@ -106,6 +133,7 @@ CHECK_ID=""
 COMMITS=""
 SINCE=""
 PER_RUN_TIMEOUT="120"
+HISTORY="empty"
 MODE=""
 
 die_unmeasured() {
@@ -132,6 +160,10 @@ while [ "$#" -gt 0 ]; do
     --commits) [ "$#" -ge 2 ] || die_unmeasured "--commits needs a value"; COMMITS="$2"; shift 2 ;;
     --since) [ "$#" -ge 2 ] || die_unmeasured "--since needs a value"; SINCE="$2"; shift 2 ;;
     --per-run-timeout) [ "$#" -ge 2 ] || die_unmeasured "--per-run-timeout needs a value"; PER_RUN_TIMEOUT="$2"; shift 2 ;;
+    --history)
+      [ "$#" -ge 2 ] || die_unmeasured "--history needs empty or clone"
+      case "$2" in empty|clone) HISTORY="$2" ;; *) die_unmeasured "--history is empty or clone, not $2" ;; esac
+      shift 2 ;;
     *) die_unmeasured "unknown option: $1" ;;
   esac
 done
@@ -143,7 +175,7 @@ done
 # poll loop charges its own interval to every invocation.
 # ---------------------------------------------------------------------------
 ENGINE='
-import os, re, signal, subprocess, sys, tarfile, shutil
+import os, re, signal, subprocess, sys, tarfile, shutil, time
 
 mode     = sys.argv[1]
 cfg_fp   = sys.argv[2]
@@ -153,6 +185,7 @@ n_commits= sys.argv[5]
 since    = sys.argv[6]
 per_run  = float(sys.argv[7])
 work_root= sys.argv[8]
+history  = sys.argv[9]
 
 def refuse(msg, code=2):
     sys.stderr.write("measure-check-overfire: " + msg + "\n")
@@ -213,10 +246,11 @@ def measurability(chk):
     if not isinstance(cmd, list) or not cmd:
         return False, "no command to run", "n/a"
     requires = chk.get("requires") or []
-    if "git" in requires:
+    if "git" in requires and history != "clone":
         return (False,
                 "reads git history, and an extracted tree carries no .git - its "
-                "answer there would be an artefact of the extraction", "n/a")
+                "answer there would be an artefact of the extraction "
+                "(--history clone gives it the real history)", "n/a")
     if any(isinstance(a, str) and a == "--base" for a in cmd):
         return (False,
                 "the command passes --base, so it compares against a history the "
@@ -229,7 +263,15 @@ def measurability(chk):
         "no file placeholder - runs against the whole extracted tree"
         if not any("{file" in str(a) for a in cmd) else "file placeholder"), None
 
+def history_line():
+    if history == "clone":
+        return ("history: CLONE - each commit gets the real history up to it, "
+                "borrowed read-only; no tags, no remotes, nothing after it")
+    return ("history: EMPTY - each tree gets an empty repository, so a check "
+            "reading history refuses rather than answers")
+
 if mode == "list":
+    print("    " + history_line())
     print("    every check in this config, and whether it can be replayed")
     print("      %-28s %-11s %s" % ("check", "measurable", "why"))
     yes = no = 0
@@ -254,6 +296,7 @@ if not chosen:
 chk = chosen[0]
 
 print("    check: %s" % check_id)
+print("    " + history_line())
 
 # The history comes FIRST. Whether a check is replayable over history is not a
 # question that has an answer when there is no history, and answering it anyway
@@ -316,8 +359,40 @@ def _bail(signum, _frame):
 signal.signal(signal.SIGTERM, _bail)
 signal.signal(signal.SIGINT, _bail)
 
+common = git("rev-parse", "--git-common-dir").stdout.strip()
+objects_dir = os.path.join(root if not os.path.isabs(common) else "", common, "objects")
+
+def quiet(argv):
+    return subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=None).returncode
+
+def clone_at(sha, tree):
+    """A repository at `tree` whose history is this one up to `sha` and no further.
+    Returns None on success, or the step that failed."""
+    if quiet(["git", "init", "--quiet", tree]) != 0:
+        return "git init"
+    with open(os.path.join(tree, ".git", "objects", "info", "alternates"), "w") as fh:
+        fh.write(os.path.abspath(objects_dir) + "\n")
+    for argv, what in (
+            (["git", "-C", tree, "config", "gc.auto", "0"], "config"),
+            (["git", "-C", tree, "update-ref", "refs/heads/main", sha], "update-ref"),
+            (["git", "-C", tree, "symbolic-ref", "HEAD", "refs/heads/main"], "symbolic-ref"),
+            (["git", "-C", tree, "reset", "--hard", "--quiet"], "checkout")):
+        if quiet(argv) != 0:
+            return what
+    return None
+
+child_tmp_root = os.path.join(work_root, "child-tmp")
+os.makedirs(child_tmp_root, exist_ok=True)
+t_start = time.time()
+
 try:
-    for sha in commits:
+    for idx, sha in enumerate(commits):
+        t_commit = time.time()
+        def progress(verdict):
+            sys.stderr.write("measure-check-overfire: [%d/%d] %s %s (%.1fs, %.0fs so far)\n"
+                             % (idx + 1, len(commits), sha[:12], verdict,
+                                time.time() - t_commit, time.time() - t_start))
+            sys.stderr.flush()
         show = git("show", "--pretty=format:", "--name-only", "--no-renames",
                    "--diff-filter=ACMR", sha)
         files = [f for f in show.stdout.splitlines() if f.strip()]
@@ -328,25 +403,36 @@ try:
             if not triggering:
                 tally["not_triggered"] += 1
                 per_commit.append((sha, "not-triggered"))
+                progress("not-triggered")
                 continue
         tally["triggered"] += 1
 
         tree = os.path.join(work, sha[:12])
-        os.makedirs(tree, exist_ok=True)
-        tar_fp = os.path.join(work, sha[:12] + ".tar")
-        with open(tar_fp, "wb") as th:
-            arc = subprocess.run(["git", "-C", root, "archive", "--format=tar", sha],
-                                 stdout=th, stderr=None)
-        if arc.returncode != 0:
-            tally["tool_absent"] += 1
-            per_commit.append((sha, "tree-unavailable"))
-            continue
-        with tarfile.open(tar_fp) as tf:
-            try:
-                tf.extractall(tree, filter="data")
-            except TypeError:
-                tf.extractall(tree)
-        os.unlink(tar_fp)
+        if history == "clone":
+            failed_step = clone_at(sha, tree)
+            if failed_step is not None:
+                tally["tool_absent"] += 1
+                per_commit.append((sha, "tree-unavailable (%s)" % failed_step))
+                progress("tree-unavailable")
+                shutil.rmtree(tree, ignore_errors=True)
+                continue
+        else:
+            os.makedirs(tree, exist_ok=True)
+            tar_fp = os.path.join(work, sha[:12] + ".tar")
+            with open(tar_fp, "wb") as th:
+                arc = subprocess.run(["git", "-C", root, "archive", "--format=tar", sha],
+                                     stdout=th, stderr=None)
+            if arc.returncode != 0:
+                tally["tool_absent"] += 1
+                per_commit.append((sha, "tree-unavailable"))
+                progress("tree-unavailable")
+                continue
+            with tarfile.open(tar_fp) as tf:
+                try:
+                    tf.extractall(tree, filter="data")
+                except TypeError:
+                    tf.extractall(tree)
+            os.unlink(tar_fp)
 
         # AN EMPTY GIT REPOSITORY IN THE EXTRACTED TREE, DELIBERATELY. Measured
         # first, not assumed: without this, 20 of 20 replays of acceptance-rows
@@ -360,14 +446,16 @@ try:
         # refusal and never as a pass. Committing the tree would have given
         # those checks a one-commit history that is not this repository, and
         # they would have answered confidently about it.
-        subprocess.run(["git", "init", "--quiet", tree],
-                       stdout=subprocess.DEVNULL, stderr=None, check=False)
+        if history != "clone":
+            subprocess.run(["git", "init", "--quiet", tree],
+                           stdout=subprocess.DEVNULL, stderr=None, check=False)
 
         exe = cmd_tpl[0]
         exe_fp = os.path.join(tree, exe[2:]) if exe.startswith("./") else None
         if exe_fp is not None and not os.path.isfile(exe_fp):
             tally["tool_absent"] += 1
             per_commit.append((sha, "tool-absent-at-that-commit"))
+            progress("tool-absent-at-that-commit")
             shutil.rmtree(tree, ignore_errors=True)
             continue
 
@@ -397,10 +485,13 @@ try:
             # replay of selftest-coverage with a 25s per-run limit was still alive
             # after twenty minutes. So the child gets its own session and the
             # timeout kills the group.
+            child_tmp = os.path.join(child_tmp_root, "%s-%d" % (sha[:12], len(rcs)))
+            os.makedirs(child_tmp, exist_ok=True)
+            child_env = dict(os.environ, TMPDIR=child_tmp)
             try:
                 proc = subprocess.Popen(argv, cwd=tree, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, text=True,
-                                        start_new_session=True)
+                                        start_new_session=True, env=child_env)
             except OSError as exc:
                 broke = ("tool_absent", "not-executable: %s" % exc.strerror)
                 break
@@ -421,11 +512,13 @@ try:
         if broke is not None:
             tally[broke[0]] += 1
             per_commit.append((sha, broke[1]))
+            progress(broke[1])
             shutil.rmtree(tree, ignore_errors=True)
             continue
         if not rcs:
             tally["tool_absent"] += 1
             per_commit.append((sha, "no invocation was made"))
+            progress("no invocation was made")
             shutil.rmtree(tree, ignore_errors=True)
             continue
         # Worst first: an undeclared code outranks a refusal, a refusal outranks
@@ -455,6 +548,7 @@ try:
         else:
             tally["undeclared"] += 1
             per_commit.append((sha, "undeclared exit %d" % rc))
+        progress(per_commit[-1][1])
         shutil.rmtree(tree, ignore_errors=True)
 finally:
     shutil.rmtree(work, ignore_errors=True)
@@ -589,23 +683,70 @@ exit 0
 FIXTURE_TRIP
   chmod +x "$REPO/tools/fires-on-trip.sh"
 
-  # A tool that OUTLIVES ITS OWN CHILD PROCESS. It backgrounds a sleep and waits,
-  # so the grandchild holds stdout open: killing only the direct child leaves the
-  # read blocked long after the timeout fired, which is the defect this drives.
-  # The sleep is 5s rather than 60s deliberately - with the group-kill removed
-  # this case must FAIL, not hang, or the self-test stops being a self-test.
-  cat > "$REPO/tools/hangs.sh" <<'FIXTURE_HANG'
+  # A tool that OUTLIVES ITS OWN CHILD PROCESS. Its grandchild sleeps 30s and
+  # carries a token unique to this self-test, so a kill that reached only the
+  # direct child leaves a process the case below finds by name. 30s outlasts the
+  # 10s the engine waits after a kill, so the survivor is still alive when it is
+  # looked for; and the case still ENDS with the group kill removed, because that
+  # wait is bounded - a case that hung would hang the suite instead of failing.
+  GC_TOKEN="ofgrandchild-$$-$RANDOM"
+  cat > "$REPO/tools/hangs.sh" <<FIXTURE_HANG
 #!/usr/bin/env bash
 set -euo pipefail
-sleep 5 &
+sh -c 'sleep 30; : $GC_TOKEN' &
 wait
 FIXTURE_HANG
   chmod +x "$REPO/tools/hangs.sh"
 
+  # A tool that READS HISTORY and says so in `requires`: it fires when the LAST
+  # COMMIT added or modified src/bad.txt. Under the default it is unmeasurable (a
+  # tree with an empty repository has no last commit); under --history clone it
+  # must fire on exactly the commit that added the file. A synthetic history that
+  # handed every tree a one-commit past would fire on every commit carrying it.
+  cat > "$REPO/tools/reads-last-commit.sh" <<'FIXTURE_LAST'
+#!/usr/bin/env bash
+set -euo pipefail
+names="$(git show --name-only --diff-filter=AM --pretty=format: HEAD)" || {
+  echo "reads-last-commit: no last commit to read" >&2; exit 2; }
+case "$names" in *src/bad.txt*) echo "  the last commit touched src/bad.txt" >&2; exit 1 ;; esac
+exit 0
+FIXTURE_LAST
+  chmod +x "$REPO/tools/reads-last-commit.sh"
+
+  # A tool that fires when the repository it is handed can see a commit its HEAD
+  # cannot reach - the future, from the point of view of the commit replayed. A
+  # clone carrying this branch's tip as a remote-tracking ref fails it on every
+  # commit but the newest.
+  cat > "$REPO/tools/sees-no-future.sh" <<'FIXTURE_FUTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+all="$(git rev-list --all --count)"
+mine="$(git rev-list --count HEAD)"
+if [ "$all" != "$mine" ]; then
+  echo "  this repository holds $all commits and HEAD reaches $mine" >&2
+  exit 1
+fi
+exit 0
+FIXTURE_FUTURE
+  chmod +x "$REPO/tools/sees-no-future.sh"
+
+  # A tool that makes a directory under TMPDIR and then outlives the timeout. It
+  # is killed with SIGKILL, so its own cleanup never runs; the directory must end
+  # up inside this tool's scratch directory and not in the caller's TMPDIR.
+  cat > "$REPO/tools/leaks-tmp.sh" <<'FIXTURE_LEAK'
+#!/usr/bin/env bash
+set -euo pipefail
+mktemp -d "${TMPDIR:-/tmp}/leak.XXXXXX" > /dev/null
+sleep 5 &
+wait
+FIXTURE_LEAK
+  chmod +x "$REPO/tools/leaks-tmp.sh"
+
   GIT=(git -C "$REPO" -c user.email=selftest@example.invalid -c user.name=selftest -c commit.gpgsign=false)
   git init --quiet "$REPO" > /dev/null
   printf 'one\n' > "$REPO/src/a.txt"
-  "${GIT[@]}" add tools/fires-on-bad.sh tools/always-refuses.sh tools/needs-root.sh tools/fires-on-trip.sh tools/hangs.sh src/a.txt > /dev/null
+  "${GIT[@]}" add tools/fires-on-bad.sh tools/always-refuses.sh tools/needs-root.sh tools/fires-on-trip.sh tools/hangs.sh \
+    tools/reads-last-commit.sh tools/sees-no-future.sh tools/leaks-tmp.sh src/a.txt > /dev/null
   "${GIT[@]}" commit --quiet -m "first: a clean tree" > /dev/null
   printf 'bad\n' > "$REPO/src/bad.txt"
   "${GIT[@]}" add src/bad.txt > /dev/null
@@ -746,6 +887,39 @@ checks:
       pass: [0]
       fail: [1]
       refused: [2]
+  - id: reads-last-commit
+    why: declares git and reads the last commit, so only a real history can answer for it
+    when:
+      always: true
+    requires: [./tools/reads-last-commit.sh, git]
+    mode: batch
+    command: [./tools/reads-last-commit.sh]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+  - id: sees-no-future
+    why: fires when the repository it is handed holds a commit HEAD cannot reach
+    when:
+      always: true
+    requires: [./tools/sees-no-future.sh, git]
+    mode: batch
+    command: [./tools/sees-no-future.sh]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+  - id: leaks-tmp
+    why: makes a directory under TMPDIR and is then killed on timeout
+    when:
+      paths: ["src/**"]
+    requires: [./tools/leaks-tmp.sh]
+    mode: batch
+    command: [./tools/leaks-tmp.sh, "{files}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
   - id: no-command-at-all
     why: nothing to run
     when:
@@ -822,6 +996,37 @@ CFG
     --root "$REPO" --config "$WORK/checks.yaml" --check per-file-fold
   drive timed-out 4 "every replay outran the limit, so nothing was examined and there is no rate" \
     --root "$REPO" --config "$WORK/checks.yaml" --check outlives-its-child --per-run-timeout 1
+  CASES=$((CASES + 1))
+  ALIVE="$(pgrep -f "$GC_TOKEN" | wc -l | tr -d ' ')" || ALIVE=0
+  pkill -f "$GC_TOKEN" || :
+  if [ "$ALIVE" = "0" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+  REPORT="$REPORT      group-kill  expected 0 alive  got $ALIVE alive  $V  the timeout killed the whole process group: no grandchild of a timed-out replay is still running
+"
+
+  # --- --history clone ----------------------------------------------------
+  drive empty-history-refuses 3 "a check reading the last commit is unmeasurable without --history clone" \
+    --root "$REPO" --config "$WORK/checks.yaml" --check reads-last-commit
+  drive clone-reads-history 0 "with --history clone the same check reads the real last commit of each tree" \
+    --root "$REPO" --config "$WORK/checks.yaml" --check reads-last-commit --history clone
+  drive clone-no-future 0 "a cloned tree holds nothing its HEAD cannot reach" \
+    --root "$REPO" --config "$WORK/checks.yaml" --check sees-no-future --history clone
+  drive listed-clone 0 "--list under --history clone counts the git-declaring checks as replayable" \
+    --root "$REPO" --config "$WORK/checks.yaml" --list --history clone
+  drive bad-history 2 "--history takes empty or clone and nothing else" \
+    --root "$REPO" --config "$WORK/checks.yaml" --check measurable-one --history sideways
+
+  # --- a SIGKILLed child leaves nothing in the caller's TMPDIR ----------------
+  mkdir -p "$WORK/outer-tmp"
+  NAME="tmp-contained"; GOT=0
+  TMPDIR="$WORK/outer-tmp" bash "$0" --root "$REPO" --config "$WORK/checks.yaml" \
+    --check leaks-tmp --per-run-timeout 1 > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
+  CASES=$((CASES + 1))
+  LEFT="$(find "$WORK/outer-tmp" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
+  if [ "$GOT" = "4" ] && [ "$LEFT" = "0" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+  CODES="$CODES$GOT
+"
+  REPORT="$REPORT      $NAME  expected 4 and 0 entries left  got $GOT and $LEFT  $V  a replay killed on timeout made a directory under TMPDIR, and none of it is left in the caller's TMPDIR
+"
 
   # Sentences, not only codes, on the rows carrying this tool's central claims.
   WORDED=0; WORDED_OK=0
@@ -853,12 +1058,28 @@ CFG
     "the fire is on the LAST of three triggering files, so only visiting them all finds it"
   assert_says timed-out 'timed out                      4' \
     "all four triggering commits outran the limit, and a timeout is never a pass"
-  assert_says listed 'measurable: 7 of 11' \
-    "--list counts the replayable checks and names why the rest are not"
   assert_says no-verdict 'verdict on none of them' \
     "every replay refused, so no rate is printed rather than a 0.0% one"
   assert_says measured 'the denominator' \
     "the denominator is named in the output, because which commits are under the line is the whole argument"
+  assert_says clone-reads-history 'fire rate over merged history: 1/5 = 20.0%' \
+    "one fire over five commits: only the commit that ADDED src/bad.txt has it in its last commit, which only a real per-commit history shows"
+  assert_says clone-reads-history 'history: CLONE' \
+    "the history mode is printed, so a rate taken over a clone is never read as one taken over an empty repository"
+  assert_says clone-no-future 'fire rate over merged history: 0/5 = 0.0%' \
+    "no replayed repository can see a commit after the one it was built at"
+  assert_says listed-clone 'measurable: 11 of 14' \
+    "the three checks declaring git are replayable once the history is real"
+  assert_says listed 'measurable: 8 of 14' \
+    "without --history clone the same three are not"
+  WORDED=$((WORDED + 1))
+  if grep -q 'measure-check-overfire: \[1/5\] ' "$WORK/measured.err"; then
+    WORDED_OK=$((WORDED_OK + 1)); W="held"
+  else
+    W="NOT HELD"
+  fi
+  REPORT="$REPORT      wording:progress  $W  a progress line per commit goes to stderr, so a long replay is never silent
+"
 
   printf '    selftest cases driven: %d\n' "$CASES"
   printf '%s' "$REPORT"
@@ -869,14 +1090,14 @@ CFG
   fi
   printf '    R39.s  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$SELF_VERDICT" \
-    "each case exits the code it declares, and fifteen rows also assert the sentence"
+    "each case exits the code it declares, and twenty rows also assert the sentence"
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 2 3 4; do
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 2 3 4\n' "$REACHED"
-  printf '    NOT ASSERTED, two things. The undeclared-exit bucket is not driven - every fixture tool returns a code its own config declares. And the GROUP kill on timeout is EXERCISED BUT ITS EFFECT IS NOT ASSERTED: the timing-out fixture tool leaves a grandchild that exits by itself after 5s, so replacing the group kill with a child-only kill still reaches exit 4 and still reports 4 timeouts - it only makes the run take 24.8s instead of about 4s. The group kill was added because a real replay with a 25s limit was still alive after twenty minutes, and that measurement, not this self-test, is its evidence. The fixture sleeps 5s rather than 600s on purpose: a case that HANGS when the line regresses would hang the suite instead of failing it.\n'
+  printf '    NOT ASSERTED: the undeclared-exit bucket is not driven - every fixture tool returns a code its own config declares. The group kill on timeout IS asserted (group-kill): until 1.1 it was exercised but not asserted, because its fixture grandchild exited by itself after 5s.\n'
   [ "$CASES" = "$UPHELD" ] || exit 1
   [ "$WORDED" = "$WORDED_OK" ] || exit 1
   if [ -n "$MISSING" ]; then
@@ -916,7 +1137,13 @@ esac
 [ -r "$CONFIG" ] \
   || die_unmeasured "no readable config at $CONFIG. Nothing was measured, which is not a fire rate of zero."
 
-TMP="$(mktemp -d)" || die_unmeasured "could not make a temporary directory"
+# mktemp IS GIVEN AN EXPLICIT TEMPLATE UNDER $TMPDIR. Measured on this
+# machine: macOS /usr/bin/mktemp -d with no template IGNORES TMPDIR and writes
+# to the per-user temp directory whatever TMPDIR says. So a bare `mktemp -d`
+# cannot be redirected, and neither the scratch-directory guard nor the
+# containment of a killed child could be tested through it.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/measure-check-overfire.XXXXXX")" \
+  || die_unmeasured "could not make a temporary directory"
 # EXIT covers the ordinary path; INT and TERM are trapped separately because a
 # fatal signal terminates the shell without running the EXIT trap, and that is
 # how five interrupted runs each left several megabytes of extracted tree behind.
@@ -925,7 +1152,7 @@ trap 'rm -rf "$TMP"; exit 130' INT
 trap 'rm -rf "$TMP"; exit 143' TERM
 
 set +e
-python3 -c "$ENGINE" "$MODE" "$CONFIG" "$ROOT" "$CHECK_ID" "$COMMITS" "$SINCE" "$PER_RUN_TIMEOUT" "$TMP"
+python3 -c "$ENGINE" "$MODE" "$CONFIG" "$ROOT" "$CHECK_ID" "$COMMITS" "$SINCE" "$PER_RUN_TIMEOUT" "$TMP" "$HISTORY"
 RC=$?
 set -e
 exit "$RC"
