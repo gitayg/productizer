@@ -49,6 +49,16 @@ DISPATCH = (
     re.compile(r"""add_argument\(\s*["']--self[-_]?test["']"""),
     # a comparison: [ "$1" = --selftest ] / if arg == "--self-test"
     re.compile(r"""[=!]=?\s*["']?--self[-_]?test\b"""),
+    # a comparison against a list or tuple literal holding the flag:
+    # argv == ["--selftest"] / sys.argv[1:] == ["--self-test"] /
+    # args == ("--selftest",). Missed until B88: replay-ci.py dispatched that
+    # way, passed 16 of 16, and read `carries no self-test`. `==` or `!=` only,
+    # because a bare `=` before a list is an assignment and a list with no
+    # operator before it is an argv being BUILT - subprocess.run([..,
+    # "--selftest"]) - which is a mention. No bracket may open or close between
+    # the literal's start and the flag, so the match cannot run on out of one
+    # compared literal into a call that merely passes the flag.
+    re.compile(r"""[=!]=\s*[\[(][^\[\]()]*["']--self[-_]?test["']"""),
 )
 FLAG_RE = re.compile(r"--self[-_]?test\b")
 REJECTED_RE = re.compile(r"unknown (option|argument|flag)", re.I)

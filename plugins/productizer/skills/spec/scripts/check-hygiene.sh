@@ -3,8 +3,19 @@
 #                  [--selftest|--self-test] <file>...
 #
 # Refuses content that must not reach a public repo: personal filesystem
-# paths, machine hostnames, private key material, and anything shaped like a
-# credential.
+# paths, machine hostnames, private key material, and the credential SHAPES
+# the built-in list names - GitHub, GitLab, AWS, Anthropic, OpenAI, Slack,
+# Stripe, Google, npm and SendGrid tokens, JSON Web Tokens, and a value of
+# sixteen or more letters and digits assigned to a name containing `secret`.
+#
+# WHAT IT DOES NOT CLAIM. A regex matches a shape; it cannot score entropy.
+# A high-entropy value assigned to any other name (token, password, api key),
+# or sitting on a line with no name at all, is not caught here and is the
+# secret-scan check's job - gitleaks scores entropy, which this cannot. The
+# generic rule is keyed on the one word the measured miss used, and it was
+# adopted only after it produced no finding anywhere in this repository. With
+# no entropy test, every keyword added is another way for ordinary code to
+# look like a leak, and a rule that cries wolf is a rule somebody switches off.
 #
 # TWO PATTERN SOURCES, UNIONED.
 #
@@ -104,8 +115,8 @@ VERSION="check-hygiene 2.0"
 # script. It is also split on `|` at run time for reporting, and
 # PATTERN_CLASSES names each alternative in the same order - a length mismatch
 # refuses the run rather than mislabelling a finding.
-PATTERNS='/Users/[A-Za-z][A-Za-z0-9._-]*|/home/[A-Za-z][A-Za-z0-9._-]*|C:\\Users\\[A-Za-z][A-Za-z0-9._-]*|-Users-[A-Za-z][A-Za-z0-9._-]*|[A-Za-z0-9][A-Za-z0-9-]*\.local[^A-Za-z0-9_.-]|[A-Za-z0-9][A-Za-z0-9-]*\.local$|-----BEGIN [A-Z ]*PRIVATE KEY|gh[opsur]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|A[KS]IA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_-]{16,}|sk-proj-[A-Za-z0-9_-]{16,}|^sk-[A-Za-z0-9]{20,}|[^A-Za-z0-9]sk-[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|[sr]k_live_[A-Za-z0-9]{10,}|AIza[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}'
-PATTERN_CLASSES='personal filesystem path|personal filesystem path|personal filesystem path|personal filesystem path, slug form|machine hostname|machine hostname|private key material|GitHub token|GitHub personal access token|AWS access key id|Anthropic API key|OpenAI project API key|OpenAI API key|OpenAI API key|Slack token|Stripe live key|Google API key|npm token|JSON Web Token'
+PATTERNS='/Users/[A-Za-z][A-Za-z0-9._-]*|/home/[A-Za-z][A-Za-z0-9._-]*|C:\\Users\\[A-Za-z][A-Za-z0-9._-]*|-Users-[A-Za-z][A-Za-z0-9._-]*|[A-Za-z0-9][A-Za-z0-9-]*\.local[^A-Za-z0-9_.-]|[A-Za-z0-9][A-Za-z0-9-]*\.local$|-----BEGIN [A-Z ]*PRIVATE KEY|gh[opsur]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|A[KS]IA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_-]{16,}|sk-proj-[A-Za-z0-9_-]{16,}|^sk-[A-Za-z0-9]{20,}|[^A-Za-z0-9]sk-[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|[sr]k_live_[A-Za-z0-9]{10,}|AIza[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}|glpat-[A-Za-z0-9_-]{20,}|SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}|secret[A-Za-z0-9_-]*["]?[ ]*[:=]+[ ]*[^A-Za-z0-9 ]?[A-Za-z0-9]{16,}'
+PATTERN_CLASSES='personal filesystem path|personal filesystem path|personal filesystem path|personal filesystem path, slug form|machine hostname|machine hostname|private key material|GitHub token|GitHub personal access token|AWS access key id|Anthropic API key|OpenAI project API key|OpenAI API key|OpenAI API key|Slack token|Stripe live key|Google API key|npm token|JSON Web Token|GitLab personal access token|SendGrid API key|generic assigned secret'
 
 usage() {
   printf 'usage: check-hygiene.sh [--version] [--help] [--patterns FILE] [--print-patterns] [--selftest] <file>...\n'
@@ -180,6 +191,19 @@ if [ -n "$SELFTEST" ]; then
   # An AWS access key id shape. Same construction, same reason.
   printf 'aws_access_key_id = %s%s\n' 'AK' 'IA0123456789ABCDEF' > "$SCRATCH/credential.txt"
 
+  # GitLab, SendGrid and a generic assigned secret, each beside a NEGATIVE
+  # CONTROL one character short of its shape: a rule that also fired on the
+  # control would be matching the prefix, not the credential. The bodies are
+  # slices of one alphabet taken at run time and every prefix and keyword is
+  # split, so no line of this file holds a credential-shaped run.
+  fill='AbCdEfGhIjKlMnOpQrStUvWxYz0123456789aBcDeFgHiJkLmNoPqRsTuVwXyZ'
+  printf 'GITLAB_TOKEN=%s%s%s\n' 'gl' 'pat-' "${fill:0:20}" > "$SCRATCH/gitlab.txt"
+  printf 'GITLAB_TOKEN=%s%s%s\n' 'gl' 'pat-' "${fill:0:19}" > "$SCRATCH/gitlab-short.txt"
+  printf 'SENDGRID_API_KEY=%s%s%s.%s\n' 'S' 'G.' "${fill:0:22}" "${fill:0:43}" > "$SCRATCH/sendgrid.txt"
+  printf 'SENDGRID_API_KEY=%s%s%s.%s\n' 'S' 'G.' "${fill:0:22}" "${fill:0:42}" > "$SCRATCH/sendgrid-short.txt"
+  printf 'client_%s%s = "%s"\n' 'sec' 'ret' "${fill:0:32}" > "$SCRATCH/generic.txt"
+  printf 'client_%s%s = "%s"\n' 'sec' 'ret' "${fill:0:15}" > "$SCRATCH/generic-short.txt"
+
   # A NUL byte makes it binary: named, and NOT counted as examined.
   printf 'text\000more text\n' > "$SCRATCH/binary.bin"
 
@@ -236,6 +260,34 @@ if [ -n "$SELFTEST" ]; then
   leak=0
   grep -qF 'IA0123456789ABCDEF' "$SCRATCH/cred.out" "$SCRATCH/cred.err" || leak=$?
   record match-not-printed 1 "$leak" "the offending text is absent from the finding (grep found nothing, which is exit 1)"
+
+  # Each shape is a finding under ITS OWN class, and its control is clean. The
+  # label is asserted as well as the exit code: a plant caught by some other
+  # rule would pass on the code alone and prove nothing about the new one.
+  # The label checks record grep's status, so like match-not-printed they are
+  # kept out of the reached codes.
+  for shape in "gitlab:GitLab personal access token" "sendgrid:SendGrid API key" "generic:generic assigned secret"; do
+    name="${shape%%:*}"
+    label="${shape#*:}"
+
+    got=0
+    bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/$name.txt" \
+      > "$SCRATCH/$name.out" 2> "$SCRATCH/$name.err" || got=$?
+    record "$name" 1 "$got" "a $label is a finding"
+    CODES="$CODES$got
+"
+
+    labelled=0
+    grep -qF ": $label - " "$SCRATCH/$name.out" || labelled=$?
+    record "$name-labelled" 0 "$labelled" "the finding is named as a $label (grep found the label, which is exit 0)"
+
+    got=0
+    bash "$0" --patterns "$SCRATCH/no-local-patterns.txt" "$SCRATCH/$name-short.txt" \
+      > "$SCRATCH/$name-short.out" 2> "$SCRATCH/$name-short.err" || got=$?
+    record "$name-short" 0 "$got" "the $label prefix with a body one character short is not a finding"
+    CODES="$CODES$got
+"
+  done
 
   # Binary alongside a clean file: the binary is named, not counted, and the
   # run is still clean because something WAS examined.

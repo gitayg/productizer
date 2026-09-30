@@ -307,7 +307,7 @@ returned 50, so one in this range but older than those is not listed here.**
   if [ "$CASES" = "$UPHELD" ]; then CASE_VERDICT="held"; else CASE_VERDICT="NOT HELD"; fi
   printf '    R39.a  %-40s examined %3d  upheld %3d  %s\n' \
     "each-case-exits-the-declared-code-and-says-why" "$CASES" "$UPHELD" "$CASE_VERDICT"
-  NDOC="$(printf '%s\n' $DOCUMENTED | wc -l | tr -d ' ')"
+  NDOC="$(printf '%s' "$DOCUMENTED" | wc -w | tr -d ' ')"
   if [ -n "$MISSING" ]; then CODE_VERDICT="NOT HELD"; else CODE_VERDICT="held"; fi
   printf '    R39.b  %-40s examined %3d  upheld %3d  %s\n' \
     "every-documented-exit-code-reached" "$NDOC" "$((NDOC - $(printf '%s' "$MISSING" | wc -w | tr -d ' ')))" "$CODE_VERDICT"

@@ -64,7 +64,7 @@ checks:
       - The private half of the deny list is loaded at runtime and is absent in CI and in a fresh clone, so those runs check generic rules only. The run says so rather than staying quiet.
 
   - id: shell-lint
-    why: these scripts run on other people's machines, and an unquoted expansion there is their problem, not ours
+    why: these scripts run on other people's machines, and a shellcheck warning there is their problem, not ours. Unquoted expansions are shell-quoting's job - this check's severity never raises them
     when:
       paths: ["**/*.sh"]
     severity: block
@@ -85,7 +85,7 @@ checks:
 
   # --- the solver's own corpus --------------------------------------------
     limitations:
-      - Runs at --severity=warning, which does NOT include SC2086, unquoted expansions. That was found when a deliberate SC2086 failed to turn the gate red.
+      - Runs at --severity=warning, which does NOT include SC2086, unquoted expansions. That was found when a deliberate SC2086 failed to turn the gate red, and measured again as a recall miss (B85). `shell-quoting` now raises exactly that code.
 
   - id: solver-corpus
     why: precision must stay at 1.00 - a contradiction checker that halts on a non-conflict gets switched off, and then nothing is checked
@@ -2760,3 +2760,36 @@ checks:
       from: stdout_count
       pattern: '([0-9]+) file\(s\) checked'
       min_covered: 1
+
+# --- unquoted expansions, which shell-lint's severity never raised ----------
+#
+# B85. shell-lint runs `shellcheck --severity=warning`, and SC2086 - an unquoted
+# expansion - is severity INFO, so the defect shell-lint's own reason named could
+# never fire. Recall measured it: 0 of 10 planted unquoted expansions caught.
+# Lowering shell-lint to info would have added about ninety unrelated findings
+# (63 of them SC2016, mostly a deliberate `$` inside a quoted awk or python
+# program) and buried this one, so this is its own check raising that ONE code.
+# The repository had three, all fixed before this was declared, each with its
+# self-test output unchanged.
+
+  - id: shell-quoting
+    why: an unquoted expansion splits and globs a value nobody meant to split, on machines that are not ours, and shell-lint's severity never raised it
+    when:
+      paths: ["**/*.sh"]
+    severity: block
+    requires: [shellcheck]
+    version_command: [shellcheck, --version]
+    mode: per_file
+    command: [shellcheck, --severity=info, --include=SC2086, --format=gcc, "{file}"]
+    timeout_seconds: 600
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2, 3, 4]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - It raises SC2086 and nothing else. A split that is intended must be written as one - an array, or `tr` - rather than left unquoted; a file that needs an exception says so with a `# shellcheck disable=SC2086` comment and its reason beside it.

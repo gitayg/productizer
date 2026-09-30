@@ -222,11 +222,15 @@ selftest() {
 
   printf '\n%s of %s cases held\n' "$((ST_TOTAL - ST_FAILS))" "$ST_TOTAL"
 
-  REACHED="$(printf '%s\n' $ST_CODES | grep -v '^$' | sort -u | tr '\n' ' ' \
-    | sed 's/  *$//')"
+  # ST_CODES is a space-separated list, split with tr rather than by leaving
+  # the expansion unquoted - shell-quoting (SC2086) reads an unquoted
+  # expansion as a defect, and here the split is the intent, so say it.
+  REACHED="$(printf '%s' "$ST_CODES" | tr ' ' '\n' | grep -v '^$' | sort -u \
+    | tr '\n' ' ' | sed 's/  *$//')"
+  ST_CODE_LINES="$(printf '%s' "$ST_CODES" | tr ' ' '\n')"
   ST_MISSING=""
   for want in 0 2 3 4; do
-    printf '%s\n' $ST_CODES | grep -qx "$want" || ST_MISSING="$ST_MISSING $want"
+    grep -qx "$want" <<< "$ST_CODE_LINES" || ST_MISSING="$ST_MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 2 3 4\n' "$REACHED"
   printf '    NOT ASSERTED: the CONTENT of a record. Each case asserts the exit code and the number of lines on stdout, so a parse that emitted the right count of wrong records - a mis-split field, a status read from the wrong column - is green here. The id, line, status and text columns are asserted by check-declared-scope.sh and contradiction-check.py against the real spec, not here.\n'

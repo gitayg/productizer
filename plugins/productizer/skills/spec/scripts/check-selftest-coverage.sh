@@ -59,7 +59,9 @@
 # HOW "CARRIES A SELF-TEST" IS MEASURED, AND WHAT THAT MEASUREMENT IS WORTH.
 # Structurally, on the tool's own source: a non-comment line that DISPATCHES on
 # a self-test flag - a shell `case` pattern `--selftest)`, a `[ "$1" = --selftest ]`
-# comparison, or an argparse `add_argument("--self-test"...)`. A line that only
+# comparison, a comparison against a list or tuple literal holding the flag
+# (`argv == ["--selftest"]`, `args == ("--self-test",)`), or an argparse
+# `add_argument("--self-test"...)`. A line that only
 # MENTIONS the flag does not count, and that distinction is load-bearing rather
 # than fussy: `check-nothing-merged.sh` names `--selftest` in its header comment
 # while its argument parser rejects it with exit 2, and a grep for the string
@@ -422,11 +424,73 @@ esac
 exit 0
 TOOL
 
+  # --- a comparison against a LIST is a dispatch; a list passed on is not ---
+  # B88: replay-ci.py dispatched with `if argv == ["--selftest"]:`, its
+  # self-test passed 16 of 16, and R39 read `carries no self-test`, because the
+  # `[` between the operator and the flag broke the comparison pattern.
+  cat > "$d/tools/list-dispatch.py" <<'TOOL'
+#!/usr/bin/env python3
+import sys
+
+
+def main(argv):
+    if argv == ["--selftest"]:
+        print("  fixture self-test held")
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+TOOL
+
+  # the tuple form, on the other spelling of the flag.
+  cat > "$d/tools/tuple-dispatch.py" <<'TOOL'
+#!/usr/bin/env python3
+import sys
+
+if tuple(sys.argv[1:]) == ("--self-test",):
+    print("  fixture self-test held")
+    sys.exit(0)
+sys.exit(0)
+TOOL
+
+  # THE NEGATIVE CONTROL. Its only mentions of the flag are argv lists it BUILDS
+  # to run something else - no `==` in front of them. A recogniser widened to
+  # "any line holding ["--selftest"]" reads this as a self-test, and that is
+  # the mention-versus-dispatch distinction this whole check rests on.
+  cat > "$d/tools/list-mention.py" <<'TOOL'
+#!/usr/bin/env python3
+import subprocess
+import sys
+
+
+def run_helper():
+    subprocess.run(["bash", "helper.sh", "--selftest"], check=False)
+    return subprocess.run(["bash", "helper.sh"] + ["--selftest"], check=False).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(0)
+TOOL
+
+  # the same flag, as a list, inside a docstring. Text, not code that runs.
+  cat > "$d/tools/doc-mention.py" <<'TOOL'
+#!/usr/bin/env python3
+"""Runs helper.sh; pass it ["--selftest"] to run ITS self-test. This tool
+takes no such flag."""
+import sys
+
+sys.exit(0)
+TOOL
+
   chmod +x "$d/tools/with-selftest.sh" "$d/tools/mention-only.sh" \
            "$d/tools/rejects-flag.sh" "$d/tools/slow-selftest.sh" \
            "$d/tools/off-selftest.sh" \
            "$d/tools/codes-complete.sh" "$d/tools/codes-missing.sh" \
-           "$d/tools/codes-malformed.sh"
+           "$d/tools/codes-malformed.sh" \
+           "$d/tools/list-dispatch.py" "$d/tools/tuple-dispatch.py" \
+           "$d/tools/list-mention.py" "$d/tools/doc-mention.py"
   # NOTHING CREATES tools/gone.sh. The `absent` cases name it deliberately.
   printf 'name: fixture\njobs:\n  checks:\n    steps:\n      - run: |\n          echo nothing\n' \
     > "$d/.github/workflows/checks.yml"
@@ -599,6 +663,35 @@ CFG
 printf 'name: fixture\njobs:\n  checks:\n    steps:\n      - run: |\n          bash tools/with-selftest.sh --selftest || true\n' \
   > "$SB/wfswallow/.github/workflows/checks.yml"
 
+# listcmp: two Python tools that dispatch by comparing their argv to a list or
+# tuple literal. Both carry a self-test; a recogniser that misses the shape
+# reads `1 of 3` and fails the run on tools whose self-tests pass.
+mk_case listcmp
+cat > "$SB/listcmp/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-selftest
+    command: [./tools/with-selftest.sh, --selftest]
+  - id: fixture-list-dispatch
+    command: [./tools/list-dispatch.py, --selftest]
+  - id: fixture-tuple-dispatch
+    command: [./tools/tuple-dispatch.py, --self-test]
+CFG
+
+# listmention: two tools that hold the flag in a list and dispatch on nothing -
+# once in a subprocess argv, once in a docstring. Each is an R39 finding.
+mk_case listmention
+cat > "$SB/listmention/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-selftest
+    command: [./tools/with-selftest.sh, --selftest]
+  - id: fixture-list-mention
+    command: [./tools/list-mention.py]
+  - id: fixture-doc-mention
+    command: [./tools/doc-mention.py]
+CFG
+
 FAILED=0
 CASES=0
 # Every exit code a case actually produced, one per line. The R39.b line this
@@ -687,6 +780,12 @@ drive absenttool  1 "tools/gone.sh is named by fixture-absent and no such file e
 drive absenttool  1 "third-party tools, which nobody here can add a self-test to: none"
 drive absentoff   0 "never a third party: ./tools/gone.sh (1 of them named only by"
 drive wfswallow   1 "R40 propagation: 0 of those 1 can still set the run's exit code"
+
+# B88: a comparison against a list or tuple literal is a dispatch, and a list
+# that is only passed on - or only written in a docstring - is not.
+drive listcmp     0 "R39: 3 of 3 check tools the suite exercises carry a self-test"
+drive listmention 1 "list-mention.py carries no self-test"
+drive listmention 1 "doc-mention.py carries no self-test"
 
 printf '  cases driven: %d. Cases that did not hold: %d\n' "$CASES" "$FAILED"
 
