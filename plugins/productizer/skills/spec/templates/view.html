@@ -946,7 +946,7 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
   .vz-hero-value{font-size:30px}
   #vz-chart{height:210px}}
 
-/* ---------- architecture: the declared graph, and its five states ----------
+/* ---------- architecture: the declared graph, and its six states -----------
    The graph is tools -> checks -> requirements, and the thing a reader must
    take away from it is which requirements are actually MEASURED. That is the
    whole reason this block spends four channels on state instead of one.
@@ -963,13 +963,20 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
         history section. `n/a` is a shut guard, as it is in the coverage rail.
         `?` is `read, and could not be determined`. The empty set is `nothing
         asserts this`. A cross is new here and means the one thing this page
-        had no glyph for: a claim that was made and then FAILED.
+        had no glyph for: a claim that was made and then FAILED. `!` is newer
+        (B80) and means a claim that STANDS on a check that is failing but
+        only advises - counted as checked, and not a clean pass.
      2. A WORD, uppercase, on the face of every node. Not on hover, not in a
         legend the reader has to hold in their head - on the node.
      3. A BORDER STYLE, and the five are different values rather than five
         weights of one: 2px solid, 1px dashed, 3px double, 1px solid under a
         diagonal hatch, 1px dotted. Border STYLE is one of the few things a
         forced-colors mode preserves after it has thrown every colour away.
+        The sixth, `advisory failing`, is 3px dashed: the one state that
+        shares a style, so it is the thickest dashed border on the page in
+        every mode and never shares its WIDTH with another dashed state -
+        1px never-ran here, 2px never-ran under prefers-contrast, 2px guard
+        shut under forced colours. Its glyph and its word are its own.
      4. Hue last, and only where it repeats something already said.
 
    The two greys are the ones a legend cannot rescue, so they are the two the
@@ -983,7 +990,7 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
 .ag-note{margin:0;font-size:12px;color:var(--muted);line-height:1.6;max-width:88ch}
 .ag-note b{color:var(--text)}
 
-/* The five states, drawn once here and worn by nodes, by legend swatches and
+/* The six states, drawn once here and worn by nodes, by legend swatches and
    by the inspector, so the legend cannot drift from the graph it explains. */
 .ag-n{border-width:1px;border-style:solid;border-color:var(--line)}
 .ag-n.a-meas{border-width:2px;border-style:solid;border-color:var(--ok);
@@ -1001,6 +1008,10 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
   background-color:color-mix(in srgb,var(--warn) 7%,var(--raised))}
 .ag-n.a-unk{border-width:2px;border-style:dotted;border-color:var(--muted);
   background-color:var(--raised)}
+/* B80 - covered by an advisory check that is FAILING. Counted as checked, so
+   it is not `void`; standing on a failing check, so it is not `measured`. */
+.ag-n.a-advf{border-width:3px;border-style:dashed;border-color:var(--warn);
+  background-color:color-mix(in srgb,var(--warn) 9%,var(--raised))}
 
 /* The glyph box repeats the border style a second time, in a second place, at
    a size a reader scanning a column of 35 rows actually lands on. */
@@ -1016,6 +1027,8 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
     color-mix(in srgb,var(--muted) 34%,transparent) 0 2px,transparent 2px 5px)}
 .a-miss>.ag-g,.ag-g.a-miss{border-style:dotted;border-color:var(--warn);color:var(--warn)}
 .a-unk>.ag-g,.ag-g.a-unk{border-style:dotted;border-width:2px;border-color:var(--muted);color:var(--text)}
+.a-advf>.ag-g,.ag-g.a-advf{border-style:dashed;border-width:2px;border-color:var(--warn);
+  color:var(--warn);font-weight:700}
 
 /* The word. Uppercase and on the node, because a state a reader has to hover
    for is a state the reader guesses at instead. */
@@ -1028,6 +1041,7 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
 .a-meas .ag-w{color:color-mix(in srgb,var(--ok) 62%,var(--text))}
 .a-void .ag-w{color:color-mix(in srgb,var(--crit) 62%,var(--text))}
 .a-miss .ag-w{color:color-mix(in srgb,var(--warn) 62%,var(--text))}
+.a-advf .ag-w{color:color-mix(in srgb,var(--warn) 62%,var(--text))}
 
 /* nodes on the canvas */
 .ag-node{position:absolute;z-index:2;display:flex;align-items:center;gap:7px;
@@ -1047,6 +1061,9 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
 .ag-canvas.ag-on .vz-wire:not(.hot){opacity:.1}
 .ag-canvas .vz-wire.hot{stroke:var(--accent);stroke-width:2}
 .ag-wire-void{stroke-dasharray:4 3}
+/* A claim that stands on a failing advisory check: long dashes, so it is neither
+   the solid wire of a clean claim nor the short dashes of a voided one. */
+.ag-wire-advf{stroke-dasharray:9 3}
 .ag-lanehd{position:absolute;z-index:0;font-family:var(--mono);font-size:9px;
   text-transform:uppercase;letter-spacing:.09em;color:var(--muted);line-height:1.5;
   padding-bottom:5px;border-bottom:1px solid var(--line)}
@@ -1076,11 +1093,11 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
 .vz-chip.ag-n{border-radius:4px}
 .vz-chip.a-meas{color:var(--ok)}
 .vz-chip.a-void{color:var(--crit)}
-.vz-chip.a-miss{color:var(--warn)}
+.vz-chip.a-miss,.vz-chip.a-advf{color:var(--warn)}
 .vz-chip.a-never,.vz-chip.a-shut,.vz-chip.a-unk{color:var(--text)}
 
-/* the spec delta. A change word is a PILL - a different shape from the five
-   state boxes - so it cannot be read as a sixth coverage state. The word and
+/* the spec delta. A change word is a PILL - a different shape from the six
+   state boxes - so it cannot be read as a seventh coverage state. The word and
    the glyph carry it; hue repeats them. */
 .ag-delta{display:flex;flex-direction:column;gap:9px;border:1px solid var(--line);
   border-radius:10px;background:var(--surface);padding:13px 14px}
@@ -1164,6 +1181,10 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
      on top of its own glyph and its own word. `double` is not available here -
      it is what `void` already wears. */
   .ag-n.a-shut{border-style:dashed;border-width:2px}
+  /* `advisory failing` is dashed 3px already, so it stays apart from this 2px
+     dashed shut guard and from the 1px dashed never-ran by width as well as by
+     its own glyph and word. Restated so nobody thins it to 2px here. */
+  .ag-n.a-advf{border-style:dashed;border-width:3px}
   .ag-canvas.ag-on .ag-node:not(.hot),
   .ag-canvas.ag-on .vz-wire:not(.hot){opacity:1}
   .ag-node:hover,.ag-node:focus-visible{box-shadow:none}}
@@ -1198,13 +1219,15 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
       enough that its STYLE is a guess, a hatch faint enough to read as a flat
       fill, and an opacity that dims a word somebody has to read.
 
-   THE FIVE STATES KEEP THEIR PAIRWISE DISTINCTION, and the pair that carries
-   it is (style, width). No two of the six are the same pair here, which is the
-   property `check-view-rendered.sh` asserts rather than trusting this comment:
+   THE SIX STATES KEEP THEIR PAIRWISE DISTINCTION, and the pair that carries
+   it is (style, width). No two of the seven are the same pair here, which is
+   the property `check-view-rendered.sh` asserts rather than trusting this
+   comment:
 
         measured   solid 3px        guard shut  solid 2px + a denser hatch
         never ran  dashed 2px       missing     dotted 2px
         void       double 3px       unreadable  dotted 3px
+        advisory failing  dashed 3px
 
    Nothing goes past 3px: a node is 32px tall with `box-sizing: border-box`,
    and at 4px the state WORD - channel two of four, and the one colour cannot
@@ -1226,6 +1249,7 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
       color-mix(in srgb,var(--muted) 34%,transparent) 0 2px,transparent 2px 6px)}
   .ag-n.a-miss{border-width:2px}
   .ag-n.a-unk{border-width:3px}
+  .ag-n.a-advf{border-width:3px}
   /* The glyph box repeats the border style, so it grows with it. The box grows
      too: at 17px a 3px border leaves 11px for a 10px glyph, and the glyph is
      channel one. */
@@ -1243,6 +1267,7 @@ a.stat.lk:hover .stat-go,a.kc.lk:hover .kc-go{color:var(--accent);opacity:1}
   .a-meas .ag-w{color:var(--ok)}
   .a-void .ag-w{color:var(--crit)}
   .a-miss .ag-w{color:var(--warn)}
+  .a-advf .ag-w{color:var(--warn)}
   /* A faded node is still a node. The fade says "not related to what you
      picked"; at .3 it also says "and you may not read me". */
   .ag-canvas.ag-on .ag-node:not(.hot){opacity:.72}
@@ -2098,7 +2123,7 @@ openAnchor(location.hash);
 function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
   document.body.appendChild(ta);ta.select();try{document.execCommand("copy");cb();}catch(err){}ta.remove();}
 
-// ---------- architecture: the declared graph, over five states -------------
+// ---------- architecture: the declared graph, over six states --------------
 // Reads VZ_ARCH, which the generator embedded in this file's own bytes, and
 // draws it into the mount the generator left. It fetches nothing, stores
 // nothing and posts nothing. If the generator wrote no mount, this is a no-op,
@@ -2122,7 +2147,7 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
 
   var GL_UNK = "?", GL_NEVER = "—";
 
-  // The five requirement states, and what each MEANS. The meaning is the
+  // The six requirement states, and what each MEANS. The meaning is the
   // legend's text and the inspector's text, from one place, so the legend
   // cannot come to disagree with what a node says about itself.
   var RS = {
@@ -2132,25 +2157,31 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
       m:"Claimed, but nothing triggered the check in this change. THIS IS NOT A PASS — " +
         "it is an absence of evidence, and it is drawn as one."},
     "void":     {g:"✗", w:"VOID",       k:"a-void",
-      m:"A check claimed this and FAILED. A failing check voids its own claim, so the " +
-        "requirement falls back to Missing. NOT a pass, and not merely “unknown”."},
+      m:"A BLOCKING check claimed this and FAILED, or a check claimed it and measured nothing " +
+        "(hollow, timed out, tool missing). That voids the claim, so the requirement falls back " +
+        "to Missing. NOT a pass, and not merely “unknown”."},
     guard_shut: {g:"n/a",    w:"GUARD SHUT", k:"a-shut",
       m:"Unreachable here — the obligation’s Where… guard never opens in this " +
         "repository, so there is nothing to meet. Not unmet, and not measured either."},
     missing:    {g:"∅", w:"MISSING",    k:"a-miss",
-      m:"Nothing asserts this at all. No check names it."}
+      m:"Nothing asserts this at all. No check names it."},
+    advisory_failing: {g:"!", w:"ADVISORY FAILING", k:"a-advf",
+      m:"Counted as checked, and NOT a clean pass. A check holding this up ran and is " +
+        "FAILING, but it is declared advise, so its claim stands and the run is not refused " +
+        "for it — warn means warn. Read that check’s findings."}
   };
-  var RS_ORDER = ["measured","never_ran","void","guard_shut","missing"];
+  var RS_ORDER = ["measured","advisory_failing","never_ran","void","guard_shut","missing"];
   // A state this page does not know is never quietly folded into one it does.
   var RS_BAD = {g:GL_UNK, w:"UNREADABLE STATE", k:"a-unk",
     m:"The generator emitted a state this page has no rendering for. It is drawn as " +
-      GL_UNK + " rather than as any of the five, because guessing which one it meant is " +
+      GL_UNK + " rather than as any of the six, because guessing which one it meant is " +
       "how a dashboard starts lying."};
 
   var KS = {
     pass:          {g:"✓", w:"PASS",          k:"a-meas", m:"ran and found nothing"},
     fail:          {g:"✗", w:"FAIL",          k:"a-void",
-      m:"ran and found something. Every claim it makes is voided by that"},
+      m:"ran and found something. If it blocks, every claim it makes is voided by that; " +
+        "if it only advises, its claims stand and are drawn ADVISORY FAILING, never as measured"},
     refused:       {g:"⊘", w:"REFUSED",       k:"a-void",
       m:"declined to answer. A refusal is not a pass"},
     hollow:        {g:"◌", w:"HOLLOW",        k:"a-miss",
@@ -2299,7 +2330,7 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
     " Every node below was derived from " + (from || "the check result") +
     (A.measured_utc ? " at " + A.measured_utc : "") +
     ". Colour repeats what the glyph, the word on the node and the border style already say; " +
-    "with colour switched off the five states stay apart."));
+    "with colour switched off the six states stay apart."));
   root.appendChild(stamp);
 
   /* --- the legend, which states what each state MEANS --------------------- */
@@ -2348,9 +2379,10 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
         "nodes, because those are the ones on screen."));
   }
   key.appendChild(el("p", "ag-kfoot",
-    "Four of the five are not a pass in different ways, and that is why they are drawn as " +
+    "Four of the six are not a pass in different ways, and that is why they are drawn as " +
     "four different things rather than as one grey. A shut guard is the only one of the four " +
-    "that is not a gap."));
+    "that is not a gap. The sixth, ADVISORY FAILING, counts as checked and is not a clean " +
+    "pass either: the check holding it up ran and is failing, and it only advises."));
   root.appendChild(key);
 
   /* --- the delta strip. A base nobody differenced against does not get a
@@ -2448,7 +2480,7 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
       ". A re-wrapped sentence is not an edit. "));
     sub.appendChild(el("b", null, "Coverage is not compared with the base:"));
     sub.appendChild(document.createTextNode(" that would need a check run at the base, and this " +
-      "result holds one run. The five states on the graph are this run's, and nothing here " +
+      "result holds one run. The six states on the graph are this run's, and nothing here " +
       "says a requirement gained or lost them."));
     dsec.appendChild(sub);
     var dstrip = el("div", "ag-strip");
@@ -2621,7 +2653,8 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
   }
   for (i = 0; i < edges.length; i++){
     var ed = edges[i];
-    if (ed.kind === "claims") path(ed.from, ed.to, ed.voided ? "ag-wire-void" : "", !!ed.voided);
+    if (ed.kind === "claims") path(ed.from, ed.to, ed.voided ? "ag-wire-void"
+      : (ed.advisory_failing ? "ag-wire-advf" : ""), !!ed.voided);
     else if (ed.kind === "runs") path(ed.from, ed.to, "", false);
   }
   root.appendChild(board);
@@ -2640,9 +2673,10 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
       "claims it, how that check ended, and why that adds up to the state on its face. " +
       "Tab reaches every node in order."));
     insp.appendChild(el("p", "ag-itext",
-      "A requirement is Covered only where a check RAN and PASSED. A claim from a check " +
-      "that failed is voided by that failure; a claim from a check nothing triggered " +
-      "measured nothing at all."));
+      "A requirement is Covered cleanly only where a check RAN and PASSED. A claim from a " +
+      "blocking check that failed is voided by that failure; one from an advisory check that " +
+      "failed stands, and is drawn ADVISORY FAILING, never as measured; a claim from a check " +
+      "nothing triggered measured nothing at all."));
   }
   function evList(items, emptyText){
     if (!items || !items.length){
@@ -2691,7 +2725,8 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
         "why it reads as " + sp.w + ", which is itself the finding.");
       var cl = claimedBy[d.id] || [], names = [];
       for (i = 0; i < cl.length; i++)
-        names.push(cl[i].from + (cl[i].voided ? " (claim voided)" : ""));
+        names.push(cl[i].from + (cl[i].voided ? " (claim voided)"
+          : (cl[i].advisory_failing ? " (advisory check FAILING — claim stands, not a clean pass)" : "")));
       insp.appendChild(el("p", "ag-itext ag-idim", names.length
         ? "Claimed by: " + names.join(", ") + "."
         : "No check claims this requirement."));
@@ -2714,7 +2749,8 @@ function fb(txt,cb){var ta=document.createElement("textarea");ta.value=txt;
       insp.appendChild(el("p", "ag-itext", lines.join(" ")));
       var cm = claimsOf[d.id] || [], out = [];
       for (i = 0; i < cm.length; i++)
-        out.push(cm[i].to + (cm[i].voided ? " (voided by this check’s own result)" : ""));
+        out.push(cm[i].to + (cm[i].voided ? " (voided by this check’s own result)"
+          : (cm[i].advisory_failing ? " (stands: this check only advises, and it is failing)" : "")));
       insp.appendChild(el("p", "ag-ievh", "Claims"));
       evList(out, "This check claims no requirement. It runs, and nothing on this page " +
         "depends on how it ends.");

@@ -2,10 +2,10 @@
 
 `build-view.sh` derives a declared architecture graph from
 `.claude/productizer/checks-result.json` and overlays every active requirement
-with one of five states: `measured`, `never_ran`, `void`, `guard_shut`,
-`missing`.
+with one of six states: `measured`, `never_ran`, `void`, `guard_shut`,
+`missing`, and — since B80, warn means warn — `advisory_failing`.
 
-**This repository's own result file reaches two of the five.** Measured on
+**This repository's own result file reaches two of the six.** Measured on
 2026-09-07 against `.claude/productizer/checks-result.json` at v4.56.0:
 
     35 requirements, all `exercised: true`
@@ -36,6 +36,17 @@ loses one, goes red.
 | `F3` | `never_ran` | claimed `Covered` by `charlie`, whose status is `not_triggered`; the claim is live (nothing voided it) but no passing check stands behind it |
 | `F4` | `guard_shut` | claimed `n/a` by `delta`, which ran and reported the obligation unreachable in this configuration |
 | `F5` | `missing` | no check in the fixture names it at all — the claim list is empty |
+| `F6` | `advisory_failing` | claimed `Covered` by `golf`, an `advise` check whose status is `fail` and which met its own coverage assertion; the runner keeps the claim (`voided: null`) and marks it `advisory_failing`, so `F6` reads `Covered` with `held_by_failing_advisory: true` — counted as checked, and not a clean pass |
+
+The file keeps the name `five-states.json` although it now holds six: every
+script, test and document that points at it kept working when `F6` was added,
+and a rename would have moved all of them for a word.
+
+`F6` and `F2` are the B80 pair. Both claims come from a check that FAILED; the
+only difference is the severity, `advise` against `block`, and they must read
+differently — `F2` void, `F6` advisory_failing. `build-view.sh` A16 also strips
+`advisory_failing` off `F6`'s claim in memory and asserts it then reads `void`:
+the exemption is the runner's mark, never the `fail` status alone.
 
 `F2` and `F3` both end at `verdict: Missing` / `exercised: false`, and they are
 in the fixture together on purpose: they are the pair a deriver is most likely
@@ -54,7 +65,7 @@ reader to the wrong one.
   node is `present: false`. Every probe in this repository's live result exits
   0, so `present: false` exists nowhere but here.
 - **A tool shared by two checks.** `alpha` and `foxtrot` both run
-  `check-alpha.sh`, so the fixture has 6 checks and 5 tools. That inequality is
+  `check-alpha.sh`, so the fixture has 7 checks and 6 tools. That inequality is
   true of this repository's live file too — 32 checks, fewer tools — and is why
   `counts.tools` is measured rather than assumed equal to `counts.checks`.
 - **A check that claims nothing.** `foxtrot` makes no coverage claim, so it is a
@@ -82,8 +93,12 @@ on. So `--arch-selftest` builds a repository at test time:
   built sha equals it — an edit to `base-spec.md` that forgets `result.json`
   goes red rather than comparing against nothing.
 - `spec.md` is then written over it, uncommitted: the working tree is head.
-- `result.json` is `five-states.json` with `F1..F5` renamed `R1..R5` (the
-  parser reads `R<n>` ids only) and each unit's text taken from `spec.md`.
+- `result.json` is `five-states.json` as it stood before B80 — `F1..F5`
+  renamed `R1..R5` (the parser reads `R<n>` ids only), each unit's text taken
+  from `spec.md`, and no `golf` / `F6`. Every active requirement in `spec.md`
+  already wears one of the five states, so the sixth is drawn and asserted on
+  the `five-states.json` page instead (`check-view-rendered.sh`'s `states`
+  case), not here.
 
 | id | base | head | reads |
 |---|---|---|---|

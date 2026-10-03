@@ -46,7 +46,7 @@
 # EXIT CODES ARE THE CONTRACT
 #   0  the page was written, or --arch printed a graph, or every self-test
 #      case held
-#   2  a bad argument, a missing template, a VZ_ARCH overlay whose five states
+#   2  a bad argument, a missing template, a VZ_ARCH overlay whose six states
 #      do not partition the requirements, or a self-test case that did not hold
 #
 # There is deliberately no third code. Every refusal above is the same fact -
@@ -115,7 +115,7 @@ while [ $# -gt 0 ]; do
     --selftest|--self-test) MODE=selftest; shift ;;
     # The graph assertion suite. Driven by --selftest as one of its cases and
     # separately runnable, because when it goes red the first question is which
-    # of A1..A14 went red and that answer is on its own stdout.
+    # of A1..A16 went red and that answer is on its own stdout.
     --arch-selftest) MODE=archtest; shift ;;
     --out) OUT="${2:-}"; [ -n "$OUT" ] || { echo "build-view: --out needs a file" >&2; exit 2; }; shift 2 ;;
     --out=*) OUT="${1#--out=}"; shift ;;
@@ -158,7 +158,7 @@ ROOT="$(cd "$ROOT" && pwd)"
 #
 # The graph assertions are one case here rather than seven, because they are
 # assertions about a data structure and belong in the language that builds it;
-# `--arch-selftest` is that suite and it names its own cases A1..A14. What this
+# `--arch-selftest` is that suite and it names its own cases A1..A16. What this
 # layer adds is the part that suite cannot reach from inside one process: the
 # exit codes.
 if [ "$MODE" = selftest ]; then
@@ -744,7 +744,7 @@ if result_raw is not None:
         check_state = 'unreadable'
 
 # --------------------------------------------------------------------------
-# VZ_ARCH - the DECLARED architecture graph, with a five-state overlay
+# VZ_ARCH - the DECLARED architecture graph, with a six-state overlay
 # --------------------------------------------------------------------------
 # WHAT THIS IS NOT. It is not a graph of the source tree. This repository holds
 # 72 shell scripts and 16 python files, and a graph built by opening those and
@@ -768,15 +768,17 @@ if result_raw is not None:
 # it too would make `generated_from` name one file while the counts came from
 # two. The tool a check RUNS is in the result, so that is the tool this draws.
 #
-# THE OVERLAY IS THE POINT, AND IT IS WHERE THIS IS EASY TO GET WRONG. Five
-# states, and on this repository's own result file exactly two of them occur:
+# THE OVERLAY IS THE POINT, AND IT IS WHERE THIS IS EASY TO GET WRONG. Six
+# states (five until B80 added `advisory_failing`), and on this repository's
+# own result file exactly two of them occur:
 # 35 requirements, every one `exercised`, 38 claims, every one `pass`, none
-# voided. So `never_ran`, `void` and `missing` have no example here at all, and
-# a self-test driven by this tree alone would exercise two branches of five and
-# report green over three that had never run. That is the "a control asserting
+# voided. So `never_ran`, `void`, `missing` and `advisory_failing` have no
+# example here at all, and a self-test driven by this tree alone would exercise
+# two branches of six and report green over four that had never run. That is the "a control asserting
 # over an empty set" failure this repository has already shipped more than
 # once. `fixtures/arch-graph/five-states.json` is a committed result file built
-# so that each of the five states has exactly one requirement in it, and
+# so that each of the six states has exactly one requirement in it (the name
+# predates the sixth and is kept so nothing that points at it moves), and
 # `--arch-selftest` drives it. The precedent is `check-ruling-requested.sh` and
 # `check-spec-home-stop.sh`, both of which drive committed fixtures for the
 # same reason: the condition they detect is not present in this repository.
@@ -804,7 +806,8 @@ if result_raw is not None:
 # and that is the gap this closes - by construction rather than by looking
 # harder, since a check that exists is in this graph and a check that does not
 # is in nothing. The two live side by side because they fail differently.
-VZ_ARCH_STATES = ('measured', 'never_ran', 'void', 'guard_shut', 'missing')
+VZ_ARCH_STATES = ('measured', 'never_ran', 'void', 'guard_shut', 'missing',
+                  'advisory_failing')
 
 # run-checks.sh's own list, restated here rather than imported because this
 # script parses a RESULT and must not depend on the runner being present to
@@ -812,9 +815,18 @@ VZ_ARCH_STATES = ('measured', 'never_ran', 'void', 'guard_shut', 'missing')
 # voided, so this set is a second opinion and not the first: it catches a claim
 # whose check came back in a state that measures nothing but which the writer
 # of that result did not mark. Both are checked, and either one is enough.
+#
+# `fail` IS NOT IN THE SET, AND IS STILL VOID BY DEFAULT (B80). Since the
+# runner stopped voiding an `advise` check's failure - warn means warn - a
+# `fail` claim is void here UNLESS the result marks it `advisory_failing`,
+# which only the runner writes, and only for an advisory check that failed
+# having met its own coverage assertion. The default stays void because the
+# second opinion is for a writer that did NOT mark: a `fail` claim with no
+# `voided` and no `advisory_failing` is a result this page cannot vouch for,
+# and drawing it as anything but void would let an unmarked failure through.
 VZ_ARCH_VOID_RUN = frozenset((
     'missing_tool', 'timeout', 'no_version', 'refused', 'unmapped_exit',
-    'fail', 'hollow', 'nothing_to_examine', 'no_base', 'disabled'))
+    'hollow', 'nothing_to_examine', 'no_base', 'disabled'))
 # `no_base` here is the RUNNER'S check status (added 2026-09-28): a check whose
 # command takes {base} in a run that had none. Not the same thing as the spec
 # delta's `state: no_base` further down, which is a view of the spec with no
@@ -863,6 +875,19 @@ def vz_arch_tool(cmd):
     return vz_arch_pub(head)
 
 
+def vz_arch_claim_advisory_failing(c):
+    """A live claim the runner marked as standing on a failing advisory check."""
+    return (not c.get('voided') and c.get('check_status') == 'fail'
+            and bool(c.get('advisory_failing')))
+
+
+def vz_arch_claim_void(c):
+    """A claim that covers nothing: marked so, or in a status that measured nothing."""
+    if c.get('voided') or c.get('check_status') in VZ_ARCH_VOID_RUN:
+        return True
+    return c.get('check_status') == 'fail' and not vz_arch_claim_advisory_failing(c)
+
+
 def vz_arch_req_state(unit):
     """One of VZ_ARCH_STATES for one `spec_coverage.units[]` row.
 
@@ -881,6 +906,12 @@ def vz_arch_req_state(unit):
       missing then: no claim at all. Mutually exclusive with void, since a
         requirement with no claims has no claim to void, so their order between
         themselves does not matter - only that both sit under guard_shut.
+      advisory_failing next (B80): a live claim from an `advise` check that
+        FAILED. It counts as checked - the runner does not refuse on it - and
+        it is not a clean pass, so it sits ahead of measured: a requirement
+        also held up by a passing check still wears it, the same way one
+        voided claim makes a requirement void whatever else claims it. The
+        reader is owed the failing check first.
       never_ran: claimed, live, and no check that passed stands behind it. This
         is the em-dash rendering: not a failure, not a pass, nothing measured.
       measured last, and it is the only one that has to prove itself: a live
@@ -890,11 +921,12 @@ def vz_arch_req_state(unit):
     claims = unit.get('claims') or []
     if unit.get('verdict') == 'n/a':
         return 'guard_shut'
-    if any(c.get('voided') or c.get('check_status') in VZ_ARCH_VOID_RUN
-           for c in claims):
+    if any(vz_arch_claim_void(c) for c in claims):
         return 'void'
     if not claims:
         return 'missing'
+    if any(vz_arch_claim_advisory_failing(c) for c in claims):
+        return 'advisory_failing'
     if unit.get('exercised') and any(c.get('check_status') == 'pass'
                                      and not c.get('voided') for c in claims):
         return 'measured'
@@ -1220,7 +1252,8 @@ def vz_arch_build(res_obj, state, src, mtime, root=None):
                                     'files_handed_over': None,
                                     'files_dropped': None})
             claim_edges.append({'from': src_id, 'to': uid, 'kind': 'claims',
-                                'voided': bool(cl.get('voided'))})
+                                'voided': bool(cl.get('voided')),
+                                'advisory_failing': vz_arch_claim_advisory_failing(cl)})
             if src_id in triggered_ids and uid not in touched:
                 touched.append(uid)
         req_nodes.append({
@@ -1264,12 +1297,12 @@ def vz_arch_build(res_obj, state, src, mtime, root=None):
 
     graph['counts'] = {'checks': len(check_nodes), 'tools': len(tool_order),
                        'requirements': len(req_nodes), 'by_state': by_state}
-    # The five states are a partition or they are nothing. If they are not, the
+    # The six states are a partition or they are nothing. If they are not, the
     # overlay is drawing some requirement twice or not at all, and the counts
     # under it are a lie - so this refuses rather than publishes.
     if sum(by_state.values()) != len(req_nodes):
         sys.stderr.write(
-            'build-view: VZ_ARCH by_state sums to %d over %d requirement(s). The five '
+            'build-view: VZ_ARCH by_state sums to %d over %d requirement(s). The six '
             'states are not a partition, so the overlay would be wrong about at least '
             'one requirement. Refusing to write.\n' % (sum(by_state.values()), len(req_nodes)))
         sys.exit(2)
@@ -1308,7 +1341,7 @@ if MODE == 'arch':
     sys.exit(0)
 
 if MODE == 'archtest':
-    # A1..A14. Every case names the state or the property it drives, so a red
+    # A1..A16. Every case names the state or the property it drives, so a red
     # line says which branch broke rather than that something did.
     _fixdir = os.path.join(SKILL_HOME, 'fixtures', 'arch-graph')
     _fix = os.path.join(_fixdir, 'five-states.json')
@@ -1325,7 +1358,7 @@ if MODE == 'archtest':
 
     if _g['state'] != 'read':
         sys.stderr.write('build-view: the fixture at %s could not be read, so no case '
-                         'was driven and none of A1..A14 means anything.\n'
+                         'was driven and none of A1..A16 means anything.\n'
                          % vz_arch_shown(_fix))
         sys.exit(2)
 
@@ -1344,17 +1377,18 @@ if MODE == 'archtest':
        'F5 - a requirement no check names reads missing (got %r)' % _st.get('F5'))
     _a('A6', (sum(_g['counts']['by_state'].values()) == _g['counts']['requirements']
               and sorted(_g['counts']['by_state']) == sorted(VZ_ARCH_STATES)
+              and len(VZ_ARCH_STATES) == 6
               and set(_g['counts']['by_state'].values()) == set([1])),
-       'by_state has all five keys, sums to counts.requirements, and this fixture '
+       'by_state has all six keys, sums to counts.requirements, and this fixture '
        'puts exactly one requirement in each (got %r)' % (_g['counts']['by_state'],))
     _tools = set(n['id'] for n in _g['nodes'] if n['kind'] == 'tool')
     _a('A7', ('fixture-tool.py' in _tools and 'python3' not in _tools
-              and _g['counts']['tools'] == 5 and _g['counts']['checks'] == 6
+              and _g['counts']['tools'] == 6 and _g['counts']['checks'] == 7
               and any(n['kind'] == 'tool' and n['id'] == 'check-charlie.sh'
                       and n['present'] is False for n in _g['nodes'])),
        'a tool reached through an interpreter is the script, two checks behind one '
        'tool are one node, and a failed version probe is present:false '
-       '(6 checks, %d tools)' % _g['counts']['tools'])
+       '(7 checks, %d tools)' % _g['counts']['tools'])
     _absent = vz_arch_build(*vz_arch_read(os.path.join(_fixdir, 'no-such-result.json'),
                                           'no-such-result.json'))
     _unread = vz_arch_build(*vz_arch_read(os.path.join(_fixdir, 'README.md'),
@@ -1451,13 +1485,35 @@ if MODE == 'archtest':
        'a requirement that only moved between two spec files is unchanged, not CHANGED '
        '(rows %r, unchanged %r)' % (_mv, _mvsame))
 
+    # A15, A16 - B80. An advisory check that FAILED keeps its claim, and the
+    # requirement says it stands on a failing check: not void, not measured.
+    # The second half is the guard on the exemption itself: the same claim
+    # with the runner's mark taken off is a `fail` nobody vouched for, and it
+    # must fall back to void rather than ride the exemption.
+    _f6e = [e for e in _g['edges'] if e['kind'] == 'claims' and e['to'] == 'F6']
+    _a('A15', (_st.get('F6') == 'advisory_failing' and len(_f6e) == 1
+               and _f6e[0]['advisory_failing'] is True and _f6e[0]['voided'] is False),
+       'F6 - a live claim from an advise check that FAILED reads advisory_failing, and its '
+       'edge carries advisory_failing true and voided false (got %r, edges %r)'
+       % (_st.get('F6'), _f6e))
+    _o = json.loads(open(_fix).read())
+    for _u in _o['spec_coverage']['units']:
+        for _c in _u['claims']:
+            _c.pop('advisory_failing', None)
+    _um = vz_arch_build(_o, 'read', 'five-states.json', None)
+    _ums = dict((n['id'], n.get('state')) for n in _um['nodes'] if n['kind'] == 'requirement')
+    _a('A16', _ums.get('F6') == 'void' and _ums.get('F2') == 'void',
+       'the same fail claim WITHOUT the runner\'s advisory_failing mark reads void - the '
+       'exemption is the mark, never the status alone (F6 got %r)' % _ums.get('F6'))
+
     sys.stdout.write('  cases driven: %d. Cases that did not hold: %d\n' % (len(_driven), len(_failed)))
     if _failed:
         sys.stderr.write('FAIL: %s did not hold.\n' % ', '.join(_failed))
         sys.exit(2)
     sys.stdout.write(
-        '  NOT ASSERTED: that this repository ever reaches never_ran, void or missing. '
-        'It does not today, which is why the fixture exists; A1..A14 are statements '
+        '  NOT ASSERTED: that this repository ever reaches never_ran, void, missing or '
+        'advisory_failing. '
+        'It does not today, which is why the fixture exists; A1..A16 are statements '
         'about the deriver, not about this tree.\n')
     sys.exit(0)
 

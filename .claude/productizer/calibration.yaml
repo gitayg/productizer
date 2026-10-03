@@ -1,0 +1,445 @@
+# The calibration record. R50: a blocking check records its fire rate over
+# merged history, how many commits returned a verdict, and a PERSON's ruling on
+# every fire in that window. R51: a check whose rate could not be measured
+# records that its severity was never calibrated, and why.
+#
+# Read by plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh,
+# whose header carries the schema. In short:
+#
+#   status: measured      window {first, last, commits, history}, verdicts (> 0),
+#                         fires, fire_rate "<fires>/<verdicts> = <pct>%",
+#                         measured_by {tool, version, date}, and one ruling per
+#                         fire {commit, ruling, by, date, note}
+#   status: uncalibrated  reason (as measured), measured_by {tool, version, date}
+#
+# A ruling is `genuine` or `false-positive` and names the PERSON who ruled it.
+# `pending` is a fire nobody has ruled - including one an agent has opened and
+# formed a view on; the agent's view goes in `note` and counts for nothing.
+#
+# EVERY FIGURE BELOW WAS MEASURED ON 2026-10-02, on one machine, by
+# measure-check-overfire.sh 1.1 against checks.yaml as committed at 547684e,
+# over the 30 non-merge commits 1029c597 (v4.44.0) to 547684e (v4.64.1). None is
+# carried over from risk-and-calibration.md: its first table names no window
+# end, its B77 tables name no instrument version, and governance-self-footing's
+# command has changed since B77 measured it. `history: clone` is used for the
+# checks that read git history - the four declaring `git`, plus
+# classification-provenance and import-marking, which read it without declaring
+# it (B77). `excluded` counts the triggering commits that returned no verdict;
+# they are outside the denominator, never passes. The rate is an UPPER BOUND on
+# over-fire: every commit replayed was merged, so a fire is a merged defect or a
+# false positive, and only a person's ruling tells which.
+#
+# Not here, on purpose: a check with no record. The check names it.
+version: 1
+checks:
+  - id: hygiene
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check hygiene --commits 30 --history empty"}
+  - id: shell-lint
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 23
+    verdicts: 23
+    fires: 0
+    fire_rate: "0/23 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check shell-lint --commits 30 --history empty"}
+  - id: solver-corpus
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check solver-corpus --commits 30 --history empty"}
+  - id: stderr-suppression
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 23
+    verdicts: 23
+    fires: 2
+    fire_rate: "2/23 = 8.7%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check stderr-suppression --commits 30 --history empty"}
+    rulings:
+      - commit: 434bd790139e3e7b76e4b1bee2cce5701b1a3f40
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: an agent opened this fire during B68 (v4.61.0) and called it a genuine suppression - upgrade-drift.sh line 688 discarded stderr at this commit. That is an agent's judgement, not a person's ruling"
+      - commit: 1029c597e635988804d2130e44d103af7baab28b
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: an agent opened this fire during B68 (v4.61.0) and called it a genuine suppression - build-view.sh lines 122, 125, 127, 129 each discarded stderr at this commit. That is an agent's judgement, not a person's ruling"
+  - id: spec-home
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check spec-home --commits 30 --history empty"}
+  - id: ruling-requested
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check ruling-requested --commits 30 --history empty"}
+  - id: template-frontmatter
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check template-frontmatter --commits 30 --history empty"}
+  - id: guide-current
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check guide-current --commits 30 --history empty"}
+  - id: view-read-only
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check view-read-only --commits 30 --history empty"}
+  - id: missing-tool-reported
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check missing-tool-reported --commits 30 --history empty"}
+  - id: acceptance-rows
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check acceptance-rows --commits 30 --history empty"}
+  - id: import-marking
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: clone}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check import-marking --commits 30 --history clone"}
+  - id: classification-provenance
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: clone}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check classification-provenance --commits 30 --history clone"}
+  - id: superseded-text
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: clone}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check superseded-text --commits 30 --history clone"}
+  - id: pending-ruling-scope
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: clone}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check pending-ruling-scope --commits 30 --history clone"}
+  - id: jira-unbound
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check jira-unbound --commits 30 --history empty"}
+  - id: no-fabricated-zero
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check no-fabricated-zero --commits 30 --history empty"}
+  - id: nothing-merged
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check nothing-merged --commits 30 --history empty"}
+  - id: cannot-run-coverage
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    excluded: {refused: 1}
+    verdicts: 29
+    fires: 0
+    fire_rate: "0/29 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check cannot-run-coverage --commits 30 --history empty"}
+  - id: declared-scope
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check declared-scope --commits 30 --history empty"}
+  - id: spec-integrity
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: clone}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check spec-integrity --commits 30 --history clone"}
+  - id: unmeasured-report
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check unmeasured-report --commits 30 --history empty"}
+  - id: untrusted-execution
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check untrusted-execution --commits 30 --history empty"}
+  - id: publish-gate-decides
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check publish-gate-decides --commits 30 --history empty"}
+  - id: spec-home-stop
+    status: uncalibrated
+    reason: "measured nothing - it triggered on 30 of 30 commits and returned a verdict on none: 8 refused, 22 undeclared exit, 0 tool absent at that commit, 0 timed out"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check spec-home-stop --commits 30 --history empty"}
+  - id: installed-copies
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check installed-copies --commits 30 --history empty"}
+  - id: changelog-row
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: clone}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check changelog-row --commits 30 --history clone"}
+  - id: view-publish-refused
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check view-publish-refused --commits 30 --history empty"}
+  - id: waiver-rendering
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check waiver-rendering --commits 30 --history empty"}
+  - id: selftest-coverage
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    excluded: {tool_absent: 6}
+    verdicts: 24
+    fires: 1
+    fire_rate: "1/24 = 4.2%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check selftest-coverage --commits 30 --history empty --per-run-timeout 600"}
+    rulings:
+      - commit: a274b801de03fbbd5c38732240743b991dcc6fc1
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: risk-and-calibration.md calls this the anachronism case from reading the commit subject, which it says is a guess; nobody has opened the fire. Replayed with --per-run-timeout 600, the timeout this check declares, because a 120s cap timed out every commit tried"
+  - id: retrieval-budget
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    excluded: {refused: 9}
+    verdicts: 21
+    fires: 0
+    fire_rate: "0/21 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check retrieval-budget --commits 30 --history empty"}
+  - id: secret-scan
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check secret-scan --commits 30 --history empty"}
+  - id: dependency-audit
+    status: uncalibrated
+    reason: "measured nothing - it triggered on none of the 30 commits in the window, so no verdict was returned and there is no rate"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check dependency-audit --commits 30 --history empty"}
+  - id: sast
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 14
+    verdicts: 14
+    fires: 0
+    fire_rate: "0/14 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check sast --commits 30 --history empty"}
+  - id: governance-self-footing
+    status: uncalibrated
+    reason: "the command passes --base, so it compares against a history the extracted tree does not have"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check governance-self-footing --commits 30 --history clone"}
+  - id: view-rendered
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    excluded: {tool_absent: 21}
+    verdicts: 9
+    fires: 0
+    fire_rate: "0/9 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check view-rendered --commits 30 --history empty"}
+  - id: requirement-index-current
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    excluded: {tool_absent: 27}
+    verdicts: 3
+    fires: 0
+    fire_rate: "0/3 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check requirement-index-current --commits 30 --history empty"}
+  - id: hard-corpus
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    excluded: {refused: 18}
+    verdicts: 12
+    fires: 0
+    fire_rate: "0/12 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check hard-corpus --commits 30 --history empty"}
+  - id: mech-corpus
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    excluded: {refused: 24}
+    verdicts: 6
+    fires: 0
+    fire_rate: "0/6 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check mech-corpus --commits 30 --history empty"}
+  - id: spec-valid
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    excluded: {refused: 13}
+    verdicts: 17
+    fires: 4
+    fire_rate: "4/17 = 23.5%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check spec-valid --commits 30 --history empty"}
+    rulings:
+      - commit: 7c083eb54e2d29db176fc024ea060f83227f315c
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.62.0'; not yet opened by a person or an agent"
+      - commit: 8e2ea54e5a94c945c4a624afec2a7c3529739f72
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.61.2'; not yet opened by a person or an agent"
+      - commit: cb002de4582861d31a5b6c5c33310198a4c53d1a
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.61.1'; not yet opened by a person or an agent"
+      - commit: 1955e79f6b2f3c8f1bf135aef2cd1955f1e86737
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.61.0'; not yet opened by a person or an agent"
+  - id: backlog-valid
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 30
+    verdicts: 30
+    fires: 5
+    fire_rate: "5/30 = 16.7%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check backlog-valid --commits 30 --history empty"}
+    rulings:
+      - commit: 9f757e4562f0dc76d55fd37e09ea65e49ee51ac5
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.57.0'; not yet opened by a person or an agent"
+      - commit: 246d529a219513abc0146d8e290cdab08c015c8f
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.56.0'; not yet opened by a person or an agent"
+      - commit: 70efe44150f0e627b919b4356b3db26bbd7dc6ec
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.55.1'; not yet opened by a person or an agent"
+      - commit: 434bd790139e3e7b76e4b1bee2cce5701b1a3f40
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.55.0'; not yet opened by a person or an agent"
+      - commit: 145d93406b6a68526fa9677074e7c1c849e3b386
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.54.0'; not yet opened by a person or an agent"
+  - id: shell-quoting
+    status: measured
+    window: {first: 1029c597e635988804d2130e44d103af7baab28b, last: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, commits: 30, history: empty}
+    triggered: 23
+    verdicts: 23
+    fires: 2
+    fire_rate: "2/23 = 8.7%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-02", config: "checks.yaml at 547684e", command: "measure-check-overfire.sh --check shell-quoting --commits 30 --history empty"}
+    rulings:
+      - commit: 1955e79f6b2f3c8f1bf135aef2cd1955f1e86737
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.61.0'; not yet opened by a person or an agent"
+      - commit: 5117f4806f1d3bc06af03c3af0c20f4e8815385a
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-03
+        note: "ruled GENUINE by the maintainer on 2026-10-03, one check at a time, after the fire was replayed at its commit and its finding shown. Replay evidence: fired in the replay of 2026-10-02 at 'v4.60.0'; not yet opened by a person or an agent"
+  - id: calibration-recorded
+    status: uncalibrated
+    reason: "measured nothing - it triggered on 13 of the 30 commits and returned a verdict on none: 0 refused, 0 undeclared exit, 13 tool absent at that commit, 0 timed out. It did not exist before 2026-10-02, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-03", config: "checks.yaml in the working tree, with calibration-recorded declared", command: "measure-check-overfire.sh --check calibration-recorded --commits 30"}

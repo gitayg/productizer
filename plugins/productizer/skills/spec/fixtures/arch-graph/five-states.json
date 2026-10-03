@@ -15,12 +15,12 @@
   "verdict": "FAIL",
   "exit_code": 1,
   "counts": {
-    "declared": 6,
-    "triggered": 5,
+    "declared": 7,
+    "triggered": 6,
     "passed": 4,
     "blocking_failures": 1,
     "waived": 0,
-    "advisory_failures": 0,
+    "advisory_failures": 1,
     "disabled": 0,
     "not_triggered": 1,
     "spec_units_unsatisfied": 2
@@ -29,11 +29,11 @@
     "mode": "claims",
     "spec": "fixtures/arch-graph/spec.md",
     "status": "measured",
-    "detail": "a fixture spec with five requirements, one per overlay state",
+    "detail": "a fixture spec with six requirements, one per overlay state",
     "enforced": true,
-    "units_total": 5,
+    "units_total": 6,
     "counts": {
-      "Covered": 2,
+      "Covered": 3,
       "Partial": 0,
       "Missing": 2,
       "n/a": 1
@@ -115,6 +115,25 @@
         "note": "no check in this config names this requirement",
         "exercised": false,
         "claims": []
+      },
+      {
+        "id": "F6",
+        "text": "The fixture shall hold one requirement whose only claim stands on an advisory check that failed.",
+        "verdict": "Covered",
+        "note": "golf claimed Covered and is `advise` and FAILING: it ran and measured, so the claim stands - covered by a failing advisory check, not a clean pass",
+        "exercised": false,
+        "held_by_failing_advisory": true,
+        "claims": [
+          {
+            "check": "golf",
+            "claimed": "Covered",
+            "reason": null,
+            "evidence": "golf claimed to cover F6, ran, examined what it declared, and failed. It is declared advise, so the claim stands and F6 counts as checked - drawn as standing on a failing check, never as measured.",
+            "check_status": "fail",
+            "voided": null,
+            "advisory_failing": "the check is `advise` and came back fail: it ran and measured, so this claim stands and the requirement counts as checked - but the check holding it up is FAILING. Covered by a failing advisory check, not a clean pass"
+          }
+        ]
       }
     ]
   },
@@ -373,6 +392,47 @@
       "timed_out": false,
       "output_tail": "foxtrot: nothing claimed",
       "status": "pass"
+    },
+    {
+      "id": "golf",
+      "why": "the fixture needs one ADVISORY check that ran, met its own coverage assertion and failed, so that its claim stands and is marked as standing on a failing check (B80: warn means warn)",
+      "severity": "advise",
+      "blocking": false,
+      "mode": "once",
+      "command": [
+        "./scripts/check-golf.sh"
+      ],
+      "trigger_scope": "always",
+      "triggered": true,
+      "triggered_by": [
+        "always"
+      ],
+      "files_in_scope": 6,
+      "enabled": true,
+      "files_handed_over": 4,
+      "files_dropped_deleted": [],
+      "files_dropped_absent": [],
+      "file_list_consumed": false,
+      "dropped_source": "the runner dropped what it could not hand over",
+      "tool": {
+        "command": [
+          "./scripts/check-golf.sh",
+          "--version"
+        ],
+        "version": "check-golf 1.0",
+        "exit_code": 0
+      },
+      "exit_code": 1,
+      "duration_seconds": 0.1,
+      "coverage": {
+        "from": null,
+        "observed": null,
+        "satisfied": null
+      },
+      "timed_out": false,
+      "output_tail": "golf: 1 finding",
+      "status": "fail",
+      "detail": "the check reported findings."
     }
   ]
 }

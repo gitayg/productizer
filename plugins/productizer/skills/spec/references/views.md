@@ -219,11 +219,11 @@ scripts/build-view.sh --stale-after 900                # ... after 15 minutes
 scripts/build-view.sh --stale-after never              # or 0 - the default, off
 scripts/build-view.sh --arch                           # the declared graph as JSON, nothing written
 scripts/build-view.sh --arch FILE                      # ... derived from another result file
-scripts/build-view.sh --arch-selftest                  # the graph assertions, A1..A14
+scripts/build-view.sh --arch-selftest                  # the graph assertions, A1..A16
 scripts/build-view.sh --selftest                       # the exit-code contract
 ```
 
-## The declared graph, and the five states
+## The declared graph, and the six states
 
 The architecture section carries two drawings that fail differently, which is
 why both are there. The **boards** draw the lifecycle — the stages in the order
@@ -233,15 +233,17 @@ derived from `checks-result.json` alone. A board cannot notice a component
 nobody declared; the graph cannot go stale that way, because a check that
 exists is in it by construction.
 
-Each requirement carries one of five states, and four of them are not a pass:
+Each requirement carries one of six states. Four of them are not a pass, and
+the sixth counts as checked without being a clean one:
 
 | state | what it means |
 |---|---|
 | `measured` | a check ran and passed. Genuinely covered |
 | `never_ran` | claimed, but nothing triggered the check in this change. **Not a pass** |
-| `void` | a check claimed it and FAILED. A failing check voids its own claim, so the requirement falls back to Missing |
+| `void` | a BLOCKING check claimed it and FAILED (or the check measured nothing: hollow, timeout, missing tool...). That voids its own claim, so the requirement falls back to Missing |
 | `guard_shut` | the obligation is unreachable here — its `Where...` guard never opens. Not unmet |
 | `missing` | nothing asserts it at all |
+| `advisory_failing` | an `advise` check claimed it, RAN, and is FAILING. Warn means warn (B80): the claim stands, the requirement counts as checked and `spec_coverage: require` does not refuse on it — but it is **not a clean pass**, and it is drawn `!` / `ADVISORY FAILING` / dashed 3px, never as `measured`. A `fail` claim the runner did not mark `advisory_failing` is drawn `void` |
 
 They are distinguishable **without colour** — glyph, the word on the node,
 border style and, for a shut guard, a hatch — because colour is pre-attentive
@@ -258,8 +260,8 @@ Border STYLE, the glyph and the word survive it, which is why the state is
 carried by those three. Measured in Chrome 146 through a raw CDP
 `Emulation.setEmulatedMedia` call: the HATCH DOES NOT SURVIVE — `guard_shut`
 comes back a flat fill — so the block gives it a border width that the other
-dashed state does not have, and all five stay pairwise distinct. That block is
-DEFENSIVE, and measured as such: neutering it leaves the five distinct in this
+dashed state does not have, and all six stay pairwise distinct. That block is
+DEFENSIVE, and measured as such: neutering it leaves the six distinct in this
 browser anyway, so `check-view-rendered.sh` has no case that goes red when it
 is removed, and says so on every run.
 
@@ -273,8 +275,9 @@ that dims a word somebody has to read. Measured against `--bg` with the WCAG
 7.51, `--accent` 5.05 → 9.73. `--crit` and `--accent` were under 4.5:1 on the
 raised ground before it.
 
-Under that mode the five states wear `solid 3px`, `dashed 2px`, `double 3px`,
-`solid 2px` over a denser hatch and `dotted 2px` — no two the same pair, and
+Under that mode the six states wear `solid 3px`, `dashed 2px`, `double 3px`,
+`solid 2px` over a denser hatch, `dotted 2px` and (`advisory_failing`)
+`dashed 3px` — no two the same pair, and
 nothing past 3px, because a node is 32px tall with `box-sizing: border-box` and
 at 4px the state word starts to clip.
 
@@ -285,9 +288,10 @@ media query nobody wrote has. That is why `check-view-rendered.sh` asserts that
 the reading under the mode DIFFERS from the plain reading, rather than that the
 rule is present in the sheet.
 
-**This repository reaches only two of the five.** Measured 2026-09-08:
-`measured` 32, `guard_shut` 3, and `never_ran`, `void` and `missing` all zero.
-The other three are exercised by `fixtures/arch-graph/five-states.json`, for
+**This repository reaches only two of the six.** Measured 2026-09-08:
+`measured` 32, `guard_shut` 3, and `never_ran`, `void` and `missing` all zero;
+`advisory_failing` did not exist yet. The other four are exercised by
+`fixtures/arch-graph/five-states.json` (six requirements, one per state), for
 the same reason `ruling-requested` and `spec-home-stop` carry fixtures — a
 sweep over an empty set proves nothing. A break that stops counting one state
 was measured GREEN against this repository and RED against that fixture.
@@ -350,10 +354,10 @@ out — three times over, plain, under `forced-colors: active` and under
 
 | page | built from | what it must draw |
 |---|---|---|
-| states, delta | `fixtures/arch-graph/delta/`, its repository built at test time with every sha input pinned | all five overlay states, pairwise distinct on (border style, width, fill), on glyph and on word; all five change words, one per state |
+| delta | `fixtures/arch-graph/delta/`, its repository built at test time with every sha input pinned | all five change words, one per state |
 | unreadable | a result file that is not parseable JSON | one `?` box saying it could not be READ, and no node, no count tile, no delta row |
 | absent | a repository with no result file | one `?` box saying there is NO RESULT, and the same three zeros |
-| no-base | `fixtures/arch-graph/five-states.json`, which records no base | the graph in full, and a spec delta that is `?` — the changed-file tile reads `?`, never 0 |
+| states, no-base | `fixtures/arch-graph/five-states.json`, which records no base | all six overlay states (`F1..F6`), pairwise distinct on (border style, width, fill), on glyph and on word, in all three modes; the graph in full, and a spec delta that is `?` — the changed-file tile reads `?`, never 0 |
 
 The fixture's right answers are hardcoded there from
 `fixtures/arch-graph/README.md` rather than read back out of `--arch`: an
@@ -367,11 +371,12 @@ opened is the hollow green this repository refuses. Nothing it does touches the
 network: the probe aborts every request that is not `file:`, so the page's font
 link cannot make the test depend on a name server.
 
-`--selftest` drives sixteen cases, six of which are BREAKS applied to a page
-that was really built: the `prefers-contrast` block neutered, `guard_shut`
-trading its hatch for another state's border, `withdrawn` drawn as
-`superseded`, the unreadable branch skipped on each of the two `?` pages, and a
-base nobody recorded counted as a number. Each is asserted to come back exit 1.
+`--selftest` drives seventeen cases, seven of which are BREAKS applied to a
+page that was really built: the `prefers-contrast` block neutered, `guard_shut`
+trading its hatch for another state's border, `advisory_failing` drawn with
+`measured`'s glyph, word and class, `withdrawn` drawn as `superseded`, the
+unreadable branch skipped on each of the two `?` pages, and a base nobody
+recorded counted as a number. Each is asserted to come back exit 1.
 A break whose text is no longer in the page is not skipped — it is counted,
 printed as `mutation-lost` and fails the run, because a self-test that quietly
 drives fewer cases than it lists is the failure this check exists to refuse.

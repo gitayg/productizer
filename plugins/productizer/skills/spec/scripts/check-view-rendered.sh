@@ -29,10 +29,11 @@
 #      nodes, zero stat tiles and zero delta rows on the same page. The same
 #      for a spec delta with no base - `?`, never "nothing changed".
 #
-#   3. THE FIVE OVERLAY STATES BECOMING INDISTINGUISHABLE WITHOUT COLOUR.
-#      `measured`, `never_ran`, `void`, `guard_shut` and `missing` are carried
-#      by a glyph, a word and a border STYLE precisely so that they survive a
-#      reader who cannot use the hue. This asserts that the five are pairwise
+#   3. THE SIX OVERLAY STATES BECOMING INDISTINGUISHABLE WITHOUT COLOUR.
+#      `measured`, `never_ran`, `void`, `guard_shut`, `missing` and (B80)
+#      `advisory_failing` are carried by a glyph, a word and a border STYLE
+#      precisely so that they survive a reader who cannot use the hue. This
+#      asserts that the six are pairwise
 #      distinct on (border-style, border-width, fill) AND on the glyph AND on
 #      the word - three times over, under the plain page, under
 #      `forced-colors: active`, and under `prefers-contrast: more`.
@@ -60,15 +61,20 @@
 # WHAT IT DRIVES. Four pages, built by the real `build-view.sh` from committed
 # fixtures under `fixtures/arch-graph` and `fixtures/unmeasured-report/view`:
 #
-#   states, delta   the delta fixture repository, built here the way
+#   delta           the delta fixture repository, built here the way
 #                   build-view.sh's own self-test builds it - `base-spec.md`
 #                   committed with every sha input pinned, `spec.md` written
-#                   over it uncommitted. One page carries all five overlay
-#                   states AND all five delta words.
+#                   over it uncommitted. It carries all five delta words.
 #   unreadable      a result file that is not parseable JSON
 #   absent          a repository with no result file at all
-#   no-base         `five-states.json`, which records no base, so the spec
-#                   delta has nothing to difference against
+#   states, no-base `five-states.json`, which holds one requirement per
+#                   overlay state - all SIX since B80 - and records no base,
+#                   so the spec delta has nothing to difference against.
+#                   The states case moved here from the delta page when the
+#                   sixth state arrived: the delta fixture's requirement ids
+#                   are its spec's, every active one already wears a state,
+#                   and a sixth would have meant inventing a requirement its
+#                   spec does not hold or re-pinning its base commit.
 #
 # THE FIXTURE'S ANSWERS ARE HARDCODED HERE, and that is deliberate. Reading the
 # expectation out of `build-view.sh --arch` would assert only that the page
@@ -325,22 +331,28 @@ MODES="default forced-colors prefers-contrast"
 case_states() {  # case_states <tsv>
   local tsv="$1" m f n
   for m in $MODES; do
-    rd_nodes "$tsv" "$m" '^R[1-5]$' >"$TMP/states.$m"
+    rd_nodes "$tsv" "$m" '^F[1-6]$' >"$TMP/states.$m"
     n="$(wc -l <"$TMP/states.$m" | tr -d ' ')"
-    if [ "$n" != "5" ]; then
-      hold "five-states-drawn/$m" 1 "the page drew $n of the fixture's 5 overlay states, so the rest are not asserted"
+    if [ "$n" != "6" ]; then
+      hold "six-states-drawn/$m" 1 "the page drew $n of the fixture's 6 overlay states, so the rest are not asserted"
       continue
     fi
-    hold "five-states-drawn/$m" 0 "R1..R5 are on the page, one per overlay state"
+    hold "six-states-drawn/$m" 0 "F1..F6 are on the page, one per overlay state"
 
     # Field 2 is the word, 3 the glyph, and 4-6 the (style, width, fill) tuple
     # a reader keeps when the hue is gone.
     f=0; all_distinct "$TMP/states.$m" 4,5,6 || f=1
     hold "border-distinct/$m" "$f" "no two states share a (border style, width, fill), which is what is left without colour"
     f=0; all_distinct "$TMP/states.$m" 3 || f=1
-    hold "glyph-distinct/$m" "$f" "the five glyphs are five glyphs"
-    f=0; all_distinct "$TMP/states.$m" 2 || f=1
-    hold "word-distinct/$m" "$f" "the five words are five words"
+    hold "glyph-distinct/$m" "$f" "the six glyphs are six glyphs"
+    # The STATE word only. Field 2 is the node's whole word line, which also
+    # carries the verdict (`MEASURED · Covered`, `NEVER RAN · claimed Covered`),
+    # and two states drawn with ONE word still differ by that suffix - measured
+    # 2026-10-02 (B80): `advisory_failing` given `measured`'s word stayed
+    # "distinct" on the whole line. So the suffix is cut before comparing.
+    cut -f2 <"$TMP/states.$m" | sed 's/ · .*$//' >"$TMP/words.$m"
+    f=0; all_distinct "$TMP/words.$m" 1 || f=1
+    hold "word-distinct/$m" "$f" "the six state words are six words"
     f=0
     cut -f2 <"$TMP/states.$m" | grep -q '^$' && f=1
     hold "word-present/$m" "$f" "every state carries its word on the node, not only in a legend"
@@ -354,11 +366,12 @@ case_states() {  # case_states <tsv>
     awk -F'\t' -v id="$id" -v w="$word" \
       'BEGIN{bad=1} $1==id && index($2, w)==1 {bad=0} END{exit bad}' "$TMP/states.default" || ok=1
   done <<'NAMED'
-R1	MEASURED
-R2	VOID
-R3	NEVER RAN
-R4	GUARD SHUT
-R5	MISSING
+F1	MEASURED
+F2	VOID
+F3	NEVER RAN
+F4	GUARD SHUT
+F5	MISSING
+F6	ADVISORY FAILING
 NAMED
   hold "states-named-right" "$ok" "each fixture id wears the state its README says it reaches"
 
@@ -366,7 +379,7 @@ NAMED
   # releases it changed nothing, and the release notes said it did.
   local same=1
   cmp -s "$TMP/states.default" "$TMP/states.prefers-contrast" || same=0
-  hold "contrast-mode-changes-drawing" "$same" "the five states are drawn differently under prefers-contrast: more than under the plain page"
+  hold "contrast-mode-changes-drawing" "$same" "the six states are drawn differently under prefers-contrast: more than under the plain page"
   # This one says LESS than it looks like it says, and the wording is the
   # measurement. Neutering the template's forced-colors block does NOT make it
   # go red - driven, 2026-09-26 - because the browser throws the hatch away by
@@ -484,7 +497,7 @@ case_no_base() {  # case_no_base <tsv>
   # The graph itself IS readable here, so this case also proves the two are
   # independent: a page can draw every node and still know it has no base.
   f=0
-  [ "$(rd_count "$tsv" default nodes)" = "16" ] || f=1
+  [ "$(rd_count "$tsv" default nodes)" = "19" ] || f=1
   hold "no-base-graph-still-drawn" "$f" "the graph is drawn in full - only the delta is unknown"
 }
 
@@ -563,9 +576,13 @@ if [ "$MODE" = "selftest" ]; then
   }
   build_plain_repo "$ST/corrupt" "$FIXTURE/unmeasured-report/view/checks-result-corrupt.json"
   build_page "$ST/corrupt" "$ST/corrupt.html" || die_unmeasured "the unreadable-result page would not build"
+  # The six overlay states live on the five-states.json page, which is also
+  # the no-base page: one requirement per state, F1..F6.
+  build_plain_repo "$ST/nobase" "$FIXTURE/arch-graph/five-states.json"
+  build_page "$ST/nobase" "$ST/nobase.html" || die_unmeasured "the no-base page would not build"
 
-  got=0; bash "$0" --page "$ST/page.html" --case states >"$ST/s1.out" 2>&1 || got=$?
-  record states-holds 0 "$got" "the five overlay states are drawn distinctly in all three modes"
+  got=0; bash "$0" --page "$ST/nobase.html" --case states >"$ST/s1.out" 2>&1 || got=$?
+  record states-holds 0 "$got" "the six overlay states are drawn distinctly in all three modes"
   got=0; bash "$0" --page "$ST/page.html" --case delta >"$ST/s2.out" 2>&1 || got=$?
   record delta-holds 0 "$got" "the five change words are drawn, each as itself"
   got=0; bash "$0" --page "$ST/corrupt.html" --case unreadable >"$ST/s3.out" 2>&1 || got=$?
@@ -573,7 +590,7 @@ if [ "$MODE" = "selftest" ]; then
 
   # Break one: the prefers-contrast block is deleted. This is B57 as it stood
   # for four releases, and the case that would have caught it.
-  if mutate "$ST/page.html" "$ST/no-contrast.html" \
+  if mutate "$ST/nobase.html" "$ST/no-contrast.html" \
       's/\@media \(prefers-contrast: more\)/\@media (prefers-contrast: never-matches)/g' \
       "the prefers-contrast block could not be found in the built page"; then
     got=0; bash "$0" --page "$ST/no-contrast.html" --case states >"$ST/s4.out" 2>&1 || got=$?
@@ -582,11 +599,22 @@ if [ "$MODE" = "selftest" ]; then
 
   # Break two: two states drawn the same way once the colour is gone. `shut`
   # loses its hatch and takes `never`'s border.
-  if mutate "$ST/page.html" "$ST/collapsed.html" \
+  if mutate "$ST/nobase.html" "$ST/collapsed.html" \
       's/\.ag-n\.a-shut\{border-width:1px;border-style:solid;border-color:var\(--muted\);\s*\n\s*background-image:repeating-linear-gradient\(135deg,\s*\n\s*color-mix\(in srgb,var\(--muted\) 24%,transparent\) 0 2px,transparent 2px 7px\)\}/.ag-n.a-shut{border-width:1px;border-style:dashed;border-color:var(--muted)}/' \
       "the guard-shut fill could not be found in the built page"; then
     got=0; bash "$0" --page "$ST/collapsed.html" --case states >"$ST/s5.out" 2>&1 || got=$?
     record two-states-collapsed 1 "$got" "a hatch traded for another state's border is caught without reading a colour"
+  fi
+
+  # Break seven (B80): the sixth state drawn as `measured` - its glyph, its
+  # word and its class traded for the clean pass it must never look like. A
+  # requirement held up by a failing advisory check drawn as MEASURED is the
+  # exact lie warn-means-warn was not allowed to tell.
+  if mutate "$ST/nobase.html" "$ST/advf-as-measured.html" \
+      's/advisory_failing: \{g:"!", w:"ADVISORY FAILING", k:"a-advf",/advisory_failing: {g:"✓", w:"MEASURED", k:"a-meas",/' \
+      "the advisory-failing state could not be found in the built page"; then
+    got=0; bash "$0" --page "$ST/advf-as-measured.html" --case states >"$ST/s17.out" 2>&1 || got=$?
+    record advisory-drawn-as-measured 1 "$got" "a claim standing on a failing advisory check drawn as a clean pass is a finding"
   fi
 
   # Break three: a delta state drawn as another state.
@@ -609,8 +637,6 @@ if [ "$MODE" = "selftest" ]; then
   # Break five: a base nobody recorded drawn as a number rather than as ?. The
   # graph on this page is perfectly readable, so nothing else on it goes red -
   # which is the point: the count tile is the only thing that lies.
-  build_plain_repo "$ST/nobase" "$FIXTURE/arch-graph/five-states.json"
-  build_page "$ST/nobase" "$ST/nobase.html" || die_unmeasured "the no-base page would not build"
   got=0; bash "$0" --page "$ST/nobase.html" --case no-base >"$ST/s13.out" 2>&1 || got=$?
   record no-base-holds 0 "$got" "a spec delta with no base draws ? and no row"
   if mutate "$ST/nobase.html" "$ST/nobase-zero.html" \
@@ -655,7 +681,7 @@ if [ "$MODE" = "selftest" ]; then
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '    NOT ASSERTED: the WORDING of any finding, and that a case went red for the reason its break names rather than for another. The six breaks are applied to a BUILT page, so a template edit that moves the text they match reads as a mutation that did not apply, which is printed and fails the run rather than silently driving one case fewer.\n'
+  printf '    NOT ASSERTED: the WORDING of any finding, and that a case went red for the reason its break names rather than for another. The seven breaks are applied to a BUILT page, so a template edit that moves the text they match reads as a mutation that did not apply, which is printed and fails the run rather than silently driving one case fewer.\n'
   [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
   if [ "$MUTATIONS_LOST" -ne 0 ]; then
     printf 'FAIL: %d break(s) could not be applied, so that many cases drove nothing\n' \
@@ -701,7 +727,7 @@ build_page "$TMP/nobase" "$TMP/nobase.html" \
   || die_unmeasured "the no-base page would not build; that case is unmeasured"
 
 UNMEASURED=0
-for spec in "states:$TMP/delta.html" "delta:$TMP/delta.html" \
+for spec in "states:$TMP/nobase.html" "delta:$TMP/delta.html" \
             "unreadable:$TMP/corrupt.html" "absent:$TMP/absent.html" \
             "no-base:$TMP/nobase.html"; do
   name="${spec%%:*}"; page="${spec#*:}"
@@ -711,7 +737,7 @@ done
 
 printf '%s' "$EXAMINED"
 printf '    cases %d  upheld %d  findings %d\n' "$CASES" "$UPHELD" "$FINDINGS"
-printf '    NOT ASSERTED: colour. Every assertion here is deliberately blind to hue, because a reader who cannot use it must still be able to tell the five states apart. Contrast RATIOS are not measured either - the ones behind the prefers-contrast block were computed by hand and written into the template beside the tokens. Nor is the forced-colors BLOCK: deleting it leaves the five states distinct in this browser, because the hatch is thrown away by the browser and not by the rule, so of the two contrast modes only prefers-contrast has a case here that goes red when its block is removed.\n'
+printf '    NOT ASSERTED: colour. Every assertion here is deliberately blind to hue, because a reader who cannot use it must still be able to tell the six states apart. Contrast RATIOS are not measured either - the ones behind the prefers-contrast block were computed by hand and written into the template beside the tokens. Nor is the forced-colors BLOCK: deleting it leaves the six states distinct in this browser, because the hatch is thrown away by the browser and not by the rule, so of the two contrast modes only prefers-contrast has a case here that goes red when its block is removed.\n'
 
 # Findings win over unmeasured: a run that definitely broke something says so
 # even when some other case could not be read.

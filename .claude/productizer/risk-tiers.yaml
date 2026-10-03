@@ -119,6 +119,13 @@ rules:
     why: the publish and artifact gates; a hook edited to return early is a gate that reports nothing and blocks nothing
 
   - tier: red
+    glob: ".claude/productizer/calibration.yaml"
+    why: >-
+      decides which blocking checks have earned the right to block. A ruling
+      flipped, a fire deleted or a window shrunk here changes what may stop a
+      merge, without touching a line of checks.yaml
+
+  - tier: red
     glob: ".github/workflows/**"
     why: what CI actually executes. A step removed here is a check that stops existing while checks.yaml still declares it
 

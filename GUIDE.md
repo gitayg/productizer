@@ -772,7 +772,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Forty-three requirements are active**, and they are the whole of what has
+**Forty-five requirements are active**, and they are the whole of what has
 been agreed.
 
 Six more are superseded and none withdrawn, and neither kind is listed here.
@@ -837,7 +837,7 @@ of a state, not at a moment inside it:
 - **R45** — While a change's risk tier is reported, the lifecycle shall report
   that change's complexity as unmeasured.
 
-**When something goes wrong.** Sixteen defences, written as `If … then`
+**When something goes wrong.** Eighteen defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -874,6 +874,11 @@ because a designed path and a defended one are not the same thing:
   not report that path as a risk tier.
 - **R46** — If a change's complexity was not measured, then the lifecycle
   shall not derive it from that change's risk tier.
+- **R50** — If a check is declared blocking, then the lifecycle shall record
+  its fire rate over merged history, the number of commits that returned a
+  verdict, and a person's ruling on every fire in that window.
+- **R51** — If a check's fire rate over merged history could not be measured,
+  then the lifecycle shall record that its severity was never calibrated.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

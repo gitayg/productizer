@@ -104,6 +104,18 @@
 #     warning on stderr; only `timeout_seconds` is locally overridable.
 #   - A check that could not run blocks whatever its severity. `advise`
 #     softens a check's findings, never its absence.
+#   - WARN MEANS WARN, FOR COVERAGE TOO (B80). A `spec_units` claim from a
+#     check that came back `fail` is voided when the check is `block`, and
+#     KEPT when it is `advise`: an advisory check that failed DID run and DID
+#     measure, so the requirement counts as checked and `spec_coverage:
+#     require` does not refuse on its account. It is never rendered as a clean
+#     pass - the claim carries `advisory_failing`, and every coverage line
+#     says the requirement is held up by an advisory check that is FAILING.
+#     Every status that measured nothing (`hollow`, `missing_tool`, `timeout`,
+#     `no_version`, `refused`, `unmapped_exit`, `nothing_to_examine`,
+#     `no_base`) still voids at any severity, and so does an advisory `fail`
+#     that also failed its own coverage assertion - that one did not measure
+#     what it declared either.
 #   - Every check's tool version is recorded in the result. A scanner that
 #     silently stops working usually changes version first, and a version that
 #     cannot be obtained fails the check.
@@ -169,8 +181,9 @@
 #   - It does not sandbox the tools it runs. Everything in `checks.yaml`
 #     executes with this script's privileges, which is why the config is
 #     argv-only and reviewed like code.
-#   - A waiver does not restore what a failure voided. The waived check is
-#     still `fail`, so every `spec_units` claim it made is still voided and the
+#   - A waiver does not restore what a failure voided. Only a BLOCKING check
+#     can be waived, and the waived check is still a `fail` of a `block`
+#     check, so every `spec_units` claim it made is still voided and the
 #     requirement goes back to `Missing`. Under `policy.spec_coverage: require`
 #     the run therefore still refuses - on the DENOMINATOR, not on the check.
 #     That is deliberate: a waiver is a decision about one finding, not a
@@ -334,6 +347,17 @@ done
 #                 the same check as base-substituted under --changed,
 #                 which has no base: recorded `no_base`, the tool
 #                 never invoked, and blocking although `advise`        -> 3
+#   adv-fail-covers
+#                 B80: an `advise` check that FAILS, claiming the one
+#                 requirement under `spec_coverage: require` - its
+#                 claim stands, annotated `advisory_failing`, and the
+#                 run is not refused for coverage                     -> 0
+#   adv-block-voids
+#                 the same check declared `block`: its claim is
+#                 voided and coverage refuses, as before B80           -> 3
+#   adv-hollow-voids
+#                 the advisory check made `hollow`: measured nothing,
+#                 so its claim is voided at any severity               -> 3
 #
 # IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
 # writes over `policy.output`, so a self-test that did it would be slower than
@@ -785,6 +809,56 @@ SELFTEST_CFG_BASE
     self_unmeasured "the argv[0] variant of the {base} config does not put {base} first, so the refusal would be of some other config. Unmeasured, not a pass"
   grep -q '^    version_command: \[printf, "{base}"\]' "$SB/checks-base-version.yaml" ||
     self_unmeasured "the version_command variant of the {base} config does not carry {base}, so the refusal would be of some other config. Unmeasured, not a pass"
+
+  # B80 - WARN MEANS WARN, FOR COVERAGE. One requirement, one check claiming it,
+  # `spec_coverage: require`. Three configs differing in ONE line each from the
+  # first: the advisory check that fails (its claim stands, annotated), the same
+  # check declared `block` (its claim is voided, as before), and the advisory
+  # check made hollow by a minimum it cannot reach (voided at any severity).
+  printf '# Self-test spec\n\n- **R1** - the advisory check holds this requirement up.\n' \
+    > "$SB/spec-adv.md"
+  cat > "$SB/checks-adv-fail.yaml" <<'SELFTEST_CFG_ADV'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: require
+  spec: spec-adv.md
+defaults:
+  timeout_seconds: 30
+  mode: per_file
+  severity: block
+checks:
+  - id: advisory
+    why: the file it scans does not hold the needle, so this advisory check fails having run and measured, and it claims R1
+    when:
+      paths: ["fixture/finding.txt"]
+    severity: advise
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: per_file
+    command: [grep, -q, RUN-CHECKS-SELFTEST-NEEDLE, "{file}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+      spec_units:
+        - id: R1
+          verdict: Covered
+SELFTEST_CFG_ADV
+  sed 's/^    severity: advise$/    severity: block/' "$SB/checks-adv-fail.yaml" > "$SB/checks-adv-block.yaml"
+  sed -e 's/^      paths: \["fixture\/finding.txt"\]$/      paths: ["fixture\/clean.txt"]/' \
+      -e 's/^      min_covered: 1$/      min_covered: 2/' "$SB/checks-adv-fail.yaml" > "$SB/checks-adv-hollow.yaml"
+  # PREMISE: each variant really is the advisory config with its one change.
+  grep -q '^    severity: block$' "$SB/checks-adv-block.yaml" ||
+    self_unmeasured "the block variant of the advisory config is still advise, so case 2 would be case 1 twice. Unmeasured, not a pass"
+  { grep -q 'fixture/clean.txt' "$SB/checks-adv-hollow.yaml" && grep -q '^      min_covered: 2$' "$SB/checks-adv-hollow.yaml"; } ||
+    self_unmeasured "the hollow variant of the advisory config does not scan the clean file with an unreachable minimum, so it would not be hollow. Unmeasured, not a pass"
+
   # The sentence a `no_base` row carries, pinned here rather than read back and
   # believed, followed by the one every advisory could-not-run row gets.
   NO_BASE_DETAIL='its command takes {base}, the commit this change is measured against, and this run has none: it was started with --changed, which hands over a list of paths and names no commit. No base was guessed and the tool was not invoked. Not a pass - a check that compares against a base measures nothing without one. Run it under --base REF. Declared `advise`, but blocking anyway: a check that could not run has no findings to soften.'
@@ -923,6 +997,42 @@ SELFTEST_ASSERT_NOKEY
       printf '  held:    assert %-20s %s\n' "no $_key" "$_what"
     else
       printf '  FINDING: assert %-20s %s - %s\n' "no $_key" "$_what" "$_got"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+
+  # $1 result file, $2 a dotted path into the WHOLE result (an integer segment
+  # indexes a list), $3 the value it must hold rendered as JSON, $4 what that
+  # asserts. Same rules as self_assert: two parsed JSON values compared with
+  # `==`, the path walked key by key, nothing evaluated, and a missing key is a
+  # finding rather than null - "the runner wrote null" is half of what the
+  # coverage cases below assert.
+  self_assert_at() {
+    _file="$1"; _key="$2"; _want="$3"; _what="$4"
+    SELF_ASSERTS=$((SELF_ASSERTS + 1))
+    _got="$(python3 - "$_file" "$_key" "$_want" <<'SELFTEST_ASSERT_AT'
+import json, sys
+path, key, want = sys.argv[1:4]
+try:
+    cur = json.load(open(path))
+except (OSError, ValueError) as exc:
+    print("the result file could not be read: %s" % exc)
+    raise SystemExit(0)
+for seg in key.split("."):
+    if isinstance(cur, list) and seg.isdigit() and int(seg) < len(cur):
+        cur = cur[int(seg)]
+    elif isinstance(cur, dict) and seg in cur:
+        cur = cur[seg]
+    else:
+        print("the result has nothing at `%s` (stopped at `%s`)" % (key, seg))
+        raise SystemExit(0)
+print("held" if cur == json.loads(want) else "%s is %s, not %s" % (key, json.dumps(cur), want))
+SELFTEST_ASSERT_AT
+)"
+    if [ "$_got" = "held" ]; then
+      printf '  held:    assert %-20s %s\n' "${_key##*.}" "$_what"
+    else
+      printf '  FINDING: assert %-20s %s - %s\n' "${_key##*.}" "$_what" "$_got"
       SELF_FAILED=$((SELF_FAILED + 1))
     fi
   }
@@ -1126,6 +1236,56 @@ SELFTEST_ASSERT_NOKEY
   self_assert_change "$SB/base-none.json" base 'null' \
     "the run records no base either, so the row and the result agree"
 
+  # B80 - WARN MEANS WARN, FOR COVERAGE. Pinned here rather than read back
+  # and believed: the annotation an advisory failing claim must carry.
+  ADV_FAILING='the check is `advise` and came back fail: it ran and measured, so this claim stands and the requirement counts as checked - but the check holding it up is FAILING. Covered by a failing advisory check, not a clean pass'
+  self_drive adv-fail-covers 0 \
+    "an advise check that FAILED, claiming R1 under spec_coverage: require: it ran and measured, so its claim stands and the run is not refused for coverage" \
+    --config "$SB/checks-adv-fail.yaml" --root "$SB" \
+    --changed "$SB/changed-finding.txt" --out "$SB/adv-fail.json"
+  self_assert "$SB/adv-fail.json" status '"fail"' \
+    "the advisory check really failed - the case is not a pass in disguise"
+  self_assert_at "$SB/adv-fail.json" spec_coverage.units.0.claims.0.voided 'null' \
+    "its claim on R1 is NOT voided"
+  self_assert_at "$SB/adv-fail.json" spec_coverage.units.0.claims.0.advisory_failing "\"$ADV_FAILING\"" \
+    "and it carries the annotation saying the check holding it up is failing"
+  self_assert_at "$SB/adv-fail.json" spec_coverage.units.0.verdict '"Covered"' \
+    "R1 counts as checked"
+  self_assert_at "$SB/adv-fail.json" spec_coverage.units.0.held_by_failing_advisory 'true' \
+    "and the requirement says it is held up only by a failing advisory check"
+  self_assert_at "$SB/adv-fail.json" spec_coverage.satisfied 'true' \
+    "coverage is satisfied, so require has nothing to refuse"
+  self_assert_err "$SB/adv-fail-covers.err" "COVERED · BY A FAILING ADVISORY CHECK R1" \
+    "the printed coverage line says so beside the verdict word, not only in the JSON"
+
+  self_drive adv-block-voids 3 \
+    "the same check declared block: a blocking check that failed still voids its claim, so R1 reads Missing exactly as before" \
+    --config "$SB/checks-adv-block.yaml" --root "$SB" \
+    --changed "$SB/changed-finding.txt" --out "$SB/adv-block.json"
+  self_assert_at "$SB/adv-block.json" spec_coverage.units.0.claims.0.voided '"the check came back fail, so it measured nothing here"' \
+    "the blocking failure voids its claim, in the same words as before B80"
+  self_assert_at "$SB/adv-block.json" spec_coverage.units.0.claims.0.advisory_failing 'null' \
+    "and it is not annotated as advisory, because it is not"
+  self_assert_at "$SB/adv-block.json" spec_coverage.units.0.verdict '"Missing"' \
+    "R1 falls back to Missing"
+  self_assert_at "$SB/adv-block.json" spec_coverage.satisfied 'false' \
+    "and coverage refuses on its own account, not only through the blocking failure that shares exit 3"
+
+  self_drive adv-hollow-voids 3 \
+    "an advise check that came back HOLLOW, claiming R1 under require: hollow measured nothing, so its claim is voided at any severity and coverage refuses" \
+    --config "$SB/checks-adv-hollow.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --out "$SB/adv-hollow.json"
+  self_assert "$SB/adv-hollow.json" status '"hollow"' \
+    "the advisory check really is hollow"
+  self_assert "$SB/adv-hollow.json" blocking 'false' \
+    "and advisory, so exit 3 here can only be the coverage refusal"
+  self_assert_at "$SB/adv-hollow.json" spec_coverage.units.0.claims.0.voided '"the check came back hollow, so it measured nothing here"' \
+    "its claim on R1 is voided"
+  self_assert_at "$SB/adv-hollow.json" spec_coverage.units.0.verdict '"Missing"' \
+    "R1 reads Missing"
+  self_assert_at "$SB/adv-hollow.json" spec_coverage.satisfied 'false' \
+    "and require refuses"
+
   printf '  self-test cases driven: %d, result-file assertions: %d. Cases and assertions that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_ASSERTS" "$SELF_FAILED"
 
@@ -1142,6 +1302,7 @@ SELFTEST_ASSERT_NOKEY
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` LABEL, and the git query that produces it. `deleted-under-base` builds a two-commit git repository, deletes an in-scope path in the second commit and runs under --base HEAD~1; assertions read off the result file that git named both paths, one was handed over, the drop is labelled deleted and not absent, dropped_source names git and the ref, and change.base / change.base_ref record the commit and the ref. The --changed case asserts both are null.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: a deletion git reports as a RENAME. Both diffs this runner takes pass --no-renames, so the old path can no longer vanish from the accounting - the shape where --name-only lists only the new path, --diff-filter=D lists nothing, and the old one is neither handed over nor dropped nor labelled nor present in change.files. `renamed-away` builds a second git repository whose two commits git calls R100 - measured, with detection explicitly on, before the case runs - and six assertions read off the result file that the scope is still 2, one path was handed over, the drop is labelled deleted and not absent, and dropped_source names the query including the flag.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: a --base whose ref is NOT an ancestor of HEAD, where change.base (the merge base) and `git rev-parse <ref>` differ. `base-substituted` builds that repository, measures that the two commits differ before it runs, and asserts that change.base and the argv a `{base}` check received are both the merge base. `base-in-argv0`, `base-in-version-command` and `base-without-base` assert the refusals and the `no_base` row, reading stderr and the result file rather than the exit code alone.\n'
+  printf '  NOW ASSERTED (B80, warn means warn): an advisory check that FAILS keeps its spec_units claim. `adv-fail-covers`, `adv-block-voids` and `adv-hollow-voids` differ in one config line each, and their result files are read: the advisory failure leaves the claim unvoided and annotated advisory_failing, R1 Covered and held_by_failing_advisory, coverage satisfied, and the printed line saying so; the same check as block voids it and coverage refuses on its own account; an advisory hollow check voids it too. NOT ASSERTED: an advisory fail that ALSO failed its coverage assertion, which is voided by its own branch and is not driven here; nor a requirement covered both by a passing check and by a failing advisory one.\n'
   printf '  NOT ASSERTED: `{base}` in an interpreter program operand (refused by the same rule as argv[0], not driven here), and a base that resolved but is not 40 hex digits - a SHA-256 repository - whose row is `no_base` with a different sentence and is not driven here. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
@@ -2033,7 +2194,8 @@ for idx, chk in enumerate(checks):
     # --- what this check claims to cover, from the spec's own unit list ---
     # A claim is a claim, not coverage. It is bound to this check's result
     # below: a check that is disabled, that could not run, or that failed
-    # covers nothing, whatever it declared here.
+    # under `block` covers nothing, whatever it declared here. An `advise`
+    # check that failed keeps its claim, marked as held up by a failing check.
     su = cov.get("spec_units")
     if su is None:
         su = []
@@ -3115,8 +3277,23 @@ by_id = {r["id"]: r for r in results}
 # A Covered or Partial claim is a measurement, and a check that could not reach
 # a verdict measured nothing. A disabled check is out of force entirely, n/a
 # included: a claim from something switched off covers nothing.
-VOID_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit", "fail", "hollow",
+#
+# `fail` IS IN THIS SET FOR A `block` CHECK ONLY (B80, maintainer decision:
+# warn means warn). Measured on CI run 36351803122: the advisory
+# `risk-tier-classified` failed, its claims were voided, R42-R46 read Missing,
+# and `spec_coverage: require` refused the run - a check labelled "warn" that
+# behaved as "block". An advisory check that failed RAN and MEASURED, so its
+# claim stands; what it is never allowed to do is read as a clean pass, which
+# is what `advisory_failing` on the claim and on every coverage line is for.
+# Everything else here measured nothing and voids AT ANY SEVERITY - `hollow`
+# included, and so does a `fail` that also failed its own coverage assertion,
+# because that check did not examine what it declared any more than a hollow
+# one did.
+VOID_RUN = {"missing_tool", "timeout", "no_version", "refused", "unmapped_exit", "hollow",
             "nothing_to_examine", "no_base"}
+ADVISORY_FAILING = ("the check is `advise` and came back fail: it ran and measured, so this claim "
+                    "stands and the requirement counts as checked - but the check holding it up "
+                    "is FAILING. Covered by a failing advisory check, not a clean pass")
 
 spec_report = {"mode": sc["mode"], "spec": sc["spec"], "status": sc["status"],
                "detail": sc["detail"], "enforced": sc["enforced"],
@@ -3128,15 +3305,27 @@ if sc["status"] == "measured":
     for u in sc["units"]:
         claims = []
         for cl in sc["claims"].get(u["id"], []):
-            st = by_id.get(cl["check"], {}).get("status", "unknown")
+            crow = by_id.get(cl["check"], {})
+            st = crow.get("status", "unknown")
+            advisory = crow.get("severity") == "advise"
+            measuring = cl["verdict"] in ("Covered", "Partial")
+            adv_fail = None
             if st == "disabled":
                 void = "the check is disabled, and a disabled, skipped or todo check covers nothing"
-            elif cl["verdict"] in ("Covered", "Partial") and st in VOID_RUN:
+            elif measuring and st in VOID_RUN:
                 void = "the check came back %s, so it measured nothing here" % st
+            elif measuring and st == "fail" and not advisory:
+                void = "the check came back fail, so it measured nothing here"
+            elif measuring and st == "fail" and not (crow.get("coverage") or {}).get("satisfied"):
+                void = ("the check is `advise` and came back fail, and it also failed its own "
+                        "coverage assertion, so it did not measure what it declared here")
+            elif measuring and st == "fail":
+                void, adv_fail = None, ADVISORY_FAILING
             else:
                 void = None
             claims.append({"check": cl["check"], "claimed": cl["verdict"], "reason": cl["reason"],
-                           "evidence": cl["evidence"], "check_status": st, "voided": void})
+                           "evidence": cl["evidence"], "check_status": st, "voided": void,
+                           "advisory_failing": adv_fail})
         live = [c for c in claims if not c["voided"]]
         if any(c["claimed"] == "Covered" for c in live):
             uv = "Covered"
@@ -3158,9 +3347,25 @@ if sc["status"] == "measured":
                              for c in live if c["claimed"] == "Partial")
         else:
             note = None
+        # B80. A live claim from an advisory check that FAILED is said out
+        # loud on the requirement, beside whatever else the note says, so a
+        # Covered held up by a failing check is never printed bare. The flag is
+        # true only when nothing ELSE holds the verdict up: a requirement also
+        # covered by a check that passed is covered cleanly, and still says
+        # which of its claims stands on a failing check.
+        adv_live = [c for c in live if c["advisory_failing"]]
+        deciding = [c for c in live if c["claimed"] == uv]
+        held_adv = bool(uv in ("Covered", "Partial") and deciding
+                        and all(c["advisory_failing"] for c in deciding))
+        if adv_live:
+            adv_note = "; ".join("%s claimed %s and is `advise` and FAILING: it ran and measured, so "
+                                 "the claim stands - covered by a failing advisory check, not a "
+                                 "clean pass" % (c["check"], c["claimed"]) for c in adv_live)
+            note = "%s; %s" % (note, adv_note) if note else adv_note
         unit_rows.append({"id": u["id"], "text": u["text"], "verdict": uv, "note": note,
                           "exercised": any(by_id.get(c["check"], {}).get("status") == "pass"
                                            for c in live),
+                          "held_by_failing_advisory": held_adv,
                           "claims": claims})
     counts = {"Covered": 0, "Partial": 0, "Missing": 0, "n/a": 0}
     for r in unit_rows:
@@ -3327,8 +3532,19 @@ if sc["status"] == "measured":
                spec_report["counts"]["Partial"], spec_report["counts"]["Missing"],
                spec_report["counts"]["n/a"],
                "" if sc["enforced"] else " (declared but not enforced)"))
+    _held_adv = sum(1 for r in spec_report["units"] if r["held_by_failing_advisory"])
+    if _held_adv:
+        e.write("  %d of those count as checked ONLY because a FAILING advisory check holds them "
+                "up: warn means warn, so the run is not refused for them, and none is a clean "
+                "pass.\n" % _held_adv)
     for r in spec_report["units"]:
-        e.write("  %-8s %-5s %s\n" % (r["verdict"].upper(), r["id"], r["text"][:78]))
+        # Like a waiver, it overflows the column on purpose: a requirement held
+        # up by a failing check is not a quiet state, and the verdict word must
+        # not be skimmable on its own.
+        _vlabel = r["verdict"].upper()
+        if r["held_by_failing_advisory"]:
+            _vlabel += " · BY A FAILING ADVISORY CHECK"
+        e.write("  %-8s %-5s %s\n" % (_vlabel, r["id"], r["text"][:78]))
         if r["note"]:
             e.write("             -> %s\n" % r["note"])
 else:

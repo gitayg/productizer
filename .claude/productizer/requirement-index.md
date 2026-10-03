@@ -75,4 +75,6 @@ marker, because a table left there would be one nothing writes or checks.
 | R47 | event | active | `governance-weakening`, `governance-self-footing` |
 | R48 | ubiquitous | active | `diff-paths-named` |
 | R49 | event | active | `view-rendered` |
+| R50 | unwanted | active | `calibration-recorded` |
+| R51 | unwanted | active | `calibration-recorded` |
 <!-- productizer:requirement-index:end -->

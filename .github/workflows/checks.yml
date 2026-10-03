@@ -383,6 +383,7 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/build-requirement-index.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-release-notes.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-cannot-run-coverage.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-changelog-row.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-classification-provenance.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-declared-scope.sh --selftest

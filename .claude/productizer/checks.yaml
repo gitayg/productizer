@@ -2793,3 +2793,58 @@ checks:
       min_covered: 1
     limitations:
       - It raises SC2086 and nothing else. A split that is intended must be written as one - an array, or `tr` - rather than left unquoted; a file that needs an exception says so with a `# shellcheck disable=SC2086` comment and its reason beside it.
+
+# --- a blocking check proves its alarms are real before it may block --------
+#
+# B76, R50/R51. The maintainer chose to ENFORCE it, knowing the run goes red
+# until every blocking check has its proof. The proof is a record a person can
+# stand behind, in .claude/productizer/calibration.yaml: the window replayed,
+# the commits that returned a verdict, the fire rate, and one ruling per fire
+# naming WHO ruled. An agent's judgement is recorded as `pending` beside its
+# note, and does not count. A check whose rate could not be measured carries an
+# `uncalibrated` record with the instrument's own reason (R51). No threshold is
+# enforced - no 10% ceiling, no 20-verdict floor; those were proposed and not
+# adopted. What is enforced is that the record exists and every fire is ruled.
+
+  - id: calibration-recorded
+    why: R50/R51 - a blocking check proves its alarms are real before it may block, and the proof is a record a person ruled on, not prose
+    when:
+      paths:
+        - ".claude/productizer/checks.yaml"
+        - ".claude/productizer/calibration.yaml"
+        - "plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh"
+        - "plugins/productizer/skills/spec/scripts/calibration-recorded.py"
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a blocking check with no record, a malformed record, or a fire not ruled by a person
+      refused: [2]     # an input unreadable or unparseable, or bad usage
+    coverage:
+      spec_units:
+        - id: R50
+          verdict: Partial
+          reason: >-
+            Asserts that every enabled blocking check - effective severity resolved as the runner
+            resolves it - has a measured record whose fire count matches its rate and whose every
+            fire carries a ruling by a named person. It does NOT assert that the record is still
+            true as the branch moves: it reads no git, so a stale window or a wrong SHA passes. Nor
+            that `by` names a real person - only that it names no agent.
+        - id: R51
+          verdict: Covered
+          evidence: >-
+            A check with no measurable rate is upheld only by an `uncalibrated` record carrying the
+            instrument's own reason; a check with neither record is a finding. Populated from
+            measurement on 2026-10-02: 39 measured, 3 uncalibrated, each reason quoted verbatim
+            from measure-check-overfire.sh.
+      from: stdout_paths
+      pattern: '^(?:upheld|FINDING)\s+(\S+)'
+      must_cover: none
+      min_covered: 1
+    limitations:
+      - 34 of the 39 measured records have zero fires and pass with nothing to rule. Several rest on small denominators - 3, 6, 9, 12 and 14 verdicts. Zero fires over a small window proves little, and the record says so in its counts.
+      - It reads no git. A record can go stale as the branch moves and this will not notice.
