@@ -1865,7 +1865,13 @@ checks:
       - python3
     version_command: [./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh, --version]
     mode: batch
-    command: ["./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh", "--probe-timeout", "60"]
+    # --probe-timeout is per self-test. 60 was too tight once the view gained a sixth
+    # state: check-view-rendered.sh --selftest measured 50.8s on a developer machine
+    # (30.9s before B80), every other self-test under 20s. CI runners are slower, and one
+    # probe past the limit makes this check refuse (exit 2) and R39/R40 read Missing -
+    # which is how the v4.65.0 tag run failed while main passed on the same commit.
+    # 180 is about three times the slowest measured; a hung self-test still times out.
+    command: ["./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh", "--probe-timeout", "180"]
     timeout_seconds: 600
     exit_codes:
       pass: [0]
