@@ -772,8 +772,8 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Forty-five requirements are active**, and they are the whole of what has
-been agreed.
+**Fifty-one requirements are active**, and they are the whole of what has been
+agreed.
 
 Six more are superseded and none withdrawn, and neither kind is listed here.
 The spec keeps both forever with their text intact, so a citation written two
@@ -781,7 +781,7 @@ years ago still leads somewhere — but a guide is read by someone deciding what
 to do next, and a superseded sentence gives them no sign it stopped being
 true.
 
-**Always, with no trigger.** Seven requirements hold whatever else is
+**Always, with no trigger.** Eight requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -796,6 +796,8 @@ happening:
   code it can return.
 - **R48** — Every commit record shall name each path that commit's diff
   touches.
+- **R57** — Every reviewer agent shall be granted no tool that can write a
+  file.
 
 **When something arrives.** Twelve things happen on a discrete trigger:
 
@@ -837,7 +839,7 @@ of a state, not at a moment inside it:
 - **R45** — While a change's risk tier is reported, the lifecycle shall report
   that change's complexity as unmeasured.
 
-**When something goes wrong.** Eighteen defences, written as `If … then`
+**When something goes wrong.** Twenty-three defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -879,6 +881,16 @@ because a designed path and a defended one are not the same thing:
   verdict, and a person's ruling on every fire in that window.
 - **R51** — If a check's fire rate over merged history could not be measured,
   then the lifecycle shall record that its severity was never calibrated.
+- **R52** — If a change adds a citation of a requirement id that the spec does
+  not hold, then the lifecycle shall report that citation as dangling.
+- **R53** — If a change adds a citation of a superseded requirement, then the
+  lifecycle shall report the active requirement that replaced it.
+- **R54** — If a stage run produced no change outside the lifecycle's own
+  bookkeeping, then the lifecycle shall not advance that work's stage.
+- **R55** — If a stage advance would move work to a stage at or before its
+  current stage, then the lifecycle shall refuse it.
+- **R56** — If a stage run changed a path its target stage does not permit,
+  then the lifecycle shall refuse to deliver that change.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

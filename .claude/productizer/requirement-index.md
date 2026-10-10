@@ -77,4 +77,10 @@ marker, because a table left there would be one nothing writes or checks.
 | R49 | event | active | `view-rendered` |
 | R50 | unwanted | active | `calibration-recorded` |
 | R51 | unwanted | active | `calibration-recorded` |
+| R52 | unwanted | active | `dangling-citations` |
+| R53 | unwanted | active | `dangling-citations` |
+| R54 | unwanted | active | `stage-advance-guard` |
+| R55 | unwanted | active | `stage-advance-guard` |
+| R56 | unwanted | active | `stage-advance-guard` |
+| R57 | ubiquitous | active | `template-frontmatter` |
 <!-- productizer:requirement-index:end -->

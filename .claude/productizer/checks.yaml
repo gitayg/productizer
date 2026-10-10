@@ -344,13 +344,22 @@ checks:
     exit_codes:
       pass: [0]
       fail: [1]        # frontmatter that will not do what it says
-      refused: [2]     # bad invocation, or a template that could not be read
+      refused: [2, 3]  # 2 a bad invocation; 3 a template absent or unreadable - the check could not run
     coverage:
       # The check's own count of files it opened. A file nobody could read is
       # counted as could-not-run, never as a file that passed.
       from: stdout_count
       pattern: '([0-9]+) file\(s\) checked'
       min_covered: 1
+      spec_units:
+        - id: R57
+          verdict: Covered
+          evidence: >-
+            check-frontmatter.py 1.1 fails any agent template whose frontmatter `name` contains
+            `reviewer` and grants Write, Edit or NotebookEdit, and its default set includes
+            agent-spec-reviewer.md. Falsified 2026-10-10 on a copy of that template with Edit added:
+            rc 1, `reviewer 'spec-reviewer' grants 'Edit', a tool that can write a file`. NOT
+            asserted: a write through Bash or an MCP tool.
 
   # --- the guide the release ships with ---------------------------------------
   #
@@ -372,6 +381,7 @@ checks:
   # count it could not measure - and refused is not a pass.
     limitations:
       - It checks the frontmatter of the agent templates only. A key the host silently ignores still reads as valid here.
+      - Reviewer write-tools are matched on the frontmatter `name`. A reviewer whose name lacks the word, and a reviewer that writes through Bash or an MCP tool, both pass.
 
   - id: guide-current
     why: two releases shipped from a hand-edited guide, and a guide describing behaviour the spec never agreed to reads exactly like one that does
@@ -1806,6 +1816,131 @@ checks:
       - Fixture and eval trees are excluded because they carry their own specs with their own numbering. Measured on this repo, 81 tracked files match R3 and 19 are outside those trees.
       - Clearing is per line, so a coverage claim's `- id: Rn` line never moves and the claim stays flagged when only the evidence beside it is rewritten. The finding says the file was edited, which is the triage signal, not a clearance.
       - A citation that names no id - a paragraph quoting the sentence - is invisible.
+
+  # --- a citation this change writes that resolves to nothing -----------------
+  #
+  # B90, R52/R53. Adapted from the DANGLING_REF rule of the AI Unified Process
+  # (Apache-2.0, by Simon Martinelli); the idea is theirs, the code is not.
+  # Diff-scoped: it reads only the lines a change ADDS, because a citation
+  # already in the tree at the base is drift-reverse.sh's business, and a check
+  # that repeats the same rows on every change is one people stop reading.
+  #
+  # ADVISE, AND THE NUMBER THAT SAYS WHY. Replayed over every commit in this
+  # repository against its parent on 2026-10-10: 132 in history, 109 measurable,
+  # 25 fired with 92 findings, and none of the 92 was a citation anybody meant,
+  # by a by-hand reading recorded in references/traceability.md. Finding
+  # precision on this history is zero. The remedy is the EXAMPLE marker, and
+  # nothing here is marked yet (B101). Blocking on that rate would block one
+  # change in four for an example id.
+  - id: dangling-citations
+    why: a citation of an id the spec does not hold reads exactly like provenance, and nothing checked that a new one resolves at the moment it is written
+    when:
+      always: true
+    severity: advise
+    requires:
+      - ./plugins/productizer/skills/spec/scripts/check-citations.sh
+      - ./plugins/productizer/skills/spec/scripts/spec-requirements.sh
+      - ./plugins/productizer/skills/spec/scripts/req-trailer.sh
+      - git
+    version_command: [./plugins/productizer/skills/spec/scripts/check-citations.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-citations.sh, --base, "{base}"]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]        # at least one FINDING: an added citation the spec does not hold, or a trailer naming one
+      refused: [2]     # no base, an unresolvable ref, a shallow clone missing the base, or a spec with no requirements or no counter
+    coverage:
+      spec_units:
+        - id: R52
+          verdict: Partial
+          reason: >-
+            It reads only ADDED lines, so a citation already in the tree at the base is not
+            examined. A citation is a TOKEN - `R` and digits - so an example id outside an
+            EXAMPLE block is indistinguishable from a real one: replayed over 109 measurable
+            commits of this repository's history it fired on 25 with 92 findings, and a by-hand
+            reading found none of them was a citation anybody meant. Fixture and eval trees, the
+            spec, the constitution, the backlog and the generated requirement index are not read.
+          evidence: >-
+            Every requirement id on an added line is resolved against the spec at HEAD through
+            spec-requirements.sh. An id at or above `Next requirement id` is
+            CITATION_NEVER_ALLOCATED and one below it with no row is CITATION_ALLOCATED_MISSING;
+            every commit trailer in the range goes through `req-trailer.sh --validate`. 25
+            self-test cases over exit codes 0 1 2, each asserting a sentence.
+        - id: R53
+          verdict: Partial
+          reason: >-
+            The supersede chain is asserted only when it ends at an active requirement. A withdrawn
+            id, and a chain that ends anywhere else, print a note saying where the chain ended and
+            are driven by no self-test case. Same token and added-lines limits as R52.
+          evidence: >-
+            A new citation of a superseded id prints `NOTE CITATION_SUPERSEDED <path>:<line> <id> ->
+            <id>`, following `Superseded by` to the requirement that stands now; the `superseded`
+            self-test case asserts `R1 -> R4`. A note does not change the exit code.
+      from: stdout_count
+      pattern: 'requirements resolved against:\s*([0-9]+)'
+      min_covered: 1
+    limitations:
+      - On this repository's history the precision of a finding is zero - 92 findings over 25 of 109 measurable commits, none a citation anybody meant. The EXAMPLE marker is the remedy, and nothing is marked yet.
+      - req-trailer.sh reads the spec through its own id pattern, not spec-requirements.sh, so the two halves of this check can disagree about an id that is bold outside the `## Requirements` section.
+      - One spec path. A spec split across files reads as missing requirements.
+
+  # --- a stage that moves on nothing, backwards, or over its own rules --------
+  #
+  # B91, R54-R56. Adapted from the forward-only, rank-gated status advance in the
+  # AI Unified Process (Apache-2.0, by Simon Martinelli); no code is copied. The
+  # forbidden-path rule is this repository's own.
+  #
+  # DECLARED AS ITS SELF-TEST, the way solver-corpus declares
+  # contradiction-check.py's: the guard is a pure decider over one stage move,
+  # and no change to this repository IS a stage move, so the verdict a commit
+  # can return is whether the decider still decides correctly. NOTHING CALLS IT
+  # YET. No tracker move in this repository invokes stage-advance.sh, so
+  # R54-R56 are Covered as properties of the tool and not yet as a step anybody
+  # takes (B91).
+  - id: stage-advance-guard
+    why: a stage that moves on a run that produced nothing, backwards, or over a change to the rules it is judged by is a status that lies, and every tracker move reads it
+    when:
+      always: true
+    severity: block
+    # The script itself as argv[0], never `bash <script>`: run-checks.sh refuses
+    # a program that takes a command as an operand in any argv position (R29),
+    # and it refused the `bash` form this entry was first written with.
+    requires: [./plugins/productizer/skills/spec/scripts/stage-advance.sh, git, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/stage-advance.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/stage-advance.sh, --selftest]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of [0-9]+ cases held'
+      min_covered: 1
+      spec_units:
+        - id: R54
+          verdict: Covered
+          evidence: >-
+            Exit 1, PRODUCED NOTHING: the `bookkeeping-only` and `empty-patch` cases - a change
+            touching only stage snapshots, the checks result file or classification records, and
+            an empty one - exit 1, and so does a design advance whose only change is whitespace.
+        - id: R55
+          verdict: Covered
+          evidence: >-
+            Exit 5, NOT A FORWARD MOVE: the `backward-move`, `same-stage` and `order-from-config`
+            cases exit 5, the last reading the stage order from config.json rather than from the
+            script.
+        - id: R56
+          verdict: Covered
+          evidence: >-
+            Exit 3, FORBIDDEN PATH: the `workflow-forbidden`, `build-mode-spec-forbidden` and
+            `plan-mode-code-forbidden` cases exit 3, and `build-mode-code-allowed` exits 0, so the
+            rule is not refusing everything.
+    limitations:
+      - Nothing calls it. No tracker move, label or workflow in this repository invokes stage-advance.sh, so a stage can still move without it.
+      - Renamed paths in a patch, and a stage other than design or build with evidence of its own, are driven by no case.
 
   # --- a self-test that exists, and a self-test that runs ---------------------
   #

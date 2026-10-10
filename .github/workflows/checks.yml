@@ -250,10 +250,16 @@ jobs:
       # not be read, or holds no requirements — and it is non-zero on purpose:
       # a spec nobody parsed has not passed.
       #
-      # Deliberately not --strict. The spec carries WARNs today (three
-      # requirements with two `shall` clauses); --strict would fail this job on
-      # a pre-existing condition and the first thing anyone did would be to
-      # delete the step. WARNs are printed and do not block. See references/ci.md.
+      # --strict SINCE v4.66.0: a WARN now fails this step. It was deliberately
+      # not --strict while the spec carried WARNs - three requirements with two
+      # `shall` clauses, since split - because a step that fails on a
+      # pre-existing condition is a step somebody deletes. Measured 2026-10-10:
+      # the last WARN was P1 naming a script that does not exist
+      # (PRINCIPLE_CHECK_ABSENT), removed by the maintainer's amendment, and
+      # `validate-spec.py --repo . --strict` then printed
+      # `2 file(s) checked: 0 error(s), 0 warning(s)` and exited 0. So the bar
+      # rose with nothing to fix, and a new WARN is now a red step on the change
+      # that introduced it rather than a line nobody reads. See references/ci.md.
       #
       # `--repo .` rather than a list of paths. The cross-file checks
       # (ID_DEFINED_TWICE, COUNTER_DISAGREES, SIBLING_ID_AT_OR_ABOVE_COUNTER,
@@ -270,7 +276,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 plugins/productizer/skills/spec/scripts/validate-spec.py --self-test
-          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --repo .
+          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --repo . --strict
 
       # B63. The step above validates `--repo .`, which discovers the spec and
       # the constitution from `spec.path` in config.json. It deliberately does
@@ -310,9 +316,10 @@ jobs:
       # `--kind backlog` is passed explicitly although the kind is auto-detected
       # from the heading. A backlog whose heading is rewritten into something the
       # detector reads as another kind would then be validated under the wrong
-      # grammar and pass; named explicitly, it is an error. Not `--strict`, for
-      # the same reason the spec step is not: a WARN is printed and does not
-      # block, so nobody's first move is to delete the step.
+      # grammar and pass; named explicitly, it is an error. Not `--strict`: a
+      # WARN is printed and does not block. The spec step above went strict in
+      # v4.66.0 once it measured zero WARNs; this step was not part of that
+      # change, although the backlog also measured 0 warnings on 2026-10-10.
       - name: Backlog — id permanence and header counts
         if: ${{ !cancelled() }}
         run: |
@@ -336,10 +343,11 @@ jobs:
         # `spec-doctor.sh` is on this list and is DELIBERATELY NOT a declared
         # check in checks.yaml. It exits 1 on findings and it counts a WARN as
         # one, so a `block` check over it would turn every pre-existing warning
-        # into a red suite - which is the condition the "Spec" step above already
-        # refuses to gate on, for the stated reason that the first thing anyone
-        # does with such a gate is delete it. It also computes nothing of its
-        # own that a declared check does not already run, and it emits no path
+        # into a red suite - which is the condition the "Spec" step above refused
+        # to gate on until it measured zero WARNs in v4.66.0, for the stated
+        # reason that the first thing anyone does with such a gate is delete it.
+        # It also computes nothing of its own that a declared check does not
+        # already run, and it emits no path
         # for `coverage.from: stdout_paths` to read, so a check declared over it
         # would claim coverage it never had. Naming it here is what puts it
         # inside the set check-selftest-coverage.sh measures R39 and R40 over,
@@ -372,6 +380,10 @@ jobs:
         # being required by four of them never put it in the set. Declaring it as
         # a check of its own would be a second check over what those four
         # already run it for.
+        #
+        # `req-trailer.sh` is here for that same reason. It is a library the
+        # `dangling-citations` check calls and names only in `requires`, so
+        # until its self-test is named here it is outside R39 and R40 too.
         run: |
           set -euo pipefail
           python3 evals/check-hard-corpus.py --selftest
@@ -385,6 +397,7 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/check-cannot-run-coverage.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-changelog-row.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-citations.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-classification-provenance.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-declared-scope.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-diff-paths-named.sh --selftest
@@ -413,10 +426,12 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/classify-change-risk.sh --selftest
           bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh --selftest
           bash plugins/productizer/skills/spec/scripts/measure-check-underfire.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/req-trailer.sh --selftest
           bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
           bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
           bash plugins/productizer/skills/spec/scripts/spec-doctor.sh --selftest
           bash plugins/productizer/skills/spec/scripts/spec-requirements.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/stage-advance.sh --selftest
           bash plugins/productizer/skills/spec/scripts/upgrade-drift.sh --selftest
           bash scripts/check-hygiene.sh --selftest
           python3 scripts/replay-ci.py --selftest

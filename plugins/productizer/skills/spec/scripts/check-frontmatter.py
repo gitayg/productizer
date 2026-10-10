@@ -89,7 +89,16 @@ NAME_RE = re.compile(r"^[a-z][a-z-]*$")
 # An MCP server pattern is a legitimate entry that is not a built-in tool name.
 MCP_RE = re.compile(r"^mcp__[A-Za-z0-9_-]+(__(\*|[A-Za-z0-9_-]+))?$")
 
-DEFAULT_TEMPLATES = ("agent-verifier.md", "agent-reviewer.md")
+DEFAULT_TEMPLATES = ("agent-verifier.md", "agent-reviewer.md", "agent-spec-reviewer.md")
+
+# A reviewer reports; it never writes. references/delegation.md and references/spec-review.md
+# both rest on that, and until 1.1 nothing read it: adding `Edit` to a reviewer's allowlist was
+# a real tool, correctly spelled, and passed. Matched on the frontmatter `name`, not the file
+# name, because `name` is what the runtime dispatches by. Bash is deliberately NOT here: the
+# diff reviewer needs it for git, and delegation.md names Bash as the instructed-not-enforced
+# hole rather than pretending it is closed.
+REVIEWER_MARK = "reviewer"
+WRITING_TOOLS = ("Write", "Edit", "NotebookEdit")
 
 
 def usage():
@@ -111,6 +120,7 @@ enumerated values are fixed in the script, so two runs over the same tree agree.
 Default templates, resolved next to this script in ../templates/:
   agent-verifier.md
   agent-reviewer.md
+  agent-spec-reviewer.md
 
 These are the AGENT templates. templates/SKILL-secure-api-review.md and
 templates/spec-command.md also carry frontmatter, but a Skill and a slash command are
@@ -128,6 +138,10 @@ What it checks:
   4. Every key is a documented subagent frontmatter key, and enumerated values are in
      range. An unknown key is REPORTED, never ignored — a field the runtime drops looks
      exactly like a field it honours, and the file cannot tell you which it got.
+  5. An agent whose `name` contains `reviewer` grants no tool that can write a file:
+     not Write, not Edit, not NotebookEdit. A reviewer reports; one that can edit what
+     it reviewed can close its own finding and report a clean run. Bash is not on that
+     list, and that hole is documented in references/delegation.md, not closed here.
 
 Three outcomes are kept distinct and are never collapsed into one:
   the file is ABSENT          exit 3. The check did not run. Never reported as a pass.
@@ -173,7 +187,7 @@ def parse_args(argv):
             # The check runner records the version of every tool it ran, so a
             # result can be read back later against the tool that produced it.
             # A check with no --version is a check the runner cannot declare.
-            print("check-frontmatter 1.0")
+            print("check-frontmatter 1.1")
             raise SystemExit(0)
         if a in ("-h", "--help"):
             usage()
@@ -341,6 +355,13 @@ def check_file(path):
                 f.append("tools: unknown tool %r — not a documented tool name. A name that "
                          "does not resolve is a capability silently deleted" % t)
 
+        name = str(data.get("name", "")).strip()
+        if REVIEWER_MARK in name:
+            for t in tools:
+                if t in WRITING_TOOLS:
+                    f.append("reviewer %r grants %r, a tool that can write a file — a reviewer "
+                             "reports and never writes (references/delegation.md)" % (name, t))
+
     for k in order:
         if k not in KNOWN_KEYS:
             f.append("unknown key %r — not a documented subagent frontmatter field, so the "
@@ -432,6 +453,37 @@ SELFTEST_CASES = (
      "unreadable frontmatter is a finding, never reported as `no keys`"),
 )
 
+# The reviewer-never-writes rule (check 5). These cases assert a SENTENCE as well as the exit
+# code: every one of the red cases would also exit 1 if the rule were deleted and some other
+# finding fired, and a case red for the wrong reason is the miss the code alone cannot see.
+SELFTEST_REVIEWER = SELFTEST_CLEAN.replace("name: fixture-agent", "name: fixture-spec-reviewer")
+SELFTEST_REVIEWER_CASES = (
+    # (name, filename, contents, expected exit, what the case is, a sentence that must appear)
+    ("reviewer-read-only", "reviewer-ok.md", SELFTEST_REVIEWER, 0,
+     "a reviewer granted only reading tools passes",
+     "ok   "),
+    ("reviewer-with-bash", "reviewer-bash.md",
+     SELFTEST_REVIEWER.replace("tools: Read, Grep", "tools: Read, Grep, Glob, Bash"), 0,
+     "Bash is the documented hole, not this check's - the diff reviewer needs it for git",
+     "ok   "),
+    ("reviewer-grants-write", "reviewer-write.md",
+     SELFTEST_REVIEWER.replace("tools: Read, Grep", "tools: Read, Grep, Write"), 1,
+     "a reviewer that can Write can close its own finding",
+     "reviewer 'fixture-spec-reviewer' grants 'Write', a tool that can write a file"),
+    ("reviewer-grants-edit", "reviewer-edit.md",
+     SELFTEST_REVIEWER.replace("tools: Read, Grep", "tools: Read, Edit, Grep"), 1,
+     "a reviewer that can Edit can close its own finding",
+     "reviewer 'fixture-spec-reviewer' grants 'Edit', a tool that can write a file"),
+    ("reviewer-grants-notebook", "reviewer-nb.md",
+     SELFTEST_REVIEWER.replace("tools: Read, Grep", "tools: [Read, NotebookEdit]"), 1,
+     "NotebookEdit writes a file too, and an inline list is read like a string",
+     "reviewer 'fixture-spec-reviewer' grants 'NotebookEdit', a tool that can write a file"),
+    ("non-reviewer-may-edit", "builder-edit.md",
+     SELFTEST_CLEAN.replace("tools: Read, Grep", "tools: Read, Edit"), 0,
+     "the rule is scoped to reviewers - an agent named otherwise may hold Edit",
+     "ok   "),
+)
+
 
 def selftest():
     import shutil
@@ -453,29 +505,39 @@ def selftest():
     # nothing.
     reached = set()
 
-    def run(name, argv, expected, what):
-        """Drive one case and read the exit code off the child."""
+    def run(name, argv, expected, what, must_say=None):
+        """Drive one case and read the exit code off the child — and, where the case names
+        one, a sentence off its stdout, so a case red for the wrong reason does not hold."""
         nonlocal cases, upheld
         proc = subprocess.run([sys.executable, os.path.abspath(__file__)] + argv,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         got = proc.returncode
         reached.add(got)
         cases += 1
-        if got == expected:
+        said = (must_say is None
+                or must_say in proc.stdout.decode("utf-8", "replace"))
+        if got == expected and said:
             upheld += 1
             verdict = "held"
+        elif got == expected:
+            verdict = "NOT HELD (right code, missing sentence %r)" % must_say
         else:
             verdict = "NOT HELD"
         sys.stdout.write("      %-26s expected %d  got %d  %s  %s\n"
                          % (name, expected, got, verdict, what))
 
     try:
-        sys.stdout.write("    selftest: check-frontmatter 1.0\n")
+        sys.stdout.write("    selftest: check-frontmatter 1.1\n")
         for name, filename, body, expected, what in SELFTEST_CASES:
             path = os.path.join(work, filename)
             with io.open(path, "w", encoding="utf-8") as fh:
                 fh.write(body)
             run(name, [path], expected, what)
+        for name, filename, body, expected, what, must_say in SELFTEST_REVIEWER_CASES:
+            path = os.path.join(work, filename)
+            with io.open(path, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            run(name, [path], expected, what, must_say)
 
         run("unknown-option", ["--not-a-real-option"], 2,
             "a bad invocation is refused, never answered")
@@ -504,9 +566,12 @@ def selftest():
     if missing:
         sys.stderr.write("%s: documented exit code(s) no self-test case reached: %s\n"
                          % (SELF, " ".join(str(c) for c in missing)))
-    sys.stdout.write("    NOT ASSERTED: the WORDING of any finding. The corpus drives the "
-                     "exit code, so a case that went red for the wrong reason is "
-                     "invisible here and is read off the case output by hand.\n")
+    sys.stdout.write("    NOT ASSERTED: the WORDING of any finding outside the six reviewer "
+                     "cases, which assert a sentence. The other cases drive the exit code "
+                     "only, so one that went red for the wrong reason is invisible here and "
+                     "is read off the case output by hand. Nor whether a reviewer can write "
+                     "through Bash or an MCP tool: only Write, Edit and NotebookEdit are "
+                     "looked for.\n")
     if missing:
         return 1
     return 0 if cases == upheld else 1

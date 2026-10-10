@@ -142,8 +142,13 @@ before `shall`. Six patterns, recognised by their opening clause:
   sub-headings inside a pattern section do not change the pattern.
 - `If` without `then` parses but is non-canonical.
 - Unquantified terms (`fast`, `robust`, `reasonable`, `appropriate`, `timely`,
-  `gracefully`, …) are each an argument deferred to review. Give a number or
-  drop the word.
+  `gracefully`, …) and weak words (`should`, `etc.`, `and/or`, `if possible`,
+  `as appropriate`, `easily`, `TBD`, adapted from the AI Unified Process) are
+  each an argument deferred to review: `EARS_UNQUANTIFIED`, WARN. Give a number
+  or drop the word. Only active requirement text is judged, never a superseded
+  or withdrawn one, whose text is retained verbatim; and a term inside a code
+  span is a mention, not a use, so a requirement about this check can name
+  `should`. The full list is in `references/ears.md`.
 
 Superseded and withdrawn requirements stay in the pattern section they were
 written in. There is no archive section — moving them breaks the one thing that
@@ -218,6 +223,16 @@ Enforced by
 
 - Every active principle names a `Checked by`. A principle nothing checks is a
   slogan: it gets cited in review, argued about, and never enforced.
+- Under `--repo ROOT`, every backticked token in an active principle's
+  `Checked by` that is a script filename (`*.sh`, `*.py`, `*.js`, optionally
+  with a directory part) must match the basename of some file under ROOT,
+  `.git` excluded. One that does not is `PRINCIPLE_CHECK_ABSENT`, a WARN, on
+  the line naming it: the principle cites a check nothing can run. The value
+  may wrap over several lines; every line up to the blank one is read.
+
+  | Code | Sev | Fires on |
+  |---|---|---|
+  | `PRINCIPLE_CHECK_ABSENT` | WARN | an active principle's `Checked by` names a `*.sh`/`*.py`/`*.js` file that no file under the `--repo` root carries the basename of |
 - `Enforced by` cites requirement ids. When the spec is passed on the same
   command line, those ids are resolved against it.
 - Three to eight principles. Past eight it is a second spec, and a second spec
@@ -319,8 +334,15 @@ than no checker: it converts "nobody looked" into "it passed".
   build.
 - **Whether the reason line is true.** `Superseded by R41. Because.` satisfies
   the grammar completely.
-- **Whether `Checked by` names something that exists**, or that the named check
-  actually enforces the principle.
+- **Whether `Checked by` names something that exists, beyond a script
+  filename under `--repo`.** `PRINCIPLE_CHECK_ABSENT` reads only backticked
+  `*.sh`/`*.py`/`*.js` names, matches them by basename anywhere in the work
+  tree (so a same-named file in the wrong directory satisfies it), and runs
+  only under `--repo`, because a file named on the command line has no root.
+  A test name, a hook or a CI job is not checked. A script that ships in the
+  plugin rather than in the repo IS checked, and in a consuming repo it is
+  reported absent: a false alarm, and a WARN for that reason. Nothing checks
+  that the named check actually enforces the principle.
 - **System-name drift** (see *Known inconsistencies*).
 - **Ids allocated in another repo or another file.** The counter is checked
   against the ids in the files given, and nothing else.

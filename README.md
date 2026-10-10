@@ -18,10 +18,19 @@ productizer/
 │       ├── commands/
 │       │   └── upgrade.md        # /productizer:upgrade
 │       └── skills/
-│           └── spec/
+│           ├── answer/           # /productizer:answer
+│           ├── backlog/          # /productizer:backlog
+│           ├── check/            # /productizer:check
+│           ├── dashboard/        # /productizer:dashboard
+│           ├── help/             # /productizer:help, with scripts/list-commands.sh
+│           ├── import/           # /productizer:import
+│           ├── spec-review/      # /productizer:spec-review, advisory
+│           └── spec/             # /productizer:spec, the lifecycle itself
 │               ├── SKILL.md
+│               ├── fixtures/
 │               ├── references/
-│               ├── scripts/
+│               ├── scripts/      # every tool the stages run, among them
+│               │                 # check-citations.sh and stage-advance.sh
 │               └── templates/
 └── README.md
 ```
@@ -39,7 +48,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.65.2"`.
+`plugin.json` sets `"version": "4.66.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -250,6 +259,17 @@ specialised analysis tools and refuses the basic ones — `git`, `make`, a
 compiler, an editor — with exit `2` and nothing written.
 `scripts/req-trailer.sh --authorship --rev <rev>` reads a commit back and exits
 `3` when it claims otherwise.
+
+`scripts/check-citations.sh --base origin/main` reads the lines a change adds
+and resolves every requirement id on them against the spec at HEAD, and hands
+every commit's trailer in the range to `req-trailer.sh --validate`. An id the
+spec never allocated, or one whose row is gone, is a finding and exit `1`; a
+new citation of a superseded id is a note naming the requirement that replaced
+it. It is the advisory `dangling-citations` check here, because on this
+repository's own history a finding has never once been a real citation: 92
+findings over 25 of 109 commits, all example ids. Wrap a worked example in an
+`<!-- EXAMPLE:BEGIN -->` / `<!-- EXAMPLE:END -->` block and its ids are listed,
+not resolved.
 
 ### Reporting a change on its pull request
 

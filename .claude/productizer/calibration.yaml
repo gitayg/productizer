@@ -443,3 +443,7 @@ checks:
     status: uncalibrated
     reason: "measured nothing - it triggered on 13 of the 30 commits and returned a verdict on none: 0 refused, 0 undeclared exit, 13 tool absent at that commit, 0 timed out. It did not exist before 2026-10-02, so no past commit carries it"
     measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-03", config: "checks.yaml in the working tree, with calibration-recorded declared", command: "measure-check-overfire.sh --check calibration-recorded --commits 30"}
+  - id: stage-advance-guard
+    status: uncalibrated
+    reason: "measured nothing - it triggered on 30 of the 30 commits and returned a verdict on none: 0 refused, 0 undeclared exit, 30 tool absent at that commit, 0 timed out. It did not exist before 2026-10-10, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-10", config: "checks.yaml in the working tree, with stage-advance-guard declared", command: "measure-check-overfire.sh --check stage-advance-guard --commits 30 --history clone"}

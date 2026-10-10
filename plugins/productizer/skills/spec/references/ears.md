@@ -52,8 +52,13 @@ distinction is what separates a designed path from a defended one.
    lifecycle* below for allocation, supersession and the rules against reuse.
    The id grammar itself is normative and executable: `references/format-spec.md`
    states it, `scripts/validate-spec.py` enforces it.
-5. **No unquantified adjectives.** Fast, robust, user-friendly, appropriate, as
-   needed, etc. Each is an argument deferred to review. Give a number or drop it.
+5. **No unquantified adjectives and no weak words.** Fast, robust,
+   user-friendly, appropriate, as needed; and the weak words `should`, `etc.`,
+   `and/or`, `if possible`, `as appropriate`, `easily` and `TBD`. Each is an
+   argument deferred to review. Give a number or drop it, and a `should` is a
+   `shall` or it is nothing. The weak words are adapted from the AI Unified
+   Process (Apache-2.0, Simon Martinelli), whose spec linter keeps the same
+   list.
 6. **Unwanted-behaviour requirements are not optional.** A spec with no `If`
    requirements has not considered failure, and the tests will inherit that gap.
 
@@ -253,7 +258,7 @@ exactly like a real one a month later.
 | `EARS_MULTIPLE_SHALL` | WARN | more than one obligation under one id |
 | `EARS_IF_MISSING_THEN` | WARN | `If …, the system shall`, without `then` |
 | `EARS_SECTION_MISMATCH` | WARN | the pattern and its heading disagree |
-| `EARS_UNQUANTIFIED` | WARN | `fast`, `robust`, `reasonable`, `timely`, `gracefully`, … |
+| `EARS_UNQUANTIFIED` | WARN | an unquantified or weak term in an active requirement: `adequate(ly)`, `appropriate(ly)`, `as needed`, `easy`, `efficient(ly)`, `fast`, `flexible`, `gracefully`, `intuitive`, `optimal`, `performant`, `properly`, `quick(ly)`, `reasonable`/`reasonably`, `reliable`/`reliably`, `robust`, `scalable`, `seamless(ly)`, `sufficient(ly)`, `timely`, `user-friendly`, `where possible`, and the weak words `and/or`, `as appropriate`, `easily`, `etc.`, `if possible`, `should`, `TBD`. Case-insensitive, whole words. Not judged: superseded or withdrawn text (retained verbatim), and a term inside a code span, which mentions the word rather than using it |
 | `EARS_NO_FULL_STOP` | WARN | one requirement is one sentence |
 
 ### Supersession and permanence
@@ -290,8 +295,10 @@ inside `## Principles`), `PRINCIPLE_ID_AT_OR_ABOVE_COUNTER`,
 `PRINCIPLE_COUNTER_MISSING` / `_MALFORMED`, `PRINCIPLE_STATUS_MISSING` and
 `PRINCIPLE_STATUS_MALFORMED` are ERROR; `PRINCIPLE_NO_CHECK` (a principle
 nothing checks is a slogan), `PRINCIPLE_NO_RATIFIER`, `PRINCIPLE_NO_DATE`,
-`PRINCIPLE_SUPERSEDE_TARGET_ABSENT`, `PRINCIPLE_ENFORCED_UNKNOWN` and
-`PRINCIPLE_TOO_MANY` are WARN. The backlog carries the same id checks under
+`PRINCIPLE_SUPERSEDE_TARGET_ABSENT`, `PRINCIPLE_ENFORCED_UNKNOWN`,
+`PRINCIPLE_TOO_MANY` and `PRINCIPLE_CHECK_ABSENT` (under `--repo` only: an active
+principle's `Checked by` names a script, `*.sh`, `*.py` or `*.js`, and no file
+of that name exists anywhere under the root) are WARN. The backlog carries the same id checks under
 `BACKLOG_*`, plus `BACKLOG_STATUS_UNKNOWN` for a status outside the vocabulary
 on a row that names no Jira key.
 

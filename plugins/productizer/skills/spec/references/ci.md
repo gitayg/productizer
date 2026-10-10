@@ -23,7 +23,7 @@ a green theatre step is worse than no step.
 |---|---|---|
 | Preflight | `command -v` for `git`, `python3`, `node`, `npm`, `npx`; then `npx --yes shellcheck --version` | any one missing, named in the error |
 | Manifests | `claude plugin validate ./plugins/productizer --strict`, then `claude plugin validate . --strict` | exit 1 — missing required field, malformed JSON, or any unknown field (`--strict` promotes that warning) |
-| Spec | `validate-spec.py --self-test`, then the same script over `spec.md` and `constitution.md` | exit 1 (ERROR — a reused id, an unparseable document), 3 (self-test failed), 4 (NOT MEASURED) |
+| Spec | `validate-spec.py --self-test`, then `validate-spec.py --repo . --strict` over `spec.md` and `constitution.md` | exit 1 (ERROR — a reused id, an unparseable document), 3 (a WARN under `--strict`, or the self-test failed), 4 (NOT MEASURED) |
 | Solver | `contradiction-check.py --selftest` | exit 1 — the corpus no longer decides what it decided |
 | Stage 5 | `run-checks.sh --base <sha>` | exit 3 REFUSED, 2 bad usage, 1 crashed |
 
@@ -136,10 +136,14 @@ Measured, not assumed. Each of these was tried.
   `checks.yaml` names a requirement, so `run-checks.sh` reports the
   denominator as uncomputable rather than as zero. That is the honest output,
   and it is also a gap.
-- **`validate-spec.py` runs without `--strict`.** WARNs are printed and do not
-  block. `--strict` would fail the job today on three pre-existing
-  `EARS_MULTIPLE_SHALL` warnings, and the first thing anyone would do is delete
-  the step. Fix the warnings, then turn it on.
+- **`validate-spec.py` runs with `--strict` on the spec, since v4.66.0, and
+  without it on the backlog.** It ran without `--strict` while the spec carried
+  pre-existing WARNs, because a step red on day one is a step somebody deletes.
+  The warnings were fixed first: three `EARS_MULTIPLE_SHALL` by splitting
+  requirements, and the last one, P1 naming a script that does not exist, by
+  the maintainer's amendment. Measured 2026-10-10: `2 file(s) checked: 0
+  error(s), 0 warning(s)`, exit 0. A new WARN in the spec or the constitution
+  now fails the job on the change that introduced it.
 - **The evals under `evals/` do not run here.** They cost model calls.
 - **The shell inside this workflow is not shellchecked.** `checks.yml` is not a
   `.sh`, so `shell-lint` never sees the `run:` blocks.

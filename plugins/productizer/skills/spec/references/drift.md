@@ -231,6 +231,11 @@ clean.
 | **D** | A cited id **at or above** the watermark — never allocated here | Only that the token exists | Almost nothing. Prose that explains the id convention cites ids that were never allocated, and this pass cannot tell that sentence from a citation |
 | **C** | A test whose name is built entirely from words that appear nowhere in the spec | That a test names a flow in vocabulary the spec does not use | That the flow is gone. It matches vocabulary, not meaning |
 
+For ONE change rather than the whole tree, `scripts/check-citations.sh` resolves
+only the citations that change adds, split on the same watermark - see
+`references/traceability.md` section 6. A citation already in the tree at the
+base stays this pass's business.
+
 B and D are split on the watermark for one reason: without the split they are
 one bucket, and on this repo that bucket is 71 rows of documentation examples
 with the two interesting ones — had there been any — buried in them. A report

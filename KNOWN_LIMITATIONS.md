@@ -289,3 +289,48 @@ Stated for completeness — these were **not** measured:
 - Windows, and any non-UTF-8 commit message encoding.
 - Repositories large enough for the single `git log` pass in `--orphans` to be
   slow. It reads every commit message in HEAD's ancestry, once, with no limit.
+
+---
+
+## Citations, stage advance and whole-spec review — added in v4.66.0
+
+### 11 · `dangling-citations` has never once found a real dangling citation here
+
+`scripts/check-citations.sh` resolves every requirement id on the lines a
+change adds. A citation is a token, `R` and digits, so an example id in a
+self-test, a doc illustrating the id grammar or a `checks.yaml` comment reads
+exactly like a real one. Replayed over every commit in this repository against
+its parent, 2026-10-10:
+
+```
+132 commits in history
+ 22 refused (no spec yet), 1 with no parent
+109 measured: 84 exit 0, 25 exit 1
+ 92 findings on those 25
+```
+
+Read one by one, none of the 92 was a citation anybody meant
+(`references/traceability.md`). **Finding precision on this history is zero.**
+That is why the check is advisory and why R52 and R53 read `Partial`. The
+remedy is the `<!-- EXAMPLE:BEGIN -->` marker the check already honours, and
+nothing in this repository is wrapped in one yet (B101). The reading of the 92
+is a judgement, not a measurement.
+
+### 12 · `stage-advance.sh` has no caller
+
+It decides whether a work item's stage may move, and `references/integrations.md`
+says every tracker move goes through it first. Nothing here does: no hook,
+workflow step or script invokes it, so a stage can still move on a run that
+produced nothing. `stage-advance-guard` runs its self-test, which proves the
+decider, not that anyone asks it. Searched 2026-10-10: outside its own file it
+is named only in documentation, the spec, the backlog and the self-test lines of
+`checks.yaml` and the workflow.
+
+### 13 · `/productizer:spec-review` Part B is unmeasured
+
+Part A is deterministic. Part B hands the checklist to a clean-context reviewer
+agent, and it has **never been dispatched live**: the checklist was walked once
+by hand over this spec (B102), so what Part B finds, misses and invents is not
+known. R57 holds that a reviewer agent is granted no tool that can write a
+file, and `check-frontmatter.py` asserts it on the frontmatter `name` only. A
+reviewer that writes through Bash or an MCP tool passes.

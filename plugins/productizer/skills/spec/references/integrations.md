@@ -348,6 +348,27 @@ ticket is rewritten.
 **Transitions.** Only the stages listed in `jira.transition_on` move the ticket.
 The default is `design`, `build`, `deploy`, `done`.
 
+**Every move goes through `scripts/stage-advance.sh` first.** That is every
+Jira transition and every GitHub stage label (`github.issues.stage_labels`),
+and the move is made only on its exit 0:
+
+```bash
+stage-advance.sh . --from build --to test --base origin/main          # or --patch FILE
+stage-advance.sh . --from design --to build --mode plan --base origin/main
+```
+
+It writes nothing and calls nothing. It refuses a run that produced nothing
+outside the lifecycle's own bookkeeping (exit 1), a move to a stage at or
+before the current one (exit 5), and a change touching a path the target stage
+does not permit (exit 3): workflows, hooks, settings, `checks.yaml`,
+`calibration.yaml` and `constitution.md` always, the spec in build mode, and
+anything but `plan.md` in plan mode. `design` needs a requirement id added,
+refined, superseded or withdrawn; a whitespace-only spec edit is not one.
+`deploy` and `done` are exit 4, cannot determine: they move on a merge, and a
+merge is not visible to the script, so the merge itself is the evidence. The
+forward-only, nothing-produced-moves-nothing rule is adapted from the AI
+Unified Process (Apache-2.0, Simon Martinelli).
+
 | Stage | Moves the ticket | Why |
 |---|---|---|
 | 1 Plan | no | the ticket is being created; it is already in its start status |

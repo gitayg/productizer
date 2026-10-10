@@ -125,6 +125,7 @@ req-trailer.sh --validate [--file <msg> | --rev <rev>]
 req-trailer.sh --query R14
 req-trailer.sh --orphans
 req-trailer.sh --coverage [--include-ignored]
+req-trailer.sh --version | --selftest
 ```
 
 | Mode | Answers | Notes |
@@ -178,3 +179,122 @@ call the rest clean.
 The full list, with the reproductions behind it, is in **KNOWN_LIMITATIONS.md**
 at the repository root. The one worth knowing before you start:
 **`git commit --amend -m` destroys the trailer.**
+
+## 6 · A citation this change adds that resolves to nothing — `scripts/check-citations.sh`
+
+Sections 1 to 5 trace an id after it is written. Nothing checked an id **at the
+moment it is written**. A plan, a coverage claim in `checks.yaml`, a comment or
+a commit trailer can name an id the spec does not hold, and it reads exactly
+like provenance. `check-citations.sh` reads the lines a change **adds** and
+resolves every requirement id on them against the spec the change ends at.
+
+```sh
+check-citations.sh --base REF [--head REF] [--root DIR]
+check-citations.sh --version | --help | --selftest
+```
+
+Adapted from the `DANGLING_REF` rule of the AI Unified Process (Apache-2.0, by
+Simon Martinelli), whose spec linter refuses a reference to a requirement that
+is not in its requirements file. The idea is theirs; the code is not. What is
+added here is the split on the counter, the diff scope and the supersede note.
+
+| Output | Meaning | Changes the exit code |
+|---|---|---|
+| `FINDING CITATION_NEVER_ALLOCATED <path>:<line> <id>` | the id is at or above `Next requirement id`. It was never handed out: a typo, an invention, another product's id, or an example | yes |
+| `FINDING CITATION_ALLOCATED_MISSING <path>:<line> <id>` | the id is below the counter and the spec has no row for it. It was handed out and its row is gone, or it lives in a spec file this check does not read | yes |
+| `FINDING TRAILER_UNKNOWN_ID <sha> <id>` | a commit in `BASE..HEAD` carries a `Productizer-Req:` id the spec does not hold, as `req-trailer.sh --validate --rev <sha>` reports it | yes |
+| `FINDING TRAILER_MALFORMED_ID <sha> <token>` | the same trailer carries a token that is not an id at all | yes |
+| `NOTE CITATION_SUPERSEDED <path>:<line> <id> -> <id>` | the id resolves, but to a superseded requirement. The note follows the `Superseded by` chain to the requirement that stands now | no |
+| `NOTE CITATION_WITHDRAWN <path>:<line> <id>` | the id resolves to a withdrawn requirement | no |
+| `EXAMPLE <path>:<line> <id>` | the id sits inside an EXAMPLE block and was not resolved | no |
+
+The two findings are split on the counter because they have different repairs,
+the same line `drift-reverse.sh` draws between its signals B and D. Exit `0`
+means every added citation resolves, `1` means at least one `FINDING`, and `2`
+is a refusal that names its reason: no `--base`, a base or head that does not
+resolve, a shallow clone missing the base or the merge base, no spec at HEAD, a
+spec with no requirement definitions or no readable counter, or
+`req-trailer.sh` answering in a way the check cannot read. A commit with no
+trailer is counted and is not a finding here; that is `--orphans`' question.
+
+**What it reads.** Only lines added in `git diff BASE...HEAD`, over tracked
+files, with the spec read at HEAD through `spec-requirements.sh`. A citation
+that was already in the tree at the base is `drift-reverse.sh`'s business, not
+this check's. It does not read paths under `fixtures/` or `evals/`, which carry
+their own numbering (the measurement is in `check-suspect-links.sh`); the spec,
+`constitution.md` and `backlog.md`, whose citations `validate-spec.py` owns;
+or the generated `requirement-index.md`, whose currency
+`build-requirement-index.sh --check` already asserts.
+
+### Example ids, measured
+
+A tool about requirement ids writes a lot of ids that are not citations:
+self-test corpora, documentation of the id grammar, an output quoting another
+tool. Run over every commit in this repository's history, each against its
+parent, with the spec as it stood at that commit:
+
+| | Commits |
+|---|---|
+| in history | 132 |
+| refused, no spec yet (22) or no parent (1) | 23 |
+| measured | 109 |
+| exit 0 | 84 |
+| exit 1 | 25 |
+
+Those 25 commits carried 92 findings: 86 never allocated and 6 allocated but
+missing. Read one by one, **none was a citation anybody meant**. 28 were the
+`contradiction-check.py` self-test corpus, 27 other self-test strings and
+script comments, 16 Markdown prose illustrating the id grammar, 11 `why:` and
+comment prose in `checks.yaml`, and 10 a generated result file that quoted
+another tool's output and is no longer tracked. The 6 missing ones are all the
+sentence explaining that ids carry no leading zero. So on this repository the
+precision of a finding is zero over its whole history, and one commit in four
+would have shown one. That reading of the 92 lines is a judgement, not a
+measurement.
+
+One exclusion rule was measured and **rejected**: skip an id inside backticks
+or double quotes. It removes 67 of the 92, and it also stops checking 594 of
+the 2,351 tokens naming an allocated id in the tree at v4.65.1, a quarter of
+them, because a coverage claim's `reason:` and a doc quote real ids as readily
+as an example does.
+
+The rule adopted instead costs no coverage, because it is explicit: **an id
+between a line that starts with `<!-- EXAMPLE:BEGIN` and the next line that
+starts with `<!-- EXAMPLE:END` is not resolved.** Leading whitespace and a `#`
+or `//` comment leader are allowed before the marker. It is the marker
+`format-spec.md` section 6 already defines, and `validate-spec.py` and
+`scaffold.sh` already honour it. The ids inside are still printed, as
+`EXAMPLE` lines, so the marker is visible rather than silent, and a `BEGIN`
+with no `END` after it skips nothing: a malformed marker fails toward
+reporting. The marker must START the line, where `validate-spec.py` accepts it
+anywhere in one, and that was measured: run on the commit that lands this
+check, the anywhere-in-the-line rule made 31 lines of the check's own
+self-test an example block, because code that builds a marker mentions it. It suppresses none of the 92 historic
+findings, since none of those lines was marked. It is what a writer uses from
+now on, around a worked example:
+
+<!-- EXAMPLE:BEGIN -->
+```
+FINDING CITATION_NEVER_ALLOCATED notes/plan.md:12 R999
+NOTE CITATION_SUPERSEDED notes/plan.md:14 R14 -> R33
+```
+<!-- EXAMPLE:END -->
+
+In a script, the same marker after a `#` or `//` works, and so does building
+the id rather than writing it - the self-tests of this check and of
+`req-trailer.sh` write `R$((4 + 3))`, for the reason section 2 gives for
+coverage ids.
+
+### What it cannot see
+
+- A citation is a token, `R` and digits with no letter, digit or underscore on
+  either side. `R9.1` cites R9. Git's rename score, a storage product or a
+  register named the same way is indistinguishable from a citation.
+- One spec path, `.claude/productizer/spec.md`. A spec split across files, or
+  moved by `config.json`, reads as missing requirements.
+- `req-trailer.sh` matches ids with its own pattern, not `spec-requirements.sh`,
+  so the two halves can disagree about an id written in bold outside the
+  `## Requirements` section.
+- A citation is resolved, never read: an id that exists, cited in a sentence
+  about something else, is clean.
+

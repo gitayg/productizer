@@ -40,6 +40,11 @@ adversarially at high effort when it inherited whatever was already loaded.
 `inherit` means take the session's. `cheap` means the smallest model that can do
 the job — name the actual model id if you want to pin one.
 
+`models.review` also sets the advisory half of `/productizer:spec-review`
+(`references/spec-review.md`), which runs in a fresh context from
+`templates/agent-spec-reviewer.md`. Enforced only when that agent is installed
+and dispatched as itself; the skill says which happened.
+
 ## Stage 5 takes no model, deliberately
 
 `checks: {model: none}` is not an omission. Stage 5 runs the scripts you

@@ -86,6 +86,7 @@ delegated agent always declares the list.
 |---|---|---|---|
 | `templates/agent-verifier.md` | `Bash, Read` | no | Reports whether the change works. Needs `Bash` to start the app, nothing else |
 | `templates/agent-reviewer.md` | `Read, Grep, Glob, Bash` | no | Reports findings against `REVIEW.md`. Needs `Bash` for `git` — the base and the diff |
+| `templates/agent-spec-reviewer.md` | `Read, Grep, Glob` | no | The advisory half of `/productizer:spec-review` (`references/spec-review.md`). Reads the spec and constitution only, so it needs no `Bash` and has none |
 | the drift agent (`templates/converge.md`) | writes | **yes** | Raises a `C<n>` row and a `D<n>` ruling file (`references/rulings.md`). Recording a question is its job; it still never edits a requirement |
 
 **`Bash` is the hole, and it is worth naming.** Both read-only agents need it —
@@ -176,13 +177,15 @@ treat the coverage claim as: the check exists, and nothing invokes it.
 
 **It validates shape, not policy.** It confirms `Edit` is a real tool; it does
 not know that the table above says the verifier and the reviewer never write
-files. Adding `Edit` to either allowlist passes the check today. Closing that
-means teaching it the per-agent expected list from the table above, and it is
-worth doing — the table is the contract, and a contract no check reads is prose
-again.
+files. Adding `Edit` to the verifier's allowlist passes the check today. Since 1.1 one
+rule is read: an agent whose `name` contains `reviewer` may not grant `Write`,
+`Edit` or `NotebookEdit`. The rest of the table — the verifier's list, and
+`Bash` for anyone — is still unread; closing it means teaching the check the
+per-agent expected list, and a contract no check reads is prose again.
 
-**It reads two files.** `templates/SKILL-secure-api-review.md` and
-`templates/spec-command.md` also carry frontmatter, but a Skill and a slash
+**It reads three files** — the verifier and the two reviewers.
+`templates/SKILL-secure-api-review.md` and `templates/spec-command.md` also
+carry frontmatter, but a Skill and a slash
 command are different dialects with different key sets; checking them against
 the subagent set would report correct files as broken. They are out of scope and
 are not checked, which means they are not covered — those are different

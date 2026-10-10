@@ -138,6 +138,10 @@
 #      id. The run succeeded; what it found did not.
 #   4  CANNOT DETERMINE. Not a pass, and not a zero.
 #
+# `--version` prints the version string. `--selftest` drives every code above
+# in a sandbox and exits 0 when every case held, 3 when one did not, and 4 when
+# the corpus could not be built.
+#
 # It never suppresses stderr. An error and a genuine no-match look identical
 # once hidden, and telling those two apart is the whole job.
 #
@@ -160,6 +164,7 @@ on_exit() {
 }
 trap on_exit EXIT
 
+VERSION="req-trailer 1.0"
 TRAILER_KEY="Productizer-Req"
 ASSIST_KEY="Assisted-by"
 SPEC_REL=".claude/productizer/spec.md"
@@ -208,6 +213,8 @@ Common options:
   --spec <path>    living spec (default: <repo>/.claude/productizer/spec.md)
   --limit <n>      most rows to print per section (default 50)
   -h, --help       this text
+  --version        print the version and exit
+  --selftest       drive every exit code in a sandbox; reads no repository
 
 Exit: 0 nothing to report · 1 crashed · 2 usage/no spec · 3 a finding
       4 cannot determine (never printed as a zero)
@@ -225,6 +232,7 @@ ROOT=""
 SPEC=""
 LIMIT=50
 INCLUDE_IGNORED=0
+SELFTEST=0
 
 set_mode() {
   [ -z "$MODE" ] || die_usage "--$1 and --$MODE are two different jobs; run one at a time"
@@ -256,10 +264,173 @@ while [ "$#" -gt 0 ]; do
     --tools)      [ "$#" -ge 2 ] || die_usage "--tools needs a space-separated list, e.g. --tools \"coccinelle sparse\""; TOOLS_ARG="$2"; shift 2 ;;
     --tools=*)    TOOLS_ARG="${1#--tools=}"; shift ;;
     -h | --help)  usage; exit 0 ;;
+    --version)    printf '%s\n' "$VERSION"; exit 0 ;;
+    --selftest)   SELFTEST=1; shift ;;
     -*)           die_usage "unknown option: $1" ;;
     *)            die_usage "unexpected argument '$1'. Paths go after --file, revisions after --rev." ;;
   esac
 done
+
+# ===========================================================================
+# --selftest
+#
+# R39: every exit code in the contract above is driven by a case, each case
+# asserts a sentence as well as a code, and every repository is built in a
+# sandbox under mktemp, so nothing here reads or writes the repository this
+# script is vendored into.
+#
+# Two kinds of token are BUILT, never written, for the reason the header gives
+# for coverage ids: this file is scanned. A coverage id spelled out below would
+# be read by --coverage as real coverage of a real requirement, and an id the
+# spec does not hold would be read by check-citations.sh as a dangling
+# citation on the commit that adds it.
+#
+# Its own exit codes: 0 every case held, 3 at least one did not (a finding
+# about this script), 4 the corpus could not be built (cannot determine).
+# ===========================================================================
+selftest() {
+  local self SB
+  self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  SB="$(mktemp -d "${TMPDIR:-/tmp}/req-trailer-selftest.XXXXXX")" ||
+    undetermined "could not create a sandbox, so no case was driven"
+  SB="$(cd "$SB" && pwd -P)"
+  # on_exit removes $TMP, so the sandbox is cleaned the same way a run's is.
+  TMP="$SB"
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+
+  local unk cov
+  unk="R$((4 + 5))"
+  cov="$(printf 'COV_%s_%s' R1 holds_one_spec)"
+
+  st_git() { git -c user.email=selftest@example.invalid -c user.name=selftest \
+               -c commit.gpgsign=false -c init.defaultBranch=main "$@"; }
+  st_spec() {
+    mkdir -p "$1/.claude/productizer"
+    {
+      printf '# Living spec - selftest\n\nNext requirement id\n: R4\n\n## Requirements\n\n'
+      printf -- '- **R1** \342\200\224 The lifecycle shall hold one spec.\n'
+      printf -- '- **R2** \342\200\224 The lifecycle shall hold two specs.\n  Superseded by R3. Narrowed.\n'
+      printf -- '- **R3** \342\200\224 The lifecycle shall hold one spec per product.\n'
+    } > "$1/.claude/productizer/spec.md"
+  }
+  st_commit() { st_git -C "$1" add -A; st_git -C "$1" commit -q -m "$2"; }
+
+  # repo: a base commit with no trailer, then one claiming R1 with an
+  # Assisted-by, and one tracked file carrying a coverage id for R1 and one
+  # for an id the spec never had.
+  st_git init -q "$SB/repo" || undetermined "git init failed, so no case was driven"
+  st_spec "$SB/repo"
+  printf 'base\n' > "$SB/repo/README"
+  st_commit "$SB/repo" "base"
+  printf 'test %s\ntest %s\n' "$cov" "$(printf 'COV_%s_%s' "$unk" ghost)" > "$SB/repo/t.sh"
+  st_commit "$SB/repo" "$(printf 'build R1\n\nProductizer-Req: R1\nAssisted-by: LLM')"
+
+  # untrailed: commits, and not one carries a trailer. Also no coverage id.
+  st_git init -q "$SB/untrailed"
+  st_spec "$SB/untrailed"
+  st_commit "$SB/untrailed" "base"
+
+  mkdir -p "$SB/no-spec" "$SB/not-git"
+  st_spec "$SB/not-git"
+
+  printf 'subject\n\nbody\n' > "$SB/msg-plain"
+  cp "$SB/msg-plain" "$SB/msg-add"
+  cp "$SB/msg-plain" "$SB/msg-assist"
+  printf 'subject\n\nProductizer-Req: R1,%s\n' "$unk" > "$SB/msg-unknown"
+  printf 'subject\n\nProductizer-Req: R2\n' > "$SB/msg-superseded"
+  printf 'subject\n\nCo-authored-by: Claude <noreply@example.invalid>\n' > "$SB/msg-agent"
+
+  local failed=0 driven=0 codes=""
+  st_case() {
+    # st_case <name> <want-exit> <sentence (grep -F)> <args...>
+    local name="$1" want="$2" say="$3" rc=0
+    shift 3
+    bash "$self" "$@" > "$SB/$name.out" 2> "$SB/$name.err" || rc=$?
+    driven=$((driven + 1))
+    codes="$codes$rc
+"
+    local why=""
+    [ "$rc" -eq "$want" ] || why="exit $rc, expected $want"
+    if ! grep -qF -- "$say" "$SB/$name.out" "$SB/$name.err"; then
+      [ -n "$why" ] && why="$why; "
+      why="${why}its output does not say what it was supposed to say"
+    fi
+    if [ -z "$why" ]; then
+      printf '  held: case %-20s exit %d, and said so - %s\n' "$name" "$rc" "$say"
+    else
+      failed=$((failed + 1))
+      printf '  FINDING: case %-20s %s - expected: %s\n' "$name" "$why" "$say"
+      sed 's/^/      | /' "$SB/$name.out" "$SB/$name.err"
+    fi
+  }
+
+  local -a R=(--repo "$SB/repo")
+  {
+    st_case add                 0 'Productizer-Req: R1'                        --add R1 --file "$SB/msg-add" "${R[@]}"
+    st_case add-again           0 'already present and unchanged'              --add R1 --file "$SB/msg-add" "${R[@]}"
+    st_case add-assisted        0 'Assisted-by: LLM'                           --add R1 --assisted-by --file "$SB/msg-assist" "${R[@]}"
+    st_case validate-rev        0 '1 cited id(s) all exist'                    --validate --rev HEAD "${R[@]}"
+    st_case validate-superseded 0 'is superseded in the spec'                  --validate --file "$SB/msg-superseded" "${R[@]}"
+    st_case authorship          0 '1 Assisted-by trailer(s)'                   --authorship --rev HEAD "${R[@]}"
+    st_case query               0 '1 commit(s) carry this id'                  --query R1 "${R[@]}"
+    st_case add-unknown         3 'refusing to write a trailer naming an id'   --add "$unk" --file "$SB/msg-plain" "${R[@]}"
+    st_case validate-unknown    3 "$unk is cited by"                           --validate --file "$SB/msg-unknown" "${R[@]}"
+    st_case authorship-agent    3 'carries a Co-authored-by naming claude'     --authorship --file "$SB/msg-agent" "${R[@]}"
+    st_case query-unclaimed     3 "No commit in HEAD's history claims R3"      --query R3 "${R[@]}"
+    st_case orphans             3 'ORPHANED'                                   --orphans "${R[@]}"
+    st_case coverage            3 'DANGLING'                                   --coverage "${R[@]}"
+    st_case tools-basic         2 'is a basic development tool'                --add R1 --assisted-by --tools git --file "$SB/msg-plain" "${R[@]}"
+    st_case no-mode             2 'pick one of'                                "${R[@]}"
+    st_case no-spec             2 'no living spec'                             --validate --file "$SB/msg-plain" --repo "$SB/no-spec"
+    st_case validate-none       4 "carries no 'Productizer-Req:' trailer"      --validate --file "$SB/msg-plain" "${R[@]}"
+    st_case authorship-none     4 'makes NO claim'                             --authorship --file "$SB/msg-plain" "${R[@]}"
+    st_case orphans-untrailed   4 'not one carries'                            --orphans --repo "$SB/untrailed"
+    st_case coverage-none       4 'found no COV_R'                             --coverage --repo "$SB/untrailed"
+    st_case not-git             4 'is not a git repository'                    --orphans --repo "$SB/not-git"
+  }
+  # Exit 1 is what a crash becomes, so a case has to crash it: a temporary
+  # directory that cannot be made fails under `set -e` before any report.
+  local rc=0
+  TMPDIR="$SB/no-such-dir" bash "$self" --validate --file "$SB/msg-plain" --repo "$SB/repo" \
+    > "$SB/crash.out" 2> "$SB/crash.err" || rc=$?
+  driven=$((driven + 1))
+  codes="$codes$rc
+"
+  if [ "$rc" -eq 1 ] && grep -qF 'before reaching a report. Undetermined, not clean.' "$SB/crash.err"; then
+    printf '  held: case %-20s exit %d, and said so - %s\n' crash "$rc" 'Undetermined, not clean.'
+  else
+    failed=$((failed + 1))
+    printf '  FINDING: case %-20s exit %d, expected 1 and "Undetermined, not clean."\n' crash "$rc"
+  fi
+
+  # The add case must have written exactly one trailer, and the second run
+  # must have left the file byte-identical: idempotence is the claim.
+  if [ "$(grep -c '^Productizer-Req: R1$' "$SB/msg-add")" -ne 1 ]; then
+    failed=$((failed + 1))
+    printf '  FINDING: case %-20s the message does not hold exactly one Productizer-Req: R1 line\n' add-again
+  fi
+
+  printf '  cases driven: %d. Cases that did not hold: %d\n' "$driven" "$failed"
+  local reached missing="" want
+  reached="$(printf '%s' "$codes" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  for want in 0 1 2 3 4; do
+    printf '%s' "$codes" | grep -qx "$want" || missing="$missing $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 1 2 3 4\n' "$reached"
+  printf '    NOT ASSERTED: a squash-merged or indented trailer; --limit truncation; --include-ignored; --tools with a specialised tool name; a Signed-off-by naming an agent (the Co-authored-by path is driven, the Signed-off-by path is the same word list); a repository with no commits; and whether any commit actually implements the requirement its trailer claims, which nothing in this script can see.\n'
+  if [ "$failed" -ne 0 ] || [ -n "$missing" ]; then
+    [ -z "$missing" ] || printf 'FAIL: documented exit code(s) no case reached:%s\n' "$missing" >&2
+    printf 'FAIL: %d case(s) did not produce the exit code and the sentence they declare.\n' "$failed" >&2
+    exit 3
+  fi
+  printf '  PASS: every case produced the exit code and the sentence it declares.\n'
+  exit 0
+}
+
+if [ "$SELFTEST" = 1 ]; then
+  [ -z "$MODE" ] || die_usage "--selftest builds its own repositories; it takes no mode"
+  selftest
+fi
 
 [ -n "$MODE" ] || { usage >&2; die_usage "pick one of --add, --validate, --authorship, --query, --orphans, --coverage"; }
 

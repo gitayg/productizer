@@ -208,8 +208,25 @@ UNQUANTIFIED = [
     "seamless", "seamlessly", "sufficient", "sufficiently", "timely",
     "user-friendly", "where possible",
 ]
+# Weak words adapted from the AI Unified Process (Apache-2.0, Simon Martinelli),
+# whose spec linter keeps a WEAK_WORDS list; these seven are the ones it carried
+# and this list did not. `should` is the one that matters most: inside an EARS
+# sentence it is an obligation nobody owes, a `shall` with the commitment taken
+# out. `etc.`, `and/or` and `TBD` leave the reader to finish the requirement,
+# and the rest defer the argument exactly as the adjectives above do. They are
+# judged where the adjectives are judged -- active, scaffolded requirement text
+# only -- so a superseded requirement, whose text must stay verbatim, never
+# raises one.
+UNQUANTIFIED += [
+    "and/or", "as appropriate", "easily", "etc.", "if possible", "should",
+    "tbd",
+]
+# A term ending in punctuation (`etc.`) cannot carry a trailing `\b`: after the
+# full stop comes a space or the end of the line, and neither is a word
+# character. Each alternative therefore carries its own boundaries.
 UNQUANTIFIED_RE = re.compile(
-    r"\b(" + "|".join(re.escape(w) for w in UNQUANTIFIED) + r")\b", re.I)
+    r"(" + "|".join(r"\b" + re.escape(w) + (r"\b" if w[-1].isalnum() else "")
+                    for w in UNQUANTIFIED) + r")", re.I)
 
 # The same deferral wearing a number's clothes. `quickly` is caught above and
 # `a second or two` was not, though neither can be asserted by a test - and
@@ -279,6 +296,7 @@ class Principle:
     status_line: int = 0
     target: str = ""
     checked_by: str = ""
+    checked_by_lines: list = field(default_factory=list)
     enforced_by: list = field(default_factory=list)
 
 
@@ -714,7 +732,9 @@ def check_spec_ears(doc):
             doc.add(requirement.line, WARN, "EARS_NO_FULL_STOP",
                     "%s does not end in a full stop; one requirement is one "
                     "sentence" % requirement.ident)
-        found = UNQUANTIFIED_RE.search(text)
+        # A term inside a code span is MENTIONED, not used: a requirement about
+        # this very check has to be able to name `should` without tripping it.
+        found = UNQUANTIFIED_RE.search(BACKTICK_RE.sub("", text))
         if found:
             doc.add(requirement.line, WARN, "EARS_UNQUANTIFIED",
                     "%s uses the unquantified term `%s`; give a number or "
@@ -1050,12 +1070,19 @@ def parse_constitution(doc, text):
     section = ""
     current = None
     pending_field = ""
+    # `Checked by` wraps: in this repo's own constitution P1's value runs to a
+    # second line, and that is the line naming `track-traffic.sh`. `checked_by`
+    # keeps its first-line meaning; every line of the value, up to the blank
+    # line that ends the field, is kept in `checked_by_lines` for the one check
+    # that reads the names it holds.
+    in_checked_by = False
 
     for lineno, raw in iter_lines(text):
         heading = HEADING_RE.match(raw)
         if heading:
             level = len(heading.group("hashes"))
             title = heading.group("title")
+            in_checked_by = False
             if level <= 2:
                 section = slug(title)
                 doc.sections.add(section)
@@ -1066,6 +1093,7 @@ def parse_constitution(doc, text):
 
         if not raw.strip():
             pending_field = ""
+            in_checked_by = False
             continue
         if current is None:
             continue
@@ -1075,9 +1103,15 @@ def parse_constitution(doc, text):
             read_principle_status(doc, lineno, stripped, current)
             continue
         value = DEFLIST_VALUE_RE.match(stripped)
+        if in_checked_by and not value:
+            current.checked_by_lines.append((lineno, stripped))
         if value and pending_field:
+            in_checked_by = False
             if pending_field.lower() == "checked by":
                 current.checked_by = value.group("value").strip()
+                current.checked_by_lines.append((lineno,
+                                                 value.group("value")))
+                in_checked_by = True
             elif pending_field.lower() == "enforced by":
                 current.enforced_by = re.findall(r"\bR[1-9][0-9]*\b",
                                                  value.group("value"))
@@ -1209,6 +1243,49 @@ def check_constitution(doc, spec=None):
         doc.add(doc.principles[0].line, WARN, "PRINCIPLE_TOO_MANY",
                 "%d active principles; a constitution past %d is a second "
                 "spec and is read by nobody" % (len(active), MAX_PRINCIPLES))
+
+
+# A backticked token that IS a script filename, optionally with a directory
+# part: `run-checks.sh`, `templates/publish-gate.sh`. A token carrying a space
+# (`validate-spec.py --repo .`) is a command, not a name, and is not read.
+SCRIPT_NAME_RE = re.compile(r"^(?:[\w.-]+/)*(?P<base>[\w.-]+\.(?:sh|py|js))$")
+
+
+def repo_basenames(root):
+    """Every file basename under ROOT, `.git` excluded. A file that exists is
+    enough: a script written and not yet committed still checks the principle
+    it is named for, and this reads the work tree, as the rest of `--repo`
+    does."""
+    names = set()
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        names.update(files)
+    return names
+
+
+def check_principle_tools(doc, root, names=None):
+    """PRINCIPLE_CHECK_ABSENT: a script named in an active principle's
+    `Checked by` that no file under ROOT carries the name of. The principle
+    then cites a check nothing can run, which is PRINCIPLE_NO_CHECK with a
+    name attached. Only active principles are read: a superseded or withdrawn
+    one is a record, and the script it once named may rightly be gone."""
+    for principle in doc.principles:
+        if principle.status != "active":
+            continue
+        for lineno, value in principle.checked_by_lines:
+            for token in BACKTICK_RE.findall(value):
+                match = SCRIPT_NAME_RE.match(token.strip())
+                if match is None:
+                    continue
+                if names is None:
+                    names = repo_basenames(root)
+                base = match.group("base")
+                if base not in names:
+                    doc.add(lineno, WARN, "PRINCIPLE_CHECK_ABSENT",
+                            "%s is checked by `%s`, and no file named %s "
+                            "exists under %s; a check nothing can run checks "
+                            "nothing" % (principle.ident, token.strip(), base,
+                                         root))
 
 
 # --------------------------------------------------------------------------
@@ -2172,6 +2249,76 @@ Requirements
 
 NOT_A_SPEC = "# Some other document\n\nJust prose.\n"
 
+# The weak words adopted from the AI Unified Process, one sentence per term
+# family. Each sentence is otherwise clean by every EARS rule, so the only code
+# it can raise is the one under test.
+WEAK_WORD_SENTENCES = [
+    ("etc.", "The widget shall log errors, warnings, etc."),
+    ("and/or", "The widget shall accept a file and/or a URL."),
+    ("if possible", "The widget shall retry a failed write if possible."),
+    ("as appropriate", "The widget shall notify the owner as appropriate."),
+    ("should", "The widget shall report which jobs should be retried."),
+    ("TBD", "The widget shall retain logs for TBD days."),
+    ("easily", "The widget shall let an operator easily rotate a key."),
+]
+
+# Same header and counter for both shapes so that a fixture differs from its
+# twin by one requirement block only.
+WEAK_WORD_SPEC = """# Widget — living spec
+
+Next requirement id
+: `R4` — allocate from here.
+
+## Requirements
+
+### Ubiquitous — always active
+
+%s
+"""
+
+# The term in USE inside a superseded requirement, whose text must stay
+# verbatim, and the same term MENTIONED in a code span inside an active one.
+# Neither may fire: the first is a frozen record, the second names the word.
+WEAK_WORD_QUIET = WEAK_WORD_SPEC % (
+    "- **R1** — %s\n"
+    "  Superseded by R2. Reworded.\n"
+    "- **R2** — The widget shall hold exactly one living spec.\n"
+    "- **R3** — The widget shall reject the literal `%s` in a requirement.")
+WEAK_WORD_FIRES = WEAK_WORD_SPEC % "- **R1** — %s"
+
+# Near misses that share letters with a term and are not it.
+WEAK_WORD_NEAR_MISSES = [
+    ("should", "The widget shall record the shoulder load."),
+    ("etc.", "The widget shall read the etcd key."),
+    ("TBD", "The widget shall parse the TBDX header."),
+    ("easily", "The widget shall flag the easiest fix."),
+]
+
+# A constitution whose one active principle names a script by path, and a
+# superseded one naming a script that is gone. The superseded one is a record
+# and must stay quiet whether or not its script exists.
+TOOLS_CONSTITUTION = """# Widget — constitution
+
+Next principle id
+: `P3` — allocate from here.
+
+## Principles
+
+### P1 — A value that was not measured is never recorded as a measurement
+Active. Ratified 2026-08-28 by the maintainer.
+
+Checked by
+: `run-checks.sh` fail-closed paths; `scripts/build-view.sh`
+absent rendering; `track-traffic.sh` refusing to write on 403, and
+`validate-spec.py --repo .` as a command, which is not a filename.
+
+### P2 — An earlier bound
+Superseded by P1 2026-08-29. Folded into P1.
+
+Checked by
+: `retired-check.py`.
+"""
+
 # spec-kit notation, in the shape `specify-cli` actually emits: an annotated
 # `## Requirements` heading, one `### Functional Requirements` sub-heading,
 # RFC-2119 `MUST` bullets under `FR-0NN` ids, `### Key Entities` nested at
@@ -2417,6 +2564,26 @@ def self_test():
                                        corrected))
     forbid("corrected-counts", doc, ERROR)
     forbid("corrected-counts", doc, WARN)
+
+    # The AI Unified Process weak words, one firing and one quiet case per term
+    # family. The firing case asserts the sentence the reader sees, naming the
+    # term as written; the quiet case holds the SAME sentence superseded and
+    # the term mentioned in a code span, and must raise nothing at all.
+    for term, sentence in WEAK_WORD_SENTENCES:
+        doc = run("weak-fires:" + term, WEAK_WORD_FIRES % sentence)
+        wanted = ("R1 uses the unquantified term `%s`; give a number or drop "
+                  "it" % term)
+        got = [p.message for p in doc.problems]
+        if got != [wanted]:
+            failures.append("weak-fires:%s: expected exactly [%r], got %r"
+                            % (term, wanted, got))
+        doc = run("weak-quiet:" + term, WEAK_WORD_QUIET % (sentence, term))
+        forbid("weak-quiet:" + term, doc, ERROR)
+        forbid("weak-quiet:" + term, doc, WARN)
+    for term, sentence in WEAK_WORD_NEAR_MISSES:
+        doc = run("weak-near-miss:" + term, WEAK_WORD_FIRES % sentence)
+        forbid("weak-near-miss:" + term, doc, ERROR)
+        forbid("weak-near-miss:" + term, doc, WARN)
 
     # ----------------------------------------------------------------------
     # The two cross-file checks, falsified in both directions on the same
@@ -2817,6 +2984,73 @@ def self_test():
             if quiet_main(argv) != EXIT_USAGE:
                 failures.append("repo-discovery: %s was not a usage error"
                                 % " ".join(argv))
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+    # ----------------------------------------------------------------------
+    # PRINCIPLE_CHECK_ABSENT, through `main --repo` on a real tree, because
+    # the root it searches is the root `--repo` was given and nothing else.
+    # The SAME constitution is run twice: every named script present, then
+    # one deleted. The present run is what proves the warning is not simply
+    # always on; the absent run is what proves it reads the tree at all.
+    # ----------------------------------------------------------------------
+    sandbox = tempfile.mkdtemp(prefix="validate-spec-selftest-tools.")
+    try:
+        home = os.path.join(sandbox, ".claude", "productizer")
+        os.makedirs(home)
+        os.makedirs(os.path.join(sandbox, "scripts", "deep"))
+        with open(os.path.join(home, "spec.md"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(VALID_SPEC)
+        with open(os.path.join(home, "constitution.md"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(TOOLS_CONSTITUTION)
+        # Basenames, not paths: `scripts/build-view.sh` is satisfied by a
+        # build-view.sh anywhere under the root, and `run-checks.sh` by one
+        # two directories down.
+        for name in (os.path.join("scripts", "deep", "run-checks.sh"),
+                     "build-view.sh",
+                     os.path.join("scripts", "track-traffic.sh")):
+            with open(os.path.join(sandbox, name), "w",
+                      encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\n")
+
+        case("principle-check-present")
+        status, output = drive(["--repo", sandbox, "--strict"])
+        if status != EXIT_CLEAN or "PRINCIPLE_CHECK_ABSENT" in output:
+            failures.append("principle-check-present: every named script "
+                            "exists and the run exited %d: %s"
+                            % (status, output.strip()))
+        if "2 file(s) checked: 0 error(s), 0 warning(s)" not in output:
+            failures.append("principle-check-present: the constitution was "
+                            "not checked clean: %s" % output.strip())
+
+        case("principle-check-absent")
+        os.remove(os.path.join(sandbox, "scripts", "track-traffic.sh"))
+        status, output = drive(["--repo", sandbox])
+        constitution = os.path.join(home, "constitution.md")
+        wanted = ("%s:13: WARN PRINCIPLE_CHECK_ABSENT: P1 is checked by "
+                  "`track-traffic.sh`, and no file named track-traffic.sh "
+                  "exists under %s; a check nothing can run checks nothing"
+                  % (constitution, sandbox))
+        lines = [line for line in output.splitlines()
+                 if "PRINCIPLE_CHECK_ABSENT" in line]
+        if lines != [wanted]:
+            failures.append("principle-check-absent: expected exactly [%r], "
+                            "got %r" % (wanted, lines))
+        # A WARN: exit 0 plain, exit 1 only under --strict.
+        if status != EXIT_CLEAN:
+            failures.append("principle-check-absent: a WARN exited %d without "
+                            "--strict" % status)
+        status, output = drive(["--repo", sandbox, "--strict"])
+        if status != EXIT_FAILED:
+            failures.append("principle-check-absent: --strict exited %d, "
+                            "expected %d" % (status, EXIT_FAILED))
+        # Named on the command line there is no root, and nothing is guessed.
+        status, output = drive([constitution, "--strict"])
+        if "PRINCIPLE_CHECK_ABSENT" in output:
+            failures.append("principle-check-absent: fired without --repo: %s"
+                            % output.strip())
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
 
@@ -3426,6 +3660,11 @@ def main(argv):
             continue
         check_document(doc, spec=spec, siblings=siblings_for(index, doc),
                        others=spec_siblings(cross, doc))
+        # Only under --repo: a file named on the command line has no root to
+        # look for the scripts in, and guessing one from the file's own path
+        # would be the inference --repo exists to replace with a rule.
+        if discovery is not None and doc.kind == "constitution":
+            check_principle_tools(doc, args.repo)
 
     if args.baseline and spec is not None:
         baseline_text = None

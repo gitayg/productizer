@@ -412,6 +412,7 @@ spans several repos, and what breaks when it is split:
 | The normative spec grammar | `references/format-spec.md` |
 | Evidence and judgment, split | `references/signals.md` |
 | Requirement-to-commit traceability | `references/traceability.md` |
+| Reviewing the whole spec against itself (advisory) | `references/spec-review.md` |
 | Does the process help? measuring it | `references/measurement.md` |
 | Corrections graduated into guidance | `references/graduation.md` |
 
@@ -433,7 +434,7 @@ contract before wiring one into a gate.
 | `scripts/record-classification.sh` | the spec commit, hash and ids one classification was made against | 0 wrote · 1 already classified · 2 no hash, so no record |
 | `scripts/check-classification-provenance.sh` | every classification recorded what it read | 0 · 1 findings · 2 could not run, incl. an empty store nothing corroborates |
 | `scripts/check-hygiene.sh` | generic leak rules, plus a private list read at runtime | 0 · 1 findings · 2 could not run |
-| `scripts/check-frontmatter.py` | agent templates' frontmatter does what it says | 0 · 1 findings · 2 usage |
+| `scripts/check-frontmatter.py` | agent templates' frontmatter does what it says; a reviewer holds no tool that writes a file | 0 · 1 findings · 2 usage · 3 could not run |
 | `scripts/learnings.sh` | observations that are not obligations, cited to `R` ids | 0 · 1 findings · 2 usage · 3 unreadable · 4 cannot determine · 5 never created · 6 refused |
 | `scripts/run-runner.sh` | validates and executes a runner definition | 0 · 1 reported failure · 2 usage · 3 unreadable · 4 refused |
 | `scripts/init.sh` | all of Stage 0 in one command | 0 · 2 usage · 3 prerequisite · 4 refused · 5 partial |
@@ -443,6 +444,8 @@ contract before wiring one into a gate.
 | `scripts/signals.sh` | typed evidence records, and their hash | 0 · 1 crash · 2 usage |
 | `scripts/score.sh` | judgment over signals, keyed to their hash | 0 scored · 1 crash · 2 usage · 3 refused |
 | `scripts/req-trailer.sh` | `Productizer-Req:` provenance, orphans, coverage | 0 · 2 no spec · 3 findings · 4 cannot determine |
+| `scripts/check-citations.sh` | a citation this change ADDS that resolves to no requirement, and a new citation of a superseded one; advisory | 0 · 1 findings · 2 refused |
+| `scripts/stage-advance.sh` | may this work item's stage move, on this change's evidence; call it before any tracker move | 0 allowed · 1 produced nothing · 2 usage · 3 forbidden path · 4 cannot determine · 5 not forward |
 | `scripts/retrieval-budget.sh` | retrieval regression, deterministic | 0 in band · 4 out of band · 5 no baseline |
 | `scripts/ab-harness.sh` | same model, with the process and without | 0 · 2 usage · 3 no arms · 5 no runs · 6 arm incomplete · 7 did not complete |
 | `scripts/stage-snapshot.sh` | what a stage produced before a human touched it | 0 · 1 exists · 2 usage · 3 no dir · 5 no snapshot · 6 artifact gone · 7 no delta · 8 produced nothing |
@@ -467,4 +470,4 @@ a PR. Repo copies in `.claude/productizer/templates/` win over these.
 | 7 · document | `user-guide.md` |
 | 8 · announce | `release-blog.md` `release-email.md` `publish-gate.sh` |
 | 9 · maintain | `bands.yaml` `converge.md` |
-| any | `view.html` |
+| any | `view.html` `agent-spec-reviewer.md` |
