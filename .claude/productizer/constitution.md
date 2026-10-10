@@ -100,7 +100,7 @@ looking at.
 
 Checked by
 : `run-checks.sh` fail-closed paths; `import-survey.sh` Verdict; `build-view.sh`
-absent/unknown/zero rendering; `track-traffic.sh` refusing to write on 403.
+absent/unknown/zero rendering.
 
 Enforced by
 : R13, R15, R16, R20.
@@ -171,6 +171,7 @@ pattern, instead of spread across the feature PRs that each relaxed it.
 
 | Date | Principle | Change | Prompted by | Why | Ratified by |
 |---|---|---|---|---|---|
+| 2026-10-10 | P1 | amended in place | B95 | `Checked by` named `track-traffic.sh`, a script that does not exist in this repository; a check nothing can run checks nothing, and `validate-spec.py`'s `PRINCIPLE_CHECK_ABSENT` found it. The name is removed and the other three stay. What P1 forbids is unchanged | the maintainer |
 | 2026-06-18 | P4 | amended in place | #612 | widened to partner APIs; the original wording let partner-facing breakage through | <names> |
 | 2026-05-02 | P5 | withdrawn | #588 | EU residency required a second region; P1 already carries the residency bound | <names> |
 
