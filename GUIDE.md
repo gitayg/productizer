@@ -772,8 +772,8 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Sixty-one requirements are active**, and they are the whole of what has been
-agreed.
+**Sixty-three requirements are active**, and they are the whole of what has
+been agreed.
 
 Seven more are superseded and none withdrawn, and neither kind is listed here.
 The spec keeps both forever with their text intact, so a citation written two
@@ -807,7 +807,7 @@ happening:
 - **R67** — Every unattended agent step shall run without a tool that executes
   commands.
 
-**When something arrives.** Sixteen things happen on a discrete trigger:
+**When something arrives.** Seventeen things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -842,6 +842,10 @@ happening:
   shall push nothing until a decision made on that commit allows it.
 - **R68** — When an unattended run's change is captured, the lifecycle shall
   compute it with version-control settings the agent could not have written.
+- **R69** — When an unattended run runs a shell after the agent step in the
+  agent's own job, the lifecycle shall give that shell no environment setting,
+  from the agent or alterable by it, that names a file for the shell to
+  source.
 
 **For as long as a state lasts.** Four requirements are true for the duration
 of a state, not at a moment inside it:
@@ -855,7 +859,7 @@ of a state, not at a moment inside it:
 - **R45** — While a change's risk tier is reported, the lifecycle shall report
   that change's complexity as unmeasured.
 
-**When something goes wrong.** Twenty-five defences, written as `If … then`
+**When something goes wrong.** Twenty-six defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -914,6 +918,10 @@ because a designed path and a defended one are not the same thing:
 - **R66** — If an unattended stage run's change would delete one of the
   lifecycle's own bookkeeping records, then the lifecycle shall refuse to
   deliver that change.
+- **R70** — If a command an unattended run runs after the agent step is not
+  git reading the repository's committed configuration, then the lifecycle
+  shall run it with its working directory outside every tree the agent or its
+  delivered patch could have written.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

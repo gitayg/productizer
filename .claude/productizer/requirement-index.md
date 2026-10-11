@@ -94,4 +94,6 @@ marker, because a table left there would be one nothing writes or checks.
 | R66 | unwanted | active | `stage-advance-guard` |
 | R67 | ubiquitous | active | `ci-template-safe` |
 | R68 | event | active | `build-dispatch` |
+| R69 | event | active | `ci-template-safe` |
+| R70 | unwanted | active | `build-dispatch` |
 <!-- productizer:requirement-index:end -->

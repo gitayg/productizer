@@ -210,6 +210,7 @@ selftest() {
   cat > "$ST/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 # Stub gh for the build-dispatch self-test: records, never networks.
+pwd -P > "$GH_LOG.pwd"
 printf '%s\n' "$@" > "$GH_LOG.args"
 while [ $# -gt 0 ]; do
   case "$1" in --body-file) cp "$2" "$GH_LOG.body"; shift 2 ;; *) shift ;; esac
@@ -462,6 +463,9 @@ STUB
     sh -c 'git -C "$1" log -1 --format=%B productizer/build-7-123 | grep -qx "Assisted-by: LLM"' _ "$ST/del.origin.git"
   also gh-asked-for-a-draft "gh pr create was given --draft" \
     grep -qx -- '--draft' "$ST/deliver-build.gh.args"
+  # shellcheck disable=SC2016  # $1/$2 are expanded by the inner sh, on purpose
+  also gh-ran-at-repo-root-not-the-worktree "gh pr create ran from the repository root, not the patch-applied worktree" \
+    sh -c 'test "$(cat "$1")" = "$2"' _ "$ST/deliver-build.gh.pwd" "$(cd "$R" && pwd -P)"
   also body-names-the-run "the body says Productizer-Run: 123" \
     grep -qx 'Productizer-Run: 123' "$ST/deliver-build.gh.body"
 
@@ -923,8 +927,14 @@ git -C "$WT" push --quiet origin "$COMMIT:refs/heads/$BRANCH" \
   || fail 7 "the push of $BRANCH failed; no pull request was opened"
 
 # 6. The draft pull request. The title reaches gh through the environment.
+#    gh runs from $ROOT - the checkout at the default-branch tip - NOT from the
+#    worktree the patch was applied into. The branch is already on origin and
+#    --base/--head name it explicitly, so gh needs no files from the applied
+#    tree; running it there would be running a command with its working
+#    directory inside patch-controlled content, which this pipeline does not do
+#    for anything but git against the committed config.
 export PR_TITLE
-URL="$(cd "$WT" && gh pr create --draft --base "$DEFAULT" --head "$BRANCH" --title "$PR_TITLE" --body-file "$BODY")" \
+URL="$(cd "$ROOT" && gh pr create --draft --base "$DEFAULT" --head "$BRANCH" --title "$PR_TITLE" --body-file "$BODY")" \
   || fail 7 "gh pr create failed after $BRANCH was pushed; the branch exists and no pull request was opened"
 say "build-dispatch: opened draft pull request $URL from $BRANCH (requirement ids: ${IDS:-none})."
 exit 0

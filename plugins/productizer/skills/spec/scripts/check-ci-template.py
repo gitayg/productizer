@@ -25,6 +25,10 @@ WHAT IT ASSERTS, each a separate finding:
                  vector by which a prompt-injected agent in this read-only job
                  could tamper with a file a later token-holding step runs; the
                  maintainer ruled on 2026-10-11 that CI never gives it one
+  post-agent-env every run: step that follows the agent action inside the
+                 agent's own job pins BASH_ENV to the empty string, so no
+                 startup file an agent-influenced environment could name is
+                 sourced by a post-agent shell that reads the edited tree
   pinned         every `uses:` is pinned to a full 40-character commit id
   run-injection  no `${{ github.event.` and no `${{ inputs.` inside a run:
   swallow        no continue-on-error, and no `|| true` or `2>/dev/null` in a
@@ -208,6 +212,26 @@ def check(path):
             if "permissions" not in job:
                 find("agent-job", "jobs.%s" % jname,
                      "the agent job declares no permissions of its own")
+            # Every run: step AFTER the agent action, in the agent's own job,
+            # reads a tree the agent edited. Such a shell must not source a
+            # startup file named by an environment the agent could have
+            # influenced, so BASH_ENV is pinned empty. ENV is pinned beside it
+            # in the template for POSIX sh; only BASH_ENV is required here,
+            # because the steps run bash.
+            agent_idx = next((i for i, s in enumerate(steps)
+                              if str(s.get("uses", "")).split("@")[0] == AGENT_ACTION), None)
+            if agent_idx is not None:
+                for i in range(agent_idx + 1, len(steps)):
+                    s = steps[i]
+                    if "run" not in s:
+                        continue
+                    env = s.get("env")
+                    be = env.get("BASH_ENV") if isinstance(env, dict) else None
+                    if str(be) != "":
+                        find("post-agent-env", "jobs.%s.steps[%d]" % (jname, i),
+                             "a run: step after the agent action must pin BASH_ENV to the "
+                             "empty string; a post-agent shell in the agent's job reads the "
+                             "tree the agent edited and must source no agent-named startup file")
             for i, s in enumerate(steps):
                 if str(s.get("uses", "")).split("@")[0] == "actions/checkout":
                     pc = (s.get("with") or {}).get("persist-credentials")
@@ -271,7 +295,8 @@ def check(path):
 
 
 ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "deny-bash",
-              "pinned", "run-injection", "swallow", "no-bypass", "perms-input")
+              "post-agent-env", "pinned", "run-injection", "swallow", "no-bypass",
+              "perms-input")
 
 
 def report(path):

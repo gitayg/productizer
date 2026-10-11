@@ -154,6 +154,29 @@ JSON
   drive requirement-added 0 '| Added | `R2` |' "$R" --base base
   drive every-section-measured 0 "The store was read" "$R" --base base
 
+  # A json.py planted in the working directory the renderer runs in. The Stage 5
+  # result is read by a python3 heredoc read from stdin; without isolation that
+  # heredoc's `import json` would load this file instead of the standard library
+  # and the verdict would be whatever the plant returns, not what the result
+  # file says. The renderer runs in trees an agent may have written, so the
+  # verdict must still come from the real json. Asserting the true verdict PASS
+  # proves the standard library parsed the result; a hijack renders NOT MEASURED.
+  newrepo jsonhijack; R="$ST/jsonhijack"
+  cat > "$R/json.py" <<'PLANT'
+import os
+open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "JSON_HIJACK_MARKER"), "w").write("x")
+def load(*a, **k): return {}
+def loads(*a, **k): return {}
+PLANT
+  commit "$R"
+  drive planted-json-not-imported 0 "Verdict | **PASS**" "$R" --base base
+  CASES=$((CASES + 1)); CODES="$CODES 0"
+  if [ ! -e "$R/JSON_HIJACK_MARKER" ]; then
+    HELD=$((HELD + 1)); printf '  ok    %-40s %s\n' "planted-json-side-effect-blocked" "the plant never executed"
+  else
+    printf '  FAIL  %-40s %s\n' "planted-json-side-effect-blocked" "the planted json.py executed in the renderer"
+  fi
+
   newrepo refined; R="$ST/refined"
   printf '# Spec\n\n## Requirements\n\n- **R1** \342\200\224 The tool shall greet by name.\n' \
     > "$R/.claude/productizer/spec.md"
@@ -442,9 +465,17 @@ elif [ ! -r "$CHECKS" ]; then
   say "are not checks that passed. Run \`run-checks.sh --base <ref> --out $CHECKS\` first."
   say ""
   UNMEASURED=1
-elif ! python3 - "$CHECKS" >"$WORK/checks.md" <<'PY'
-import json
+elif ! python3 -I - "$CHECKS" >"$WORK/checks.md" <<'PY'
+# -I isolates the interpreter; on Python >= 3.11 it also implies -P, which keeps
+# the current directory off sys.path. On older runners -I does NOT imply -P, so
+# a `json.py` planted in the working directory would be imported in place of the
+# standard library before this script's first `import json`. sys is a builtin
+# and is never loaded from a file, so scrub the directory entries it carries
+# BEFORE importing anything else. The Stage 5 result this reads may sit in a
+# tree an agent has edited, so this is a trust boundary, not a nicety.
 import sys
+sys.path[:] = [p for p in sys.path if p not in ("", ".")]
+import json
 
 with open(sys.argv[1], encoding="utf-8") as fh:
     r = json.load(fh)

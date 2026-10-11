@@ -19,3 +19,4 @@ bypass-in-args.yml	1	bypassPermissions appears outside a comment
 permissions-input-missing.yml	1	no permissions input; the dispatching person has no way to narrow
 permissions-not-choice.yml	1	must be type choice, not 'string'
 permissions-default-widened.yml	1	default must be repo-settings; found 'anything-goes'
+post-agent-env-missing.yml	1	a run: step after the agent action must pin BASH_ENV to the empty string

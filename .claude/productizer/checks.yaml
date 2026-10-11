@@ -2087,6 +2087,19 @@ checks:
             Falsified 2026-10-11 twice: neutering the exit-8 refusal (`capture-refuses-planted-git`
             went 8 -> 0, and the exit-code parity broke), and emptying the diff (four capture cases
             red).
+        - id: R70
+          verdict: Covered
+          reason: >-
+            The one command deliver runs after the agent that is not git against the committed
+            config is `gh pr create`, and it is run from the repository root - the checkout at the
+            default-branch tip - not from the worktree the patch was applied into. git itself runs
+            with --git-dir/-C against that same committed configuration (the worktree shares the
+            checkout's .git, which the patch cannot write, and stage-advance.sh refuses a patch
+            carrying .gitattributes or .github before anything is applied).
+          evidence: >-
+            `gh-ran-at-repo-root-not-the-worktree` - the gh stub records its working directory, and
+            it is the repository root, not the applied worktree. Falsified 2026-10-11 on a copy that
+            ran gh from the worktree again: 68 of 69, that case red.
     limitations:
       - The real gh, a real GitHub and the action itself are never exercised. gh is a stub and origin is a local bare repository.
       - That the workflow template calls this script the way the cases do is not asserted.
@@ -2105,11 +2118,11 @@ checks:
     timeout_seconds: 60
     exit_codes:
       pass: [0]
-      fail: [1]        # at least one of the ten assertions does not hold on the template
+      fail: [1]        # at least one of the eleven assertions does not hold on the template
       refused: [2]     # usage, or a template that could not be read or parsed
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 10 assertions held'
+      pattern: '([0-9]+) of 11 assertions held'
       min_covered: 1
       spec_units:
         - id: R62
@@ -2122,9 +2135,9 @@ checks:
             The `agent-job` assertion: the job running anthropics/claude-code-action grants no
             write permission on any scope, id-token included, and every checkout in it sets
             persist-credentials false. Fixtures agent-job-write.yml and
-            agent-checkout-credentials.yml; 23 self-test cases over exit codes 0 1 2. Falsified
+            agent-checkout-credentials.yml; 24 self-test cases over exit codes 0 1 2. Falsified
             2026-10-10 on a copy with the agent job's contents read turned to write: rc 1, 5 of 7
-            (the checker had seven assertions then; ten since v4.67.1).
+            (the checker had seven assertions then; eleven since v4.67.2).
         - id: R65
           verdict: Partial
           reason: >-
@@ -2151,6 +2164,21 @@ checks:
             with a standalone `--disallowedTools Bash` (a `Bash(git:*)` deny alone does not satisfy
             it). Fixture agent-no-bash-deny.yml exits 1; falsified 2026-10-11 by making the
             assertion never fire, that case going from exit 1 to exit 0.
+        - id: R69
+          verdict: Partial
+          reason: >-
+            Static only: the `post-agent-env` assertion reads the YAML and holds that every run:
+            step after the agent action, in the agent's own job, pins BASH_ENV to the empty string,
+            so a post-agent shell reading the tree the agent edited sources no file an
+            agent-influenced environment could name. It does not run GitHub, so that the runner
+            honours the pin is unmeasured (B121); and the agent cannot set BASH_ENV today anyway -
+            it has no shell and cannot write $GITHUB_ENV - so this guards the invariant against a
+            future CLI or action change rather than a reachable vector now.
+          evidence: >-
+            `post-agent-env` - the capture step in the generate job sets BASH_ENV to the empty
+            string (ENV beside it). Fixture post-agent-env-missing.yml, a post-agent run: step in
+            the agent job with no such pin, exits 1; falsified 2026-10-11 by deleting the pin from
+            the shipped template: 10 of 11, `post-agent-env` red.
     limitations:
       - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
       - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.

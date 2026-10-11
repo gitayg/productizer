@@ -341,9 +341,9 @@ reviewer that writes through Bash or an MCP tool passes.
 `templates/build-from-spec.yml` runs a stage unattended in an adopter's
 repository. It has **never run on GitHub**: this repository is public, holds no
 model secrets, and a run costs model spend. What is measured is its static
-properties (`check-ci-template.py`, 9 of 9) and both ends of
+properties (`check-ci-template.py`, 11 of 11) and both ends of
 `build-dispatch.sh` against local repositories, with `gh` stubbed and origin a
-local bare repository (52 of 52). Not measured: the action itself, a real
+local bare repository (69 of 69). Not measured: the action itself, a real
 `gh`, that a draft stays a draft, and that the workflow calls the script the
 way the self-test does. A pull request it opens with the workflow's
 `GITHUB_TOKEN` does not start the adopter's `pull_request` checks - GitHub's
@@ -382,3 +382,31 @@ the repository's tests under the default option. Not measured on a runner: this
 repository holds no model secrets, a run costs model spend, and trust state
 lives in the user's own Claude Code configuration in their home directory,
 outside any repository (B113).
+
+### 17 · What the unattended pipeline runs AFTER the agent is hardened, not proven on a runner
+
+v4.67.2 audited every command the pipeline runs after the agent step. Three
+guards were added and are exercised by self-tests, but the properties that need
+a real GitHub runner are still unmeasured (B121, B122):
+
+- **`gh pr create` runs from `$ROOT`, not the patch-applied worktree** (R70,
+  `build-dispatch.sh`). The one post-agent command that is not git against the
+  committed config no longer has its working directory inside patch-controlled
+  content. Measured by the self-test's `gh` stub recording its directory; the
+  real `gh` and a real GitHub are not exercised.
+- **`BASH_ENV`/`ENV` are pinned empty on the post-agent capture step** (R69,
+  the template, asserted by `check-ci-template.py` `post-agent-env`). The agent
+  cannot set either today - it has no shell and cannot write `$GITHUB_ENV` - so
+  this guards the invariant against a future CLI or action change. That the
+  runner honours the pin is not measured.
+- **`pr-spec-comment.sh` reads the Stage 5 result with an isolated interpreter**
+  (`python3 -I` plus a `sys.path` scrub). A `json.py` planted beside the result
+  was reproduced being imported in place of the standard library on the HEAD
+  version; it is **not reachable through the template** (deliver renders the
+  body from `$ROOT`, the default-branch tip, never the applied worktree), so the
+  fix is defense in depth for the general tool, with a falsified regression test.
+
+Not proven without a runner: that the action's own post steps (it runs
+`post-buffered-inline-comments` under `bun` with the read-only token) touch
+nothing agent-controlled in the working directory; and everything already listed
+under item 14 and B121.

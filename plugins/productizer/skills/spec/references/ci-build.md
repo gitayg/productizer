@@ -109,6 +109,28 @@ a config entry the relocation puts out of reach. The relocation and the capture
 logic live in `build-dispatch.sh` (`stash-git`, `capture`), self-tested, not as
 shell in the YAML.
 
+**Nothing an unattended run executes after the agent comes from a place the
+agent could have written** (R69, R70, added v4.67.2). The capture step is the
+one post-agent `run:` in the agent's own job; it pins `BASH_ENV` and `ENV`
+empty, so a shell reading the tree the agent edited sources no startup file an
+agent-influenced environment could name, and it runs the copy of
+`build-dispatch.sh` made under `RUNNER_TEMP` before the agent ran, never the
+checkout the agent could edit. In `deliver`, `gh pr create` runs from the
+repository root - the checkout at the default-branch tip - not from the worktree
+the patch was applied into; the branch is already on origin and `--base`/`--head`
+name it, so `gh` needs nothing from the applied tree. The git that does run
+there uses `--git-dir`/`-C` against the committed configuration the worktree
+shares, which the patch cannot write, and `stage-advance.sh` refuses a patch
+carrying `.gitattributes` or anything under `.github` before `git apply`. And
+`pr-spec-comment.sh`, which renders the body, reads the Stage 5 result with an
+isolated interpreter (`python3 -I` and a `sys.path` scrub) so a `json.py`
+planted beside the result cannot be imported in place of the standard library -
+measured defense in depth, since `deliver` renders from the default-branch tip,
+not the agent's tree. `check-ci-template.py` asserts the `BASH_ENV` pin
+(`post-agent-env`) and `build-dispatch.sh` self-tests the `gh` working directory
+(`gh-ran-at-repo-root-not-the-worktree`); that a real runner honours the pin is
+unmeasured (B121).
+
 ### Inputs
 
 | Input | Type | Meaning |
@@ -379,6 +401,10 @@ workflow given as a path:
 - the agent job holds no write, and its checkouts set `persist-credentials: false`
 - the step that runs the agent action denies the agent a shell: its
   `claude_args` carries a standalone `--disallowedTools Bash` (`deny-bash`)
+- every `run:` step after the agent action, in the agent's own job, pins
+  `BASH_ENV` to the empty string, so a post-agent shell reading the tree the
+  agent edited sources no file an agent-influenced environment could name
+  (`post-agent-env`)
 - every `uses:` is pinned to a full 40-character commit id
 - no `${{ github.event.` and no `${{ inputs.` inside a `run:`
 - no `continue-on-error`, `|| true` or `2>/dev/null`

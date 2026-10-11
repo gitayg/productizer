@@ -272,11 +272,22 @@ jobs:
       # pinned off, and no external or textconv diff driver; it refuses (exit 8)
       # if a .git reappeared in the work tree. This is build-dispatch.sh's own
       # code, self-tested, not shell living in this YAML.
+      # This step runs AFTER the agent, in the agent's own job, with its working
+      # directory in the tree the agent edited. BASH_ENV and ENV are pinned
+      # empty so that no startup file an agent-influenced environment could name
+      # is sourced by this shell before it runs the captured script. The agent
+      # has no shell and cannot write $GITHUB_ENV, so it cannot set these today;
+      # pinning them keeps that true regardless of what a future CLI or action
+      # change allows. The script itself is the copy made out of the agent's
+      # reach before the agent ran, never the one in the (now deleted) checkout.
       - name: Capture the working tree into a patch
+        env:
+          BASH_ENV: ""
+          ENV: ""
         run: |
           set -euo pipefail
           rm -rf .productizer-run
-          bash "$RUNNER_TEMP/build-dispatch.sh" capture . \
+          bash --noprofile --norc "$RUNNER_TEMP/build-dispatch.sh" capture . \
             --git-dir "$RUNNER_TEMP/productizer-gitdir" \
             --out "$RUNNER_TEMP/productizer.patch"
 

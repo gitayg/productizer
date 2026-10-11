@@ -448,7 +448,7 @@ contract before wiring one into a gate.
 | `scripts/check-citations.sh` | a citation this change ADDS that resolves to no requirement, and a new citation of a superseded one; advisory | 0 · 1 findings · 2 refused |
 | `scripts/stage-advance.sh` | may this work item's stage move, on this change's evidence, judged on the paths git applies; call it before any tracker move | 0 allowed · 1 produced nothing · 2 usage · 3 forbidden path · 4 cannot determine · 5 not forward |
 | `scripts/build-dispatch.sh` | both ends of an unattended run in the copyable CI template: `prepare` before the model, `stash-git` and `capture` around it (the agent gets no shell and no git it could configure), `deliver` a draft PR after it | 0 · 2 usage · 3 repo not readable as needed · 4 spec unchanged · 5 no plan committed · 6 refused by stage-advance.sh · 7 delivery failed · 8 capture refused (.git in the tree) |
-| `scripts/check-ci-template.py` | the CI template's ten static safety properties, on the YAML itself (including that the agent step denies Bash) | 0 · 1 findings · 2 could not run |
+| `scripts/check-ci-template.py` | the CI template's eleven static safety properties, on the YAML itself (including that the agent step denies Bash, and that a post-agent shell pins `BASH_ENV` empty) | 0 · 1 findings · 2 could not run |
 | `scripts/retrieval-budget.sh` | retrieval regression, deterministic | 0 in band · 4 out of band · 5 no baseline |
 | `scripts/ab-harness.sh` | same model, with the process and without | 0 · 2 usage · 3 no arms · 5 no runs · 6 arm incomplete · 7 did not complete |
 | `scripts/stage-snapshot.sh` | what a stage produced before a human touched it | 0 · 1 exists · 2 usage · 3 no dir · 5 no snapshot · 6 artifact gone · 7 no delta · 8 produced nothing |
