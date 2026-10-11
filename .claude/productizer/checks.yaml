@@ -1887,7 +1887,7 @@ checks:
 
   # --- a stage that moves on nothing, backwards, or over its own rules --------
   #
-  # B91, R54, R55 and R63 (which superseded R56 in v4.67.0, B110). Adapted from the forward-only, rank-gated status advance in the
+  # B91, R54, R55 and R63 (which superseded R56 in v4.67.0, B110); B116, R66 (v4.67.1). Adapted from the forward-only, rank-gated status advance in the
   # AI Unified Process (Apache-2.0, by Simon Martinelli); no code is copied. The
   # forbidden-path rule is this repository's own.
   #
@@ -1952,7 +1952,17 @@ checks:
             variants such as `.GitHub/workflows`; `workflow-forbidden`,
             `build-mode-spec-forbidden` and `plan-mode-code-forbidden` still exit 3, and
             `backlog-allowed` and `build-mode-code-allowed` exit 0, so the rule is not refusing
-            everything. 69 cases.
+            everything. 70 cases.
+        - id: R66
+          verdict: Covered
+          evidence: >-
+            Exit 3, a DELETION of the lifecycle's own bookkeeping refused: the
+            `bk-delete-record-refused` case removes a committed classification and adds a real
+            `plan.md`, and exits 3 so the real evidence cannot launder the deletion past.
+            Bookkeeping ADDED stays R54's PRODUCED NOTHING case; a record MODIFIED in place is not
+            caught here (git reports an add and a modify alike) and is caught by its spec-hash in
+            check-classification-provenance instead. Falsified 2026-10-11 by making the decider
+            stop tracking a deletion: `bk-delete-record-refused` went from exit 3 to exit 0.
     limitations:
       - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
       - The forbidden set is a list, not a proof. A Unicode-normalisation variant of a forbidden path, and a gitlink or a symlink at an allowed path, are allowed (B114).
@@ -1961,7 +1971,7 @@ checks:
 
   # --- the two ends of an unattended run -----------------------------------
   #
-  # B93, R58-R62 and R64; B111, R65. templates/build-from-spec.yml is a workflow an adopter copies
+  # B93, R58-R62 and R64; B111, R65; B116, R67 and R68 (v4.67.1). templates/build-from-spec.yml is a workflow an adopter copies
   # into their own repository; it runs one stage with no person at the
   # keyboard. Adapted from the AI Unified Process generate workflow
   # (Apache-2.0, by Simon Martinelli); no code is copied. The maintainer ruled
@@ -2043,14 +2053,45 @@ checks:
             mode was measured denying every write; the mode admits edits only.
           evidence: >-
             The exact agent arguments per option: `repo-settings-no-mode-adds-accept-edits`,
-            `owner-mode-passes-no-flag`, `edits-only-denies-bash`, `owner-mode-edits-only-narrows`;
-            an owner's committed bypass is warned about and never written into the arguments
-            (`prepare-owner-bypass-warned`, `owner-bypass-not-produced`); and the
-            `no-args-file-ever-says-bypass` sweep finds bypassPermissions in no arguments file any
-            case produced.
+            `owner-mode-passes-no-flag`, `edits-only-is-alias-of-repo-settings`,
+            `owner-mode-edits-only-narrows`; an owner's committed bypass is warned about and never
+            written into the arguments (`prepare-owner-bypass-warned`, `owner-bypass-not-produced`);
+            and the `no-args-file-ever-says-bypass` sweep finds bypassPermissions in no arguments
+            file any case produced. Since v4.67.1 Bash is denied in every option, which narrows the
+            agent further still - that is R67, not a widening of what the committed settings grant.
+        - id: R67
+          verdict: Partial
+          reason: >-
+            Measured 2026-10-11: `--disallowedTools Bash` removes the built-in Bash tool, in
+            sub-agents too, so the agent cannot run a command through the shell. NOT covered: a
+            committed `.mcp.json` server that runs commands is the adopter's own config and still
+            reaches the agent (the action sets enableAllProjectMcpServers), and the CLI's real tool
+            removal inside the action is unmeasured (B113).
+          evidence: >-
+            `--disallowedTools Bash` is added in every permissions option: `repo-settings-always-denies-bash`,
+            `edits-only-is-alias-of-repo-settings`, and `owner-bypass-still-denies-bash` (a committed
+            bypass still gets the deny, so the flag deny beats it). build-args-from-config and the
+            prepare cases all carry the line. Falsified 2026-10-11 by removing the unconditional deny:
+            six cases red (62 of 68).
+        - id: R68
+          verdict: Covered
+          evidence: >-
+            `stash-git` moves the work tree's .git to a dir outside the agent's cwd
+            (`stash-git-ok`, `stash-removed-dotgit`, `stash-made-gitdir`; `stash-git-inside-worktree`
+            refuses a dir inside the tree), and `capture` computes the patch against that stashed
+            git-dir with the system and global config out of reach, attributes neutralised, fsmonitor
+            and hooks pinned off, and no external or textconv driver (`capture-ok`,
+            `capture-wrote-a-patch`, `capture-names-new-file`, `capture-bytes-are-verbatim-no-crlf`,
+            `capture-ident-not-expanded`); a .git replanted in the work tree is refused at exit 8
+            before any git runs (`capture-refuses-planted-git`, `capture-planted-config-never-ran`).
+            Falsified 2026-10-11 twice: neutering the exit-8 refusal (`capture-refuses-planted-git`
+            went 8 -> 0, and the exit-code parity broke), and emptying the diff (four capture cases
+            red).
     limitations:
       - The real gh, a real GitHub and the action itself are never exercised. gh is a stub and origin is a local bare repository.
       - That the workflow template calls this script the way the cases do is not asserted.
+      - A config-driven filter.*.clean, diff.*.textconv, fsmonitor or hooksPath EXECUTING during capture is not driven by any case: add -N and diff do not invoke a clean filter, and the relocation puts any agent-written config out of git's reach, so R68 rests on the relocation plus the exit-8 refusal, not on a measured driver execution.
+      - That the action tolerates its .git being moved out before the agent runs is not measured on a real runner.
 
   - id: ci-template-safe
     why: the template runs a model in other people's repositories with their secrets, and one edit to its YAML removes a guarantee while every script stays green
@@ -2064,11 +2105,11 @@ checks:
     timeout_seconds: 60
     exit_codes:
       pass: [0]
-      fail: [1]        # at least one of the nine assertions does not hold on the template
+      fail: [1]        # at least one of the ten assertions does not hold on the template
       refused: [2]     # usage, or a template that could not be read or parsed
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 9 assertions held'
+      pattern: '([0-9]+) of 10 assertions held'
       min_covered: 1
       spec_units:
         - id: R62
@@ -2081,9 +2122,9 @@ checks:
             The `agent-job` assertion: the job running anthropics/claude-code-action grants no
             write permission on any scope, id-token included, and every checkout in it sets
             persist-credentials false. Fixtures agent-job-write.yml and
-            agent-checkout-credentials.yml; 22 self-test cases over exit codes 0 1 2. Falsified
+            agent-checkout-credentials.yml; 23 self-test cases over exit codes 0 1 2. Falsified
             2026-10-10 on a copy with the agent job's contents read turned to write: rc 1, 5 of 7
-            (the checker had seven assertions then).
+            (the checker had seven assertions then; ten since v4.67.1).
         - id: R65
           verdict: Partial
           reason: >-
@@ -2097,6 +2138,19 @@ checks:
             edits-only. The workflow admits only four flag shapes into the agent's arguments.
             Fixtures bypass-in-args.yml, permissions-input-missing.yml, permissions-not-choice.yml
             and permissions-default-widened.yml each exit 1.
+        - id: R67
+          verdict: Partial
+          reason: >-
+            Static only: the `deny-bash` assertion reads the YAML and holds that the agent step's
+            claude_args carry a standalone `--disallowedTools Bash`. Whether the CLI inside the
+            action really removes the Bash tool is unmeasured (B113), and a committed MCP server
+            that runs commands reaches the agent regardless (the build-dispatch side carries the
+            rest of R67).
+          evidence: >-
+            `deny-bash` - the step running anthropics/claude-code-action denies the agent a shell
+            with a standalone `--disallowedTools Bash` (a `Bash(git:*)` deny alone does not satisfy
+            it). Fixture agent-no-bash-deny.yml exits 1; falsified 2026-10-11 by making the
+            assertion never fire, that case going from exit 1 to exit 0.
     limitations:
       - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
       - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.

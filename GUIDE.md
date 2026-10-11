@@ -772,8 +772,8 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Fifty-eight requirements are active**, and they are the whole of what has
-been agreed.
+**Sixty-one requirements are active**, and they are the whole of what has been
+agreed.
 
 Seven more are superseded and none withdrawn, and neither kind is listed here.
 The spec keeps both forever with their text intact, so a citation written two
@@ -781,7 +781,7 @@ years ago still leads somewhere — but a guide is read by someone deciding what
 to do next, and a superseded sentence gives them no sign it stopped being
 true.
 
-**Always, with no trigger.** Eleven requirements hold whatever else is
+**Always, with no trigger.** Twelve requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -804,8 +804,10 @@ happening:
   write to the repository.
 - **R65** — Every unattended agent step shall run with no permission beyond
   what the repository's committed agent settings grant.
+- **R67** — Every unattended agent step shall run without a tool that executes
+  commands.
 
-**When something arrives.** Fifteen things happen on a discrete trigger:
+**When something arrives.** Sixteen things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -838,6 +840,8 @@ happening:
   deliver it as a draft pull request.
 - **R64** — When an unattended run's change has been committed, the lifecycle
   shall push nothing until a decision made on that commit allows it.
+- **R68** — When an unattended run's change is captured, the lifecycle shall
+  compute it with version-control settings the agent could not have written.
 
 **For as long as a state lasts.** Four requirements are true for the duration
 of a state, not at a moment inside it:
@@ -851,7 +855,7 @@ of a state, not at a moment inside it:
 - **R45** — While a change's risk tier is reported, the lifecycle shall report
   that change's complexity as unmeasured.
 
-**When something goes wrong.** Twenty-four defences, written as `If … then`
+**When something goes wrong.** Twenty-five defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -907,6 +911,9 @@ because a designed path and a defended one are not the same thing:
   a path that decides what CI runs, what an agent is told or allowed, or how
   git treats a path, then the lifecycle shall refuse to deliver that change,
   judging the paths git applies rather than the text of the patch.
+- **R66** — If an unattended stage run's change would delete one of the
+  lifecycle's own bookkeeping records, then the lifecycle shall refuse to
+  deliver that change.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

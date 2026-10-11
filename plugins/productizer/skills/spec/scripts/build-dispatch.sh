@@ -2,6 +2,8 @@
 # build-dispatch.sh prepare [repo-root] --mode plan|build --issue N
 #                           --default-branch NAME --out DIR [--spec-base SHA]
 #                           [--permissions repo-settings|edits-only]
+# build-dispatch.sh stash-git [repo-root] --git-dir DIR
+# build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE
 # build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
 #                           --patch FILE --run-id ID --default-branch NAME
 #                           [--spec-base SHA] [--dry-run]
@@ -13,11 +15,30 @@
 # everything that workflow does on either side of the model, so that none of
 # it lives as untested shell inside YAML:
 #
-#   prepare  runs BEFORE the model, with a read-only token. It decides whether
+#   prepare   runs BEFORE the model, with a read-only token. It decides whether
 #            there is anything to do at all, and writes the data the agent
 #            reads: the spec's diff against the base it builds from, the plan
 #            path, and the model flags taken from config.json. Nothing here
 #            calls a model, so a refusal here costs nothing.
+#   stash-git runs BEFORE the model, after prepare's data is in place. It moves
+#            the workspace's `.git` to a directory OUTSIDE the agent's cwd, so
+#            the agent cannot write a `.git/config`, a `.git/hooks/*` or a
+#            `.git/info/attributes` that the capture step's own git commands
+#            would then execute (a `filter.*.clean`, `core.fsmonitor`,
+#            `diff.*.textconv` or `core.hooksPath` entry turns `git diff` into
+#            agent-chosen code). Measured 2026-10-11: under acceptEdits with
+#            Bash denied the CLI already refuses a `.git/**` write as a
+#            sensitive file and refuses every write outside cwd, so this is
+#            belt-and-suspenders - a structural boundary rather than a guard
+#            rail that a CLI version could drop.
+#   capture  runs AFTER the model, before any write token. It turns the agent's
+#            edits into a patch WITHOUT trusting any version-control setting the
+#            agent could have written: it drives the stashed git-dir against the
+#            work tree with the system and global config out of reach
+#            (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null), attributes off
+#            (GIT_ATTR_NOSYSTEM, GIT_ATTR_SOURCE at the empty tree), fsmonitor
+#            and hooks pinned off, and no external or textconv diff driver. It
+#            refuses (exit 8) if the computed change touches `.git` at all.
 #   deliver  runs AFTER the model, in the only job holding a write token. It
 #            asks stage-advance.sh whether the patch the agent produced is a
 #            change this stage may make, and only then commits it to a new
@@ -65,35 +86,53 @@
 # and the action's default model runs. `cheap` names no model in CI and is
 # refused rather than guessed at.
 #
-# THE AGENT'S PERMISSIONS (maintainer ruling, 2026-10-10). The agent gets the
-# permission rules the repository owner committed for Claude Code -
-# .claude/settings.json and .claude/settings.local.json - and the person who
-# dispatches the run may only NARROW them, never widen them:
-#   repo-settings  the committed rules. When they set no permissions.defaultMode,
-#                  `--permission-mode acceptEdits` is added, because a headless
-#                  run with no mode was measured to deny every file write, and
-#                  a stage whose output is file edits would produce nothing.
-#                  When they DO set a defaultMode, no mode flag is passed and
-#                  the owner's choice stands - including bypassPermissions,
-#                  which is warned about and never produced here.
-#   edits-only     the same, plus `--disallowedTools Bash`: no shell at all.
+# THE AGENT'S PERMISSIONS (maintainer rulings, 2026-10-10 and 2026-10-11). The
+# agent gets the permission rules the repository owner committed for Claude Code
+# - .claude/settings.json and .claude/settings.local.json - EXCEPT that Bash is
+# always denied, and the person who dispatches the run may only NARROW what is
+# left, never widen it:
+#   NEVER A SHELL IN CI (ruling 2026-10-11). `--disallowedTools Bash` is added
+#                  in EVERY option, repo-settings included, whatever the repo's
+#                  committed settings say. A shell is the vector: a
+#                  prompt-injected agent that can run a command can tamper with
+#                  a file a later Node step in the same job executes while it
+#                  holds the runner's cache/runtime token, which poisons a cache
+#                  the whole repository's workflows later restore. Denying Bash
+#                  removes the built-in command tool; measured 2026-10-11 it is
+#                  honoured in sub-agents too, so a Task cannot reach a shell.
+#                  Running the repository's tests in CI is given up for this.
+#   repo-settings  the committed rules, with Bash denied. When they set no
+#                  permissions.defaultMode, `--permission-mode acceptEdits` is
+#                  added, because a headless run with no mode was measured to
+#                  deny every file write, and a stage whose output is file edits
+#                  would produce nothing. When they DO set a defaultMode, no
+#                  mode flag is passed and the owner's choice stands - including
+#                  bypassPermissions, which is warned about and never produced
+#                  here, and which measured 2026-10-11 does NOT grant a shell
+#                  anyway because the flag deny of Bash beats a committed bypass.
+#   edits-only     now identical to repo-settings and kept only as an alias: the
+#                  shell denial that once distinguished it is unconditional.
 # A third option, read-only (no edit but the plan file), was dropped: a deny
 # rule beats an allow rule, so "deny Write except plan.md" cannot be written
 # as a permission rule (measured, references/ci-build.md "Permissions").
 # The claude-args file holds one flag per line, from a fixed set; nothing a
-# dispatcher typed reaches it.
+# dispatcher typed reaches it, and the file always carries `--disallowedTools
+# Bash`.
 #
 # Exit codes:
 #   0  ok, or the dry run printed what it would have pushed and opened
 #   2  usage
 #   3  the repository cannot be read as needed: not a work tree, a shallow
-#      clone, an unreadable config, or HEAD is not the default-branch tip
+#      clone, an unreadable config, HEAD is not the default-branch tip, or
+#      (stash-git/capture) the git-dir could not be moved or read
 #   4  the spec is unchanged against the base; no model call should follow
 #   5  build mode, and no plan is committed at the plan path
 #   6  refused by stage-advance.sh, on the patch or on the commit made from
 #      it; its reason is relayed verbatim
 #   7  delivery failed after the decision: the body, the branch, the commit,
 #      the push or gh - the step is named
+#   8  capture refused: a `.git` exists in the work tree after stash-git moved
+#      the real one out
 # --selftest exits 0 when every case held, 1 when one did not.
 set -euo pipefail
 export LC_ALL=C
@@ -114,17 +153,19 @@ usage() {
   printf 'usage: build-dispatch.sh prepare [repo-root] --mode plan|build --issue N\n'
   printf '                         --default-branch NAME --out DIR [--spec-base SHA]\n'
   printf '                         [--permissions repo-settings|edits-only]\n'
+  printf '       build-dispatch.sh stash-git [repo-root] --git-dir DIR\n'
+  printf '       build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE\n'
   printf '       build-dispatch.sh deliver [repo-root] --mode plan|build --issue N\n'
   printf '                         --patch FILE --run-id ID --default-branch NAME\n'
   printf '                         [--spec-base SHA] [--dry-run]\n'
   printf '       build-dispatch.sh --selftest | --version | --help\n'
   printf 'exit: 0 ok, 2 usage, 3 repository not usable or HEAD not the default-branch tip,\n'
   printf '      4 spec unchanged, 5 no committed plan, 6 refused by stage-advance.sh,\n'
-  printf '      7 delivery failed (named)\n'
+  printf '      7 delivery failed (named), 8 capture refused (the change touches .git)\n'
 }
 
 CMD=""; ROOT=""; MODE=""; ISSUE=""; SPEC_BASE=""; OUT=""; PATCH=""; RUN_ID=""
-DEFAULT=""; DRY_RUN=0; SELFTEST=0; PERMS=""; PERMS_SET=0
+DEFAULT=""; DRY_RUN=0; SELFTEST=0; PERMS=""; PERMS_SET=0; GITDIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
@@ -133,7 +174,8 @@ while [ $# -gt 0 ]; do
     --mode)    [ $# -ge 2 ] || die_usage "--mode needs plan or build"; MODE="$2"; shift 2 ;;
     --issue)   [ $# -ge 2 ] || die_usage "--issue needs a number"; ISSUE="$2"; shift 2 ;;
     --spec-base) [ $# -ge 2 ] || die_usage "--spec-base needs a commit id"; SPEC_BASE="$2"; shift 2 ;;
-    --out)     [ $# -ge 2 ] || die_usage "--out needs a directory"; OUT="$2"; shift 2 ;;
+    --git-dir) [ $# -ge 2 ] || die_usage "--git-dir needs a directory"; GITDIR="$2"; shift 2 ;;
+    --out)     [ $# -ge 2 ] || die_usage "--out needs a directory or file"; OUT="$2"; shift 2 ;;
     --patch)   [ $# -ge 2 ] || die_usage "--patch needs a file"; PATCH="$2"; shift 2 ;;
     --run-id)  [ $# -ge 2 ] || die_usage "--run-id needs the workflow run id"; RUN_ID="$2"; shift 2 ;;
     --default-branch) [ $# -ge 2 ] || die_usage "--default-branch needs a branch name"; DEFAULT="$2"; shift 2 ;;
@@ -230,8 +272,6 @@ JSON
   # args_are <file> <expected>: the claude-args file is exactly these lines.
   # shellcheck disable=SC2329  # invoked through also's "$@"
   args_are() { printf '%s\n' "$2" | cmp -s - "$1"; }
-  # shellcheck disable=SC2329  # invoked through also's "$@"
-  is_empty_file() { [ -f "$1" ] && [ ! -s "$1" ]; }
   also() {
     local name="$1" what="$2"; shift 2
     CASES=$((CASES + 1)); CODES="$CODES 0"
@@ -248,12 +288,14 @@ JSON
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-plan"
   also plan-data-has-fenced-diff "spec-diff.md carries the fenced diff" \
     grep -q 'PRODUCTIZER-SPEC-DIFF-' "$ST/out-plan/spec-diff.md"
-  also repo-settings-no-mode-adds-accept-edits "no committed defaultMode: exactly acceptEdits" \
-    args_are "$ST/out-plan/claude-args" '--permission-mode acceptEdits'
+  also repo-settings-no-mode-adds-accept-edits "no committed defaultMode: acceptEdits, then the unconditional Bash deny" \
+    args_are "$ST/out-plan/claude-args" $'--permission-mode acceptEdits\n--disallowedTools Bash'
+  also repo-settings-always-denies-bash "repo-settings denies Bash even with no --permissions given" \
+    grep -qx -- '--disallowedTools Bash' "$ST/out-plan/claude-args"
   drive prepare-edits-only 0 "permissions edits-only" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-edits" --permissions edits-only
-  also edits-only-denies-bash "edits-only adds --disallowedTools Bash and nothing else" \
-    args_are "$ST/out-edits/claude-args" $'--permission-mode acceptEdits\n--disallowedTools Bash'
+  also edits-only-is-alias-of-repo-settings "edits-only produces exactly what repo-settings does" \
+    cmp -s "$ST/out-edits/claude-args" "$ST/out-plan/claude-args"
   drive prepare-unknown-permissions 2 "--permissions must be repo-settings or edits-only; got: bypass" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-x" --permissions bypass
   drive deliver-refuses-permissions 2 "--permissions belongs to prepare" \
@@ -279,8 +321,8 @@ JSON
   commit_push "$R" "plan for #7"
   drive prepare-build 0 "prepared build for issue #7" \
     prepare "$R" --mode build --issue 7 --default-branch main --out "$ST/out-build"
-  also build-args-from-config "model and effort come from models.build; build mode adds no mode of its own" \
-    args_are "$ST/out-build/claude-args" $'--model claude-x-1\n--effort high\n--permission-mode acceptEdits'
+  also build-args-from-config "model and effort come from models.build; build mode adds no mode of its own; Bash denied" \
+    args_are "$ST/out-build/claude-args" $'--model claude-x-1\n--effort high\n--permission-mode acceptEdits\n--disallowedTools Bash'
 
   # The owner's committed defaultMode stands: no mode flag at all.
   newrepo owner-mode; R="$ST/owner-mode"
@@ -289,12 +331,12 @@ JSON
   drive prepare-owner-default-mode 0 "the committed settings set defaultMode acceptEdits; no mode flag is passed" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-owner" \
     --spec-base "$(G "$R" rev-parse HEAD~2)"
-  also owner-mode-passes-no-flag "repo-settings with a committed defaultMode: an empty args file" \
-    is_empty_file "$ST/out-owner/claude-args"
+  also owner-mode-passes-no-flag "repo-settings with a committed defaultMode: no mode flag, only the Bash deny" \
+    args_are "$ST/out-owner/claude-args" '--disallowedTools Bash'
   drive prepare-owner-edits-only 0 "permissions edits-only" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-owner-e" \
     --spec-base "$(G "$R" rev-parse HEAD~2)" --permissions edits-only
-  also owner-mode-edits-only-narrows "edits-only over a committed defaultMode: only the Bash deny" \
+  also owner-mode-edits-only-narrows "edits-only over a committed defaultMode: still only the Bash deny" \
     args_are "$ST/out-owner-e/claude-args" '--disallowedTools Bash'
 
   newrepo owner-bypass; R="$ST/owner-bypass"
@@ -305,8 +347,11 @@ JSON
   drive prepare-owner-bypass-warned 0 "WARNING the committed Claude Code settings set defaultMode bypassPermissions" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-bypass" \
     --spec-base "$(G "$R" rev-parse HEAD~2)"
+  # shellcheck disable=SC2016  # $1 is expanded by the inner sh, on purpose
   also owner-bypass-not-produced "the owner's bypass is not written into the args" \
-    is_empty_file "$ST/out-bypass/claude-args"
+    sh -c '! grep -q bypassPermissions "$1"' _ "$ST/out-bypass/claude-args"
+  also owner-bypass-still-denies-bash "a committed bypass still gets the unconditional Bash deny, no shell" \
+    args_are "$ST/out-bypass/claude-args" '--disallowedTools Bash'
 
   newrepo bad-settings; R="$ST/bad-settings"
   printf '{ "permissions": \n' > "$R/.claude/settings.json"
@@ -431,7 +476,68 @@ STUB
   drive deliver-bad-run-id 2 "--run-id must be digits" \
     deliver "$R" --mode build --issue 7 --patch "$ST/code.patch" --run-id 'x;y' \
     --default-branch main --dry-run
-  drive no-subcommand 2 "give a subcommand: prepare or deliver" --mode plan
+
+  # --- stash-git and capture -------------------------------------------------
+  # The two halves of taking the agent's edits without trusting a version-
+  # control setting the agent could have written. A plain work tree, its real
+  # .git moved out, then a hardened diff that never runs agent-chosen code.
+  local WS GD
+  WS="$ST/cap-ws"; GD="$ST/cap-gitdir"
+  rm -rf "$WS" "$GD"; mkdir -p "$WS"
+  G "$WS" init --quiet --initial-branch=main
+  printf 'original\n' > "$WS/a.txt"
+  G "$WS" add -A; G "$WS" commit --quiet -m base
+
+  drive stash-git-inside-worktree 3 "is inside the work tree" \
+    stash-git "$WS" --git-dir "$WS/inside-gitdir"
+  drive stash-git-ok 0 "stashed" \
+    stash-git "$WS" --git-dir "$GD"
+  also stash-removed-dotgit "the work tree holds no .git after stashing" \
+    test ! -e "$WS/.git"
+  also stash-made-gitdir "the stashed git-dir is a real git directory outside the work tree" \
+    test -d "$GD/objects"
+  drive stash-git-no-dotgit 3 "no .git in" \
+    stash-git "$WS" --git-dir "$ST/cap-gitdir-again"
+
+  # The agent's edits: a change, a new file, and a .gitattributes that would
+  # CRLF-convert, expand $Id$ and route through a filter driver if attributes
+  # were honoured. With no driver declared nothing runs, and the capture
+  # neutralises attributes anyway, so the delivered bytes are verbatim.
+  # shellcheck disable=SC2016  # $Id$ is a literal git ident keyword, not a shell var
+  printf 'original\nsecond line $Id$\n' > "$WS/a.txt"
+  printf 'brand new\n' > "$WS/b.txt"
+  printf '* eol=crlf ident filter=evil diff=evil\n' > "$WS/.gitattributes"
+  drive capture-ok 0 "captured the work tree" \
+    capture "$WS" --git-dir "$GD" --out "$ST/cap.patch"
+  also capture-wrote-a-patch "the patch file was written and is non-empty" \
+    test -s "$ST/cap.patch"
+  also capture-names-new-file "the patch carries the agent's new file" \
+    grep -qF 'b/b.txt' "$ST/cap.patch"
+  # shellcheck disable=SC2016  # $1 is expanded by the inner sh, on purpose
+  also capture-bytes-are-verbatim-no-crlf "no attribute CRLF-converted the delivered bytes" \
+    sh -c '! grep -qU "$(printf "\r")" "$1"' _ "$ST/cap.patch"
+  # shellcheck disable=SC2016  # $Id$ is a literal git ident keyword, not a shell var
+  also capture-ident-not-expanded 'the ident keyword was delivered as written, not expanded' \
+    grep -qF 'second line $Id$' "$ST/cap.patch"
+
+  drive capture-no-gitdir 2 "capture needs --git-dir" \
+    capture "$WS" --out "$ST/cap.patch"
+  mkdir -p "$ST/not-a-gitdir"
+  drive capture-not-a-gitdir 3 "does not read as a git directory" \
+    capture "$WS" --git-dir "$ST/not-a-gitdir" --out "$ST/cap.patch"
+
+  # A .git the agent planted in the work tree after it was stashed out, holding
+  # a config whose fsmonitor would run a command the moment git touched the
+  # tree. Capture refuses (exit 8) BEFORE any git command reads the tree, so
+  # the marker the planted config would create never appears.
+  mkdir -p "$WS/.git"
+  printf '[core]\n\tfsmonitor = touch %s/CAPTURE_PWN_MARK\n' "$ST" > "$WS/.git/config"
+  drive capture-refuses-planted-git 8 "a .git exists in the work tree after it was stashed out" \
+    capture "$WS" --git-dir "$GD" --out "$ST/cap2.patch"
+  also capture-planted-config-never-ran "the planted fsmonitor command did not run" \
+    test ! -e "$ST/CAPTURE_PWN_MARK"
+
+  drive no-subcommand 2 "give a subcommand: prepare, stash-git, capture or deliver" --mode plan
   drive version 0 "build-dispatch 1." --version
 
   # shellcheck disable=SC2016  # $1 is expanded by the inner sh, on purpose
@@ -443,7 +549,7 @@ STUB
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f&&/^#      /{next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the workflow template calls this script the way these cases do.\n'
+  printf '    NOT ASSERTED: a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the workflow template calls this script the way these cases do; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -456,12 +562,74 @@ if [ "$SELFTEST" -eq 1 ]; then
 fi
 
 # ===========================================================================
+# STASH-GIT and CAPTURE: the two halves of taking the agent's edits without
+# trusting any version-control setting the agent could have written. They share
+# no code with prepare/deliver and run self-contained, so they are handled
+# before the heavier repository checks below.
+# ===========================================================================
+if [ "$CMD" = stash-git ] || [ "$CMD" = capture ]; then
+  [ -z "$MODE$ISSUE$SPEC_BASE$PATCH$RUN_ID$DEFAULT" ] && [ "$DRY_RUN" = 0 ] && [ "$PERMS_SET" = 0 ] \
+    || die_usage "$CMD takes only [repo-root], --git-dir and (capture) --out"
+  [ -n "$GITDIR" ] || die_usage "$CMD needs --git-dir DIR"
+  [ -n "$ROOT" ] || ROOT="."
+  [ -d "$ROOT" ] || fail 3 "no such directory: $ROOT"
+  ROOT="$(cd "$ROOT" && pwd)"
+  # The git-dir must live OUTSIDE the work tree, or relocating it defeats the
+  # point - the agent's cwd is the work tree, and a git-dir under it is reach-
+  # able. This check is on the absolute paths, before the directory is moved.
+  GITDIR_PARENT="$(dirname "$GITDIR")"
+  [ -d "$GITDIR_PARENT" ] || die_usage "--git-dir parent directory does not exist: $GITDIR_PARENT"
+  GITDIR_ABS="$(cd "$GITDIR_PARENT" && pwd)/$(basename "$GITDIR")"
+  case "$GITDIR_ABS/" in "$ROOT"/*) fail 3 "--git-dir $GITDIR_ABS is inside the work tree $ROOT; a stashed git-dir the agent could reach is no boundary" ;; esac
+
+  if [ "$CMD" = stash-git ]; then
+    [ -e "$ROOT/.git" ] || fail 3 "no .git in $ROOT to stash: nothing to move out of the agent's reach"
+    [ ! -e "$GITDIR_ABS" ] || fail 3 "the stash destination already exists: $GITDIR_ABS"
+    mv "$ROOT/.git" "$GITDIR_ABS" || fail 3 "could not move $ROOT/.git to $GITDIR_ABS"
+    say "build-dispatch: stashed $ROOT/.git to $GITDIR_ABS; the agent's cwd now holds no .git."
+    exit 0
+  fi
+
+  # capture
+  [ -n "$OUT" ] || die_usage "capture needs --out FILE for the patch"
+  [ -d "$GITDIR_ABS" ] || fail 3 "the stashed git-dir is not a directory: $GITDIR_ABS. Run stash-git first."
+  [ -d "$GITDIR_ABS/objects" ] && [ -e "$GITDIR_ABS/HEAD" ] \
+    || fail 3 "the stashed git-dir does not read as a git directory (no objects/ or HEAD): $GITDIR_ABS"
+  OUT_ABS="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")" \
+    || die_usage "--out parent does not exist: $OUT"
+  EMPTY_TREE="$(git --git-dir="$GITDIR_ABS" hash-object -t tree /dev/null)" \
+    || fail 3 "could not compute the empty tree for $GITDIR_ABS"
+  hardened_git() {
+    env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_ATTR_NOSYSTEM=1 GIT_ATTR_SOURCE="$EMPTY_TREE" \
+        git --git-dir="$GITDIR_ABS" --work-tree="$ROOT" \
+        -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
+  }
+  cd "$ROOT"
+  # The work tree must hold NO .git after stash-git moved the real one out. If
+  # one is here, the agent created it - the planted config a capture must never
+  # honour or deliver. git itself also refuses to stage a nested .git (measured
+  # 2026-10-11), and git never emits a .git path in a diff at all, so this
+  # existence check is the one place a planted .git is caught, and it is caught
+  # before any git command reads the work tree.
+  [ ! -e "$ROOT/.git" ] \
+    || fail 8 "a .git exists in the work tree after it was stashed out; the agent created it, and a capture may neither honour nor deliver it. Refusing."
+  # Intent-to-add every new file so `git diff` shows it.
+  hardened_git add -N . || fail 3 "could not stage the work tree against the stashed git-dir"
+  hardened_git diff --binary --no-ext-diff --no-textconv > "$OUT_ABS" \
+    || fail 3 "could not compute the patch against the stashed git-dir"
+  say "build-dispatch: captured the work tree into $OUT_ABS ($(wc -c < "$OUT_ABS") bytes), with the agent's version-control settings out of reach."
+  hardened_git diff --stat --no-ext-diff --no-textconv || true
+  exit 0
+fi
+
+# ===========================================================================
 # ARGUMENTS
 # ===========================================================================
 case "$CMD" in
   prepare|deliver) ;;
-  "") die_usage "give a subcommand: prepare or deliver. Run with --help for the contract." ;;
-  *)  die_usage "unknown subcommand: $CMD (prepare or deliver)" ;;
+  "") die_usage "give a subcommand: prepare, stash-git, capture or deliver. Run with --help for the contract." ;;
+  *)  die_usage "unknown subcommand: $CMD (prepare, stash-git, capture or deliver)" ;;
 esac
 case "$MODE" in plan|build) ;; *) die_usage "--mode must be plan or build; got: ${MODE:-nothing}" ;; esac
 [[ "$ISSUE" =~ ^[1-9][0-9]{0,9}$ ]] || die_usage "--issue must be a positive whole number; got: ${ISSUE:-nothing}"
@@ -601,12 +769,15 @@ PY
   else
     PERM_HOW="the committed settings set defaultMode $REPO_MODE; no mode flag is passed and the owner's choice stands"
     if [ "$REPO_MODE" = bypassPermissions ]; then
-      printf 'build-dispatch: WARNING the committed Claude Code settings set defaultMode bypassPermissions. That is the repository owner'"'"'s choice and is passed through unchanged; this script never produces it. The agent then runs any tool the deny lists do not name, with the API key in its environment and the spec diff in its prompt.\n' >&2
+      printf 'build-dispatch: WARNING the committed Claude Code settings set defaultMode bypassPermissions. That is the repository owner'"'"'s choice and is passed through unchanged; this script never produces it. The agent then runs any tool the deny lists do not name - but NOT a shell: Bash is denied below in every option, and that flag deny was measured to beat a committed bypass. The agent still has the API key in its environment and the spec diff in its prompt.\n' >&2
     fi
   fi
-  if [ "$PERMS" = edits-only ]; then
-    ARGS_LINES+=("--disallowedTools Bash")
-  fi
+  # NEVER A SHELL IN CI (maintainer ruling 2026-10-11). Bash is denied in every
+  # option, repo-settings included, whatever the committed settings say. This
+  # is the single most load-bearing line here: a shell is the vector by which a
+  # prompt-injected agent tampers with a file a later token-holding step runs.
+  # edits-only is now identical to repo-settings and kept only as an alias.
+  ARGS_LINES+=("--disallowedTools Bash")
 
   mkdir -p "$OUT" || fail 3 "cannot create the output directory: $OUT"
   SD_RC=0

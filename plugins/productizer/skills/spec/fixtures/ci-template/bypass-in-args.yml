@@ -41,7 +41,9 @@ jobs:
         with:
           github_token: ${{ github.token }}
           prompt: fixed text
-          claude_args: --permission-mode bypassPermissions
+          claude_args: |
+            --disallowedTools Bash
+            --permission-mode bypassPermissions
   deliver:
     needs: generate
     runs-on: ubuntu-latest

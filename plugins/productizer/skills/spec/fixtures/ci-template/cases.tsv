@@ -8,6 +8,7 @@ top-level-write.yml	1	must be exactly contents: read; found {'contents': 'write'
 write-in-prepare.yml	1	jobs.prepare.permissions: write on contents outside the deliver job
 agent-job-write.yml	1	the agent job holds write on id-token
 agent-checkout-credentials.yml	1	checkout in the agent job must set persist-credentials: false
+agent-no-bash-deny.yml	1	the agent action step must deny the agent a shell with a standalone --disallowedTools Bash
 unpinned-uses.yml	1	not pinned to a full commit id: actions/checkout@v4
 event-in-run.yml	1	an expression is interpolated into the script: ${{ github.event.
 inputs-in-run.yml	1	an expression is interpolated into the script: ${{ inputs.

@@ -19,6 +19,12 @@ WHAT IT ASSERTS, each a separate finding:
   agent-job      the job that runs anthropics/claude-code-action has no write
                  permission, and every checkout in it sets
                  persist-credentials: false
+  deny-bash      the step that runs the agent action denies the agent a shell:
+                 its `claude_args` carries a standalone `--disallowedTools Bash`
+                 (the whole Bash tool, not just `Bash(git:*)`). A shell is the
+                 vector by which a prompt-injected agent in this read-only job
+                 could tamper with a file a later token-holding step runs; the
+                 maintainer ruled on 2026-10-11 that CI never gives it one
   pinned         every `uses:` is pinned to a full 40-character commit id
   run-injection  no `${{ github.event.` and no `${{ inputs.` inside a run:
   swallow        no continue-on-error, and no `|| true` or `2>/dev/null` in a
@@ -62,6 +68,10 @@ DEFAULT_PATH = os.path.join(HERE, "..", "templates", "build-from-spec.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "ci-template")
 
 AGENT_ACTION = "anthropics/claude-code-action"
+# A standalone denial of the whole Bash tool. `Bash` must not be followed by a
+# `(`, so `--disallowedTools "Bash(git:*)"` - a denial of only git through Bash
+# - does not satisfy it; the whole shell must be gone.
+DENY_BASH_RX = re.compile(r"--disallowedTools\s+[\"']?Bash(?![\w(])")
 BYPASS_WORDS = ("bypassPermissions", "dangerously-skip-permissions")
 PERMS_OPTIONS = ("repo-settings", "edits-only")
 PIN_RX = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
@@ -204,6 +214,13 @@ def check(path):
                     if str(pc).strip().lower() != "false":
                         find("agent-job", "jobs.%s.steps[%d]" % (jname, i),
                              "checkout in the agent job must set persist-credentials: false")
+                if str(s.get("uses", "")).split("@")[0] == AGENT_ACTION:
+                    cargs = str((s.get("with") or {}).get("claude_args") or "")
+                    if not DENY_BASH_RX.search(cargs):
+                        find("deny-bash", "jobs.%s.steps[%d].with.claude_args" % (jname, i),
+                             "the agent action step must deny the agent a shell with a "
+                             "standalone --disallowedTools Bash (never a shell in CI); a "
+                             "Bash(git:*) deny alone does not satisfy it")
     if not agent_jobs:
         die("no job in %s runs %s, so the agent job's assertions could not run. "
             "Unmeasured, not clean." % (path, AGENT_ACTION))
@@ -253,8 +270,8 @@ def check(path):
     return findings
 
 
-ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "pinned",
-              "run-injection", "swallow", "no-bypass", "perms-input")
+ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "deny-bash",
+              "pinned", "run-injection", "swallow", "no-bypass", "perms-input")
 
 
 def report(path):
@@ -333,7 +350,10 @@ def selftest():
     print("    NOT ASSERTED: that a pinned commit is the release its comment names; a "
           "write permission granted through a reusable workflow's own file; an "
           "expression smuggled into a run: through env indirection that is itself "
-          "untrusted; YAML anchors and merge keys; any behaviour of GitHub itself; that a "
+          "untrusted; YAML anchors and merge keys; any behaviour of GitHub itself; that "
+          "the CLI inside the action really removes the Bash tool when deny-bash is "
+          "declared (deny-bash checks the workflow declares it, not that the CLI honours "
+          "it - measured against local claude -p, references/ci-build.md); that a "
           "permissions option really narrows - what each one adds to the agent's "
           "arguments is build-dispatch.sh's, asserted in its own self-test.")
     if got != doc:

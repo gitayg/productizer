@@ -20,12 +20,17 @@
 #
 # THE THREE REFUSALS
 #
-#   1  PRODUCED NOTHING. The change is empty, or touches only the lifecycle's
+#   1  PRODUCED NOTHING. The change is empty, or ADDS only the lifecycle's
 #      own bookkeeping, or holds nothing the target stage counts as evidence.
 #      Bookkeeping is exactly:
 #        .claude/productizer/snapshots/**        (stage-snapshot.sh)
 #        .claude/productizer/checks-result.json  (run-checks.sh output)
 #        .claude/productizer/classifications/**  (record-classification.sh)
+#      Bookkeeping ADDED is "nothing"; bookkeeping DELETED is refusal 3, not 1.
+#      These records are an audit trail the governance checks read, and a run
+#      that erases one can flip a check from a finding to clean, so a stage run
+#      - the wrong actor to edit the rules it is judged by - may not delete
+#      one either.
 #   5  NOT A FORWARD MOVE. --to is at or before --from in the stage order.
 #   3  FORBIDDEN PATH. The change touches a path the target stage may not.
 #      THE FORBIDDEN SET lives in one function, forbidden_any_mode(), and is
@@ -242,6 +247,21 @@ JSON
   drive empty-patch 1 "produced nothing outside the lifecycle's own bookkeeping" \
     "$R" --from design --to build --mode build --patch "$WORK/empty.patch"
 
+  # A run that DELETES a bookkeeping record is refused, even when it also
+  # produces a real plan.md: erasing a classification silences the governance
+  # check that reads it. The committed record is at HEAD; the patch removes it
+  # and adds a plan.md, so the real evidence cannot launder the deletion past.
+  newrepo bk-delete; R="$WORK/bk-delete"
+  mkdir -p "$R/.claude/productizer/classifications"
+  printf 'Intent: 9\nClassification: contradict\n' \
+    > "$R/.claude/productizer/classifications/9.md"
+  commit "$R"
+  mkdir -p "$R/docs/sdlc/greet"; printf '# Plan\n' > "$R/docs/sdlc/greet/plan.md"
+  G "$R" rm --quiet .claude/productizer/classifications/9.md
+  G "$R" add -A; G "$R" diff --cached > "$WORK/bk-delete.patch"
+  drive bk-delete-record-refused 3 "a stage run may not erase an audit record" \
+    "$R" --from design --to build --mode plan --patch "$WORK/bk-delete.patch"
+
   drive backward-move 5 "not a forward move: build is at or after design" \
     "$R" --from build --to design --base base
   drive same-stage 5 "not a forward move: test is at or after test" \
@@ -438,7 +458,7 @@ JSON
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the two fixtures checked for it; a Unicode-normalisation variant of a forbidden path; a gitlink (submodule entry) or a symlink at an allowed path, both allowed; that the forbidden set is every file that steers CI or an agent.\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the two fixtures checked for it; a Unicode-normalisation variant of a forbidden path; a gitlink (submodule entry) or a symlink at an allowed path, both allowed; a bookkeeping record MODIFIED rather than added or deleted (git reports an add and a modify alike, so this decider cannot tell them apart; a forged classification is caught by its spec-hash in check-classification-provenance, not here); that the forbidden set is every file that steers CI or an agent.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -670,12 +690,27 @@ is_forbidden() {
   return 1
 }
 
-REAL=""
+REAL=""; BK_DELETED=""
 while IFS=$'\t' read -r st p; do
   [ -n "$p" ] || continue
-  is_bookkeeping "$p" || REAL="$REAL$st"$'\t'"$p"$'\n'
+  if is_bookkeeping "$p"; then
+    # Bookkeeping ADDED is inert - the "produced nothing" case. Bookkeeping
+    # DELETED is not: a classification, a snapshot or the checks result is an
+    # audit record a later stage and the governance checks read, and erasing
+    # one lets a run flip a check from a finding to clean. A stage run is the
+    # wrong actor to erase the record it is judged by, so a deletion here is
+    # forbidden in every mode, exactly as editing a rule file is.
+    [ "$st" = D ] && BK_DELETED="$BK_DELETED$p"$'\n'
+    continue
+  fi
+  REAL="$REAL$st"$'\t'"$p"$'\n'
   if is_forbidden "$p"; then FORBIDDEN="$FORBIDDEN$p"$'\n'; fi
 done <<< "$CHANGES"
+
+if [ -n "$BK_DELETED" ]; then
+  FORBIDDEN="$BK_DELETED"
+  finish 3 "the change deletes lifecycle bookkeeping that a later stage and the governance checks read; a stage run may not erase an audit record (a classification, a snapshot or the checks result). Deleted: $(printf '%s' "$BK_DELETED" | tr '\n' ' ' | sed 's/ $//')"
+fi
 
 [ -n "$REAL" ] \
   || finish 1 "the run produced nothing outside the lifecycle's own bookkeeping; $FROM_KEY -> $TO_KEY has no result to take over"

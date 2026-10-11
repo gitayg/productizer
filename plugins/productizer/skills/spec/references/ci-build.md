@@ -36,7 +36,7 @@ decision is the person who dispatches the run:
 | Job | Token | What it does |
 |---|---|---|
 | `prepare` | `contents: read`, checkout keeps no credentials | `build-dispatch.sh prepare`: decides whether there is anything to do, then writes the agent's data as files. **No model is called.** |
-| `generate` | `contents: read`, checkout keeps no credentials | `anthropics/claude-code-action` with a fixed prompt, then `git add -N .` and `git diff --binary` into a patch |
+| `generate` | `contents: read`, checkout keeps no credentials, Bash denied, `.git` moved out before the agent runs | `anthropics/claude-code-action` with a fixed prompt, then `build-dispatch.sh capture` turns the working tree into a patch against the stashed git-dir |
 | `deliver` | `contents: write`, `pull-requests: write` | `build-dispatch.sh deliver`: `stage-advance.sh` decides on the patch, then a new branch and a commit, then `stage-advance.sh` decides again on that commit, then a push and `gh pr create --draft`. **No model runs here.** |
 
 A write token never sits beside the model. The agent job's only token is its
@@ -46,6 +46,68 @@ an app token that has `contents`, `pull_requests` and `issues` write. That was
 read in the action's `src/github/token.ts` at the pinned commit. The agent job
 does not grant `id-token: write`, so the exchange could not happen anyway.
 Passing the token explicitly makes the intent visible rather than incidental.
+
+**Never a shell in CI (maintainer ruling, 2026-10-11).** An earlier, unpushed
+draft of this template tried to protect the runner's own artifact and cache
+tokens - `ACTIONS_RUNTIME_TOKEN`, `ACTIONS_RESULTS_URL`, `ACTIONS_CACHE_URL` -
+by blanking them in the agent step's `env:`. **That blank was ineffective and
+has been removed.** Read in actions/runner at the pinned behaviour:
+`NodeScriptActionHandler.cs` copies the step env first and THEN sets those
+tokens (its `ScriptHandler.cs` sets only the id-token request vars, and only
+when `id-token` is granted). So a step-level blank cannot override the runner's
+own token for a Node step, and in any case the agent's OWN process never held
+those tokens - the action passes the agent `{ ...process.env }` minus only the
+two OIDC request vars (`base-action/src/parse-sdk-options.ts` at the pinned
+commit), and the runner never put the artifact/cache tokens in the step
+process's env to begin with. A blank that protects nothing is a false
+assurance, so it is gone.
+
+**The real vector is a shell.** Code the agent can run during the generate
+job - or git the template makes run - can tamper with a file that a LATER Node
+step in the same job executes, and that step (the action's own internals, its
+setup-bun post step, the checkout post step, upload-artifact) holds the
+runtime/cache token. Because this workflow is dispatched on the default branch,
+a cache written there is readable by every branch's workflows: cross-workflow
+cache poisoning. The template closes this by **denying the agent a shell
+outright**: `build-dispatch.sh prepare` adds `--disallowedTools Bash` in every
+`permissions` option, the agent step's `claude_args` carries it too, and the
+"Read the flags" step refuses to run the agent if the prepared flags do not
+deny Bash. `check-ci-template.py` asserts the agent step declares the standalone
+deny (`deny-bash`). Measured 2026-10-11 against local `claude -p` 2.1.295:
+denying Bash removes the built-in command tool, and the removal is honoured in
+sub-agents too, so a `Task` cannot reach a shell either. Running the
+repository's tests in CI is given up for this rule.
+
+What the file and the checker cannot prove is that the CLI inside the action
+really removes the Bash tool at run time; that is measured only against local
+`claude -p`, not on a runner (B113).
+
+**Git runs after the agent, so the capture uses a git the agent could not have
+configured.** The post-agent steps run `git` in the same working tree. A
+`filter.*.clean`, `core.fsmonitor`, `diff.*.textconv` or `core.hooksPath` entry
+the agent could write into `.git/config`, `.git/hooks/*` or `.git/info/attributes`
+would make the template's own `git diff` execute agent-chosen code - the shell
+vector above, reached with no Bash. Measured 2026-10-11: under `acceptEdits`
+with Bash denied the CLI refuses a `.git/**` write as a sensitive file and
+refuses every write outside the working directory, so the agent cannot plant
+such config in the first place. On top of that guard the template takes a
+structural measure: `build-dispatch.sh stash-git` moves `.git` OUT of the
+agent's working directory before the agent runs, to a path under `RUNNER_TEMP`
+the CLI's edit tools cannot reach, and `build-dispatch.sh capture` computes the
+patch against that stashed git-dir with the system and global config out of
+reach (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`), attributes
+neutralised (`GIT_ATTR_NOSYSTEM=1`, `GIT_ATTR_SOURCE` at the empty tree),
+`core.fsmonitor` and `core.hooksPath` pinned off, and `--no-ext-diff
+--no-textconv`. It refuses (exit 8) if a `.git` reappears in the working tree.
+git itself never stages a nested `.git` and never emits a `.git` path in a
+diff, so a replanted `.git` is caught by that existence check. Worktree
+`.gitattributes` with config out of reach can still request `eol`, `ident` or
+`working-tree-encoding`; measured 2026-10-11 these are content normalisations
+that execute nothing, and `GIT_ATTR_SOURCE` at the empty tree neutralises them
+anyway so the delivered bytes are verbatim. A `filter`/`textconv` driver needs
+a config entry the relocation puts out of reach. The relocation and the capture
+logic live in `build-dispatch.sh` (`stash-git`, `capture`), self-tested, not as
+shell in the YAML.
 
 ### Inputs
 
@@ -110,6 +172,20 @@ path, and what the run is judged by. Because the set is checked first, an
 `artifacts.path` under `.claude/` or `.github/` cannot hold a plan an
 unattended run may write.
 
+**Bookkeeping may be added, never erased.** The lifecycle's own bookkeeping -
+`.claude/productizer/snapshots/**`, `.claude/productizer/classifications/**`,
+`.claude/productizer/checks-result.json` - is "nothing" when it is ADDED, so a
+run that produced only bookkeeping produced nothing to advance on. A DELETION
+of one of those records is a different act: a classification, a snapshot or the
+checks result is an audit record the governance checks read, and a run that
+erases one can flip a check from a finding to clean. So a deletion of a
+bookkeeping path is refusal 3 in every mode, exactly as editing a rule file is;
+a stage run is the wrong actor to erase the record it is judged by. What this
+does NOT catch is a bookkeeping record MODIFIED in place rather than added or
+deleted - git reports an add and a modify alike, so `stage-advance.sh` cannot
+tell them apart; a forged classification is caught instead by its spec-hash in
+`check-classification-provenance.sh`.
+
 **The patch text is never parsed.** `stage-advance.sh --patch` has git apply
 the patch to a scratch index read from `HEAD`, in a temporary object
 directory, and judges git's own `diff-tree` of the result. The paths judged
@@ -149,8 +225,8 @@ defined in the UI", which means two things:
 
 | Option | What reaches the agent | What it allows |
 |---|---|---|
-| `repo-settings` (default) | the committed settings. When they set **no** `defaultMode`, `--permission-mode acceptEdits` is added. When they set one, no mode flag is passed. Always `--disallowedTools "Bash(git:*)"` | file edits in the checkout; any tool the committed allow list grants (but see the trust caveat below); nothing the deny lists name |
-| `edits-only` | the same, plus `--disallowedTools Bash` | file edits only. The Bash tool is removed outright, so the agent cannot run your tests |
+| `repo-settings` (default) | the committed settings. When they set **no** `defaultMode`, `--permission-mode acceptEdits` is added. When they set one, no mode flag is passed. **Always `--disallowedTools Bash`** (maintainer ruling 2026-10-11, never a shell in CI) | file edits in the checkout; any non-shell tool the committed allow list grants (but see the trust caveat below); nothing the deny lists name; **no shell** |
+| `edits-only` | now **identical** to `repo-settings` and kept only as an alias: the shell denial that once distinguished it is unconditional | the same: file edits, no shell |
 
 **Why `acceptEdits` is added, and only when no `defaultMode` is committed.**
 A headless run with no permission mode denied the one file write it was asked
@@ -170,19 +246,23 @@ created (m10). Plan mode is already confined to the plan file after the fact:
 **If the owner commits `defaultMode: bypassPermissions`,** that is the
 owner's choice, and it is passed through unchanged. `build-dispatch.sh` prints
 a WARNING and never produces the value itself. `check-ci-template.py` fails any
-template that contains it. Understand what it means before choosing it:
+template that contains it. But since v4.67.1 **a committed bypass no longer
+grants a shell**: the unconditional `--disallowedTools Bash` is a flag deny,
+and a flag deny beats a committed mode (measured in m8, m9). Understand what it
+still means before choosing it:
 
-- the agent runs any tool the deny lists do not name
+- the agent runs any non-shell tool the deny lists do not name
 - it has the API key in its environment
 - it reads the spec diff, and text your committers wrote is text the model
   will treat as instructions
 
 A prompt injection in the spec, or in any file the agent reads, can then do
-whatever a shell on the runner can do. The job's token cannot write to the
-repository, but the key can still be read and sent anywhere.
+whatever the agent's remaining tools allow. The job's token cannot write to the
+repository, and the agent has no shell, but the key can still be read and, if a
+committed MCP server or an allowed tool can reach the network, sent anywhere.
 
-`edits-only` narrows even an owner's bypass: the deny lists were honoured
-under bypass mode in m8, and removing Bash took it away in m9.
+The shell is denied in every option, a committed bypass included, so the
+`edits-only` alias no longer narrows anything further.
 
 ### What was measured, and what was read
 
@@ -243,20 +323,28 @@ and the files left behind:
 build-dispatch.sh prepare [repo-root] --mode plan|build --issue N
                           --default-branch NAME --out DIR [--spec-base SHA]
                           [--permissions repo-settings|edits-only]
+build-dispatch.sh stash-git [repo-root] --git-dir DIR
+build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE
 build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
                           --patch FILE --run-id ID --default-branch NAME
                           [--spec-base SHA] [--dry-run]
 ```
 
+`stash-git` moves the working tree's `.git` out to `DIR` (which must be outside
+the tree) before the agent runs; `capture` computes the patch against that
+stashed git-dir with the agent's version-control settings out of reach. Both
+run in the `generate` job around the agent step.
+
 | Exit | Meaning |
 |---|---|
 | 0 | ok, or the dry run printed what it would have pushed and opened |
 | 2 | usage, including a `--spec-base` that is not 40 lower-case hex digits or does not resolve, and a `--permissions` value outside `repo-settings` and `edits-only` |
-| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, or `HEAD` is not the default-branch tip |
+| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, or (`stash-git`/`capture`) the git-dir could not be moved or read |
 | 4 | the spec is unchanged against the base. The run stops before any model call |
 | 5 | build mode, and no plan is committed at the plan path |
 | 6 | refused by `stage-advance.sh`, on the patch or on the commit made from it, whose reason is relayed verbatim. The branch is deleted and nothing is pushed |
 | 7 | delivery failed after the decision. The step is named: the body, the branch, the commit, the push or `gh` |
+| 8 | `capture` refused: a `.git` reappeared in the working tree after `stash-git` moved the real one out |
 
 `spec-diff.sh` exits 5 (no baseline) and 7 (over the cap) do not stop the run.
 The line it printed goes to the agent as written, as `build-diff.md`
@@ -289,6 +377,8 @@ workflow given as a path:
 - the top-level permissions are exactly `contents: read`
 - write permissions appear only in `deliver`
 - the agent job holds no write, and its checkouts set `persist-credentials: false`
+- the step that runs the agent action denies the agent a shell: its
+  `claude_args` carries a standalone `--disallowedTools Bash` (`deny-bash`)
 - every `uses:` is pinned to a full 40-character commit id
 - no `${{ github.event.` and no `${{ inputs.` inside a `run:`
 - no `continue-on-error`, `|| true` or `2>/dev/null`
@@ -334,24 +424,23 @@ your copy after every edit.
   adopter's checks therefore do not start until a person pushes to the
   branch, unless `deliver` authenticates as a GitHub App instead. With branch protection that requires
   those checks, the pull request cannot merge until they have run.
-- **`Bash(git:*)` is a guard rail, not a boundary.** The deny rule matches
-  commands that begin with `git`. Measured locally on 2026-10-10 with
-  `claude -p --permission-mode bypassPermissions --disallowedTools "Bash(git:*)"`:
-  the `git status` call was denied and recorded in `permission_denials`. A
-  command that reaches git another way, such as `sh -c`, is not matched. The
-  boundary is the token: the agent job cannot write, and `deliver` refuses a
-  commit that touches what the stage may not. It judges the commit git made,
-  not the patch text, so whatever text arrives as the patch, only what git
-  applies is delivered.
+- **The whole Bash tool is denied, not just git.** Since v4.67.1 the agent
+  gets `--disallowedTools Bash` in every option (maintainer ruling, never a
+  shell in CI). Measured 2026-10-11 against local `claude -p`: the tool is
+  removed, in sub-agents too, so the `sh -c` escape that defeated the old
+  `Bash(git:*)` deny has no shell to reach. A command-executing MCP tool from a
+  committed `.mcp.json` is the residual (R67 is `Partial`): the action sets
+  `enableAllProjectMcpServers`, so an adopter who commits such a server gives
+  the agent that path. The token is still a boundary too: the agent job cannot
+  write, and `deliver` judges the commit git made, not the patch text.
 - **Build mode accepts a patch that edits only the plan.** `build -> test`
   counts any non-bookkeeping path as evidence, so a run that rewrote only
   `plan.md` opens a pull request containing just that change. The reviewer
   sees it. Nothing refuses it.
-- **The agent may be unable to run your tests.** On a runner the committed
-  allow list was measured as ignored (see [Permissions](#permissions)), so
-  build mode edits code without running it unless your settings say
-  otherwise. Your checks on the pull request are what verify it, and they run
-  only once a person pushes (first item).
+- **The agent cannot run your tests, by design.** The no-shell rule removes the
+  Bash tool, so build mode edits code without running it. Your checks on the
+  pull request are what verify it, and they run only once a person pushes
+  (first item). This is a deliberate trade for keeping a shell out of CI.
 - **Whatever permissions apply, the model reads text your committers wrote.**
   It has the API key in its environment and reads the spec diff. Treat the
   spec as instructions the model will see.
@@ -360,7 +449,10 @@ your copy after every edit.
   change made against an older tree. Dispatch the run again.
 - **It has never run end to end here.** This repository is public, holds no
   model secrets, and a run costs model spend. What is measured is the
-  template's static properties (`check-ci-template.py`, actionlint 1.7.12
-  clean), and both ends of `build-dispatch.sh` against local repositories with
-  a stub `gh`. The action's real behaviour inside GitHub Actions, the artifact
-  hand-offs and a real `gh pr create` are not measured.
+  template's static properties (`check-ci-template.py`, 10 of 10, actionlint
+  1.7.12 clean), and all of `build-dispatch.sh` - `prepare`, `stash-git`,
+  `capture`, `deliver` - against local repositories with a stub `gh`. The
+  action's real behaviour inside GitHub Actions, that it tolerates its `.git`
+  being moved out before it runs, its setup-bun post step writing no cache, the
+  CLI removing the Bash tool, the artifact hand-offs and a real `gh pr create`
+  are not measured (B121).
