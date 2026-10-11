@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# pr-spec-comment.sh [repo-root] [--base REF] [--checks PATH] [--version] [--help]
+# pr-spec-comment.sh [repo-root] [--base REF] [--checks PATH]
+#                    [--selftest] [--version] [--help]
 #
 # Renders what a change did to the living spec, as markdown, for a human to
 # paste onto a pull request.
@@ -34,11 +35,15 @@
 #       2 usage, or a refused publish
 #       3 not a git work tree, no such directory, or spec-diff.sh is unusable
 #       5 rendered, but at least one section could NOT be measured and says so
+#
+# --selftest builds real repositories under mktemp -d, with the real sibling
+# spec-diff.sh, and exits 0 when every case held and 1 when one did not.
 set -euo pipefail
 
 VERSION="pr-spec-comment 1.0"
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$HERE/$(basename -- "${BASH_SOURCE[0]}")"
 SPEC_DIFF="$HERE/spec-diff.sh"
 
 SPEC_REL=".claude/productizer/spec.md"
@@ -49,9 +54,11 @@ CHECKS_REL=".claude/productizer/checks-result.json"
 ROOT=""
 BASE=""
 CHECKS=""
+SELFTEST=0
 
 usage() {
   echo "usage: pr-spec-comment.sh [repo-root] [--base REF] [--checks PATH]"
+  echo "       pr-spec-comment.sh --selftest | --version | --help"
   echo "Renders markdown to stdout. It posts nothing, by design - see the file header."
 }
 
@@ -62,6 +69,7 @@ while [ $# -gt 0 ]; do
     --checks)   CHECKS="${2:-}"; [ -n "$CHECKS" ] || { echo "pr-spec-comment: --checks needs a path" >&2; exit 2; }; shift 2 ;;
     --checks=*) CHECKS="${1#--checks=}"; [ -n "$CHECKS" ] || { echo "pr-spec-comment: --checks needs a path" >&2; exit 2; }; shift ;;
     --version)  echo "$VERSION"; exit 0 ;;
+    --selftest|--self-test) SELFTEST=1; shift ;;
     -h|--help)  usage; exit 0 ;;
     # Named explicitly, because somebody will try it and deserves the reason
     # rather than "unknown option".
@@ -77,6 +85,121 @@ while [ $# -gt 0 ]; do
     *)          [ -z "$ROOT" ] || { echo "pr-spec-comment: only one repo-root" >&2; exit 2; }; ROOT="$1"; shift ;;
   esac
 done
+
+# ===========================================================================
+# SELF-TEST. Real repositories under mktemp -d, the real spec-diff.sh beside
+# this file, a stub solver probe, no network. Every case asserts an exit code
+# AND a sentence of the report.
+# ===========================================================================
+selftest() {
+  # Global, not local: the EXIT trap runs after this function has returned.
+  ST="$(mktemp -d)" || { echo "pr-spec-comment: cannot create a temporary directory for the self-test" >&2; exit 2; }
+  trap 'rm -rf "$ST"' EXIT
+  export GIT_CEILING_DIRECTORIES="$ST"
+  local CASES=0 HELD=0 CODES=""
+
+  G() { git -C "$1" -c user.email=selftest@example.invalid -c user.name=selftest \
+          -c commit.gpgsign=false "${@:2}"; }
+  # newrepo <name> [bare]: a spec holding R1, tagged `base`. Unless `bare`, also
+  # a classification store, a Stage 5 result and a solver probe, so that every
+  # section of the report is measurable.
+  newrepo() {
+    local R="$ST/$1"
+    mkdir -p "$R/.claude/productizer"
+    G "$R" init --quiet --initial-branch=main
+    printf '# Spec\n\n## Requirements\n\n- **R1** \342\200\224 The tool shall greet.\n' \
+      > "$R/.claude/productizer/spec.md"
+    # The constitution too: spec-diff.sh reads both files, and a missing one
+    # turns its exit into 5 for the whole run.
+    printf '# Constitution\n\n1. Small steps.\n' > "$R/.claude/productizer/constitution.md"
+    if [ "${2:-}" != bare ]; then
+      mkdir -p "$R/.claude/productizer/classifications" "$R/evals"
+      printf 'Intent: seed\nClassification: extend\n' > "$R/.claude/productizer/classifications/0-seed.md"
+      cat > "$R/.claude/productizer/checks-result.json" <<'JSON'
+{"verdict": "PASS", "exit_code": 0,
+ "counts": {"declared": 2, "triggered": 2, "passed": 2, "blocking_failures": 0, "waived": 0,
+            "advisory_failures": 0, "not_triggered": 0, "spec_units_unsatisfied": 0},
+ "checks": [{"id": "lint", "status": "pass"}], "change": {"files": ["src/a.sh"]}}
+JSON
+      printf 'print("  true positives   3")\nprint("  false negatives  0")\nprint("  precision 1.00")\n' \
+        > "$R/evals/solver-probe.py"
+    fi
+    G "$R" add -A
+    G "$R" commit --quiet -m base
+    G "$R" tag base
+  }
+  commit() { G "$1" add -A; G "$1" commit --quiet -m change; }
+
+  drive() { # drive <name> <want> <text> <dir> [args...]
+    local name="$1" want="$2" text="$3" D="$4"; shift 4
+    local got=0
+    ( cd "$D" && bash "$SELF" "$@" ) >"$ST/$name.out" 2>"$ST/$name.err" || got=$?
+    CASES=$((CASES + 1)); CODES="$CODES $got"
+    if [ "$got" = "$want" ] && grep -qF -- "$text" "$ST/$name.out" "$ST/$name.err"; then
+      HELD=$((HELD + 1)); printf '  ok    %-40s exit %s\n' "$name" "$got"
+    else
+      printf '  FAIL  %-40s exit %s (wanted %s and the text: %s)\n' "$name" "$got" "$want" "$text"
+      sed 's/^/          stdout: /' "$ST/$name.out" | head -n 12
+      sed 's/^/          stderr: /' "$ST/$name.err" | head -n 8
+    fi
+  }
+
+  printf 'pr-spec-comment self-test\n\n'
+  local R
+
+  newrepo added; R="$ST/added"
+  printf -- '- **R2** \342\200\224 The tool shall wave.\n' >> "$R/.claude/productizer/spec.md"
+  commit "$R"
+  # shellcheck disable=SC2016  # the backticks are literal markdown in the expected sentence
+  drive requirement-added 0 '| Added | `R2` |' "$R" --base base
+  drive every-section-measured 0 "The store was read" "$R" --base base
+
+  newrepo refined; R="$ST/refined"
+  printf '# Spec\n\n## Requirements\n\n- **R1** \342\200\224 The tool shall greet by name.\n' \
+    > "$R/.claude/productizer/spec.md"
+  commit "$R"
+  # shellcheck disable=SC2016  # the backticks are literal markdown in the expected sentence
+  drive requirement-refined 0 '| Refined (id kept, sentence changed) | `R1` |' "$R" --base base
+
+  newrepo contradict; R="$ST/contradict"
+  printf 'Intent: 7\nClassification: contradict\n' > "$R/.claude/productizer/classifications/7-x.md"
+  commit "$R"
+  drive contradiction-on-top 0 "**YES — 1 of 1 classification record(s)" "$R" --base base
+
+  newrepo unchanged; R="$ST/unchanged"
+  printf 'x\n' > "$R/other.txt"
+  commit "$R"
+  drive nothing-moved 0 "**No requirement moved.**" "$R" --base base
+
+  newrepo partial bare; R="$ST/partial"
+  printf -- '- **R2** \342\200\224 The tool shall wave.\n' >> "$R/.claude/productizer/spec.md"
+  commit "$R"
+  drive no-store-is-partial 5 "> **This report is partial.**" "$R" --base base
+  drive no-checks-result-not-measured 5 "Checks that were never run" "$R" --base base
+  drive base-does-not-resolve 5 "**NOT MEASURED — the base ref does not resolve.**" "$R" --base no-such-ref
+
+  drive post-refused 2 "--post is REFUSED, and deliberately not implemented" "$R" --post
+  drive unknown-option 2 "unknown option: --frobnicate" "$R" --frobnicate
+  mkdir -p "$ST/plain"
+  drive not-a-repository 3 "not a git repository" "$ST" "$ST/plain"
+  drive version 0 "pr-spec-comment 1." "$ST" --version
+
+  printf '\n%s of %s cases held\n' "$HELD" "$CASES"
+  local reached documented
+  reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  documented="$(awk '/^# Exit:/ { f = 1; sub(/^# Exit:/, "#      ") } f && /^#[[:space:]]+[0-9] / { printf "%s ", $2; next } f { exit }' "$SELF" | sed 's/  *$//')"
+  printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
+  printf '    NOT ASSERTED: an id that VANISHED; a Superseded or Withdrawn annotation; an unreadable classification record; a malformed checks-result.json; a probe that exits non-zero or prints no counts; the change-set cap of five paths; exit 3 for an unusable spec-diff.sh; a repository with no constitution.md (measured 2026-10-10: spec-diff.sh then exits 5 for the run and this report says spec.md has no baseline, which misattributes the constitution'"'"'s absence to the spec - reported, not fixed here).\n'
+  [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
+  [ "$HELD" -eq "$CASES" ] || return 1
+  return 0
+}
+
+if [ "$SELFTEST" -eq 1 ]; then
+  ST_RC=0
+  selftest || ST_RC=$?
+  exit "$ST_RC"
+fi
 
 [ -n "$ROOT" ] || ROOT="."
 cd "$ROOT" || { echo "pr-spec-comment: no such directory: $ROOT" >&2; exit 3; }

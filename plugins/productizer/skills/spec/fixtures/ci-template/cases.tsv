@@ -1,0 +1,20 @@
+# cases.tsv - three TAB-separated fields: fixture file, expected exit, a sentence the
+# output must contain. Each violation fixture is good.yml with ONE change, so a
+# finding here can only come from that change.
+good.yml	0	every assertion held
+push-trigger.yml	1	the only trigger must be workflow_dispatch; found push, workflow_dispatch
+pull-request-target.yml	1	pull_request_target appears in the workflow
+top-level-write.yml	1	must be exactly contents: read; found {'contents': 'write'}
+write-in-prepare.yml	1	jobs.prepare.permissions: write on contents outside the deliver job
+agent-job-write.yml	1	the agent job holds write on id-token
+agent-checkout-credentials.yml	1	checkout in the agent job must set persist-credentials: false
+unpinned-uses.yml	1	not pinned to a full commit id: actions/checkout@v4
+event-in-run.yml	1	an expression is interpolated into the script: ${{ github.event.
+inputs-in-run.yml	1	an expression is interpolated into the script: ${{ inputs.
+continue-on-error.yml	1	continue-on-error turns a failed step green
+or-true.yml	1	|| true hides a failure
+devnull.yml	1	2>/dev/null hides a failure
+bypass-in-args.yml	1	bypassPermissions appears outside a comment
+permissions-input-missing.yml	1	no permissions input; the dispatching person has no way to narrow
+permissions-not-choice.yml	1	must be type choice, not 'string'
+permissions-default-widened.yml	1	default must be repo-settings; found 'anything-goes'

@@ -384,13 +384,18 @@ jobs:
         # `req-trailer.sh` is here for that same reason. It is a library the
         # `dangling-citations` check calls and names only in `requires`, so
         # until its self-test is named here it is outside R39 and R40 too.
+        # `spec-diff.sh` and `pr-spec-comment.sh` joined in v4.67.0 for the
+        # same reason: the copyable CI template runs both, through
+        # `build-dispatch.sh`, and neither was named in either file before.
         run: |
           set -euo pipefail
           python3 evals/check-hard-corpus.py --selftest
           python3 evals/check-mech-corpus.py --selftest
           python3 evals/solver-probe.py --selftest
+          python3 plugins/productizer/skills/spec/scripts/check-ci-template.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
           bash plugins/productizer/skills/help/scripts/list-commands.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/build-dispatch.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-requirement-index.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-release-notes.sh --selftest
@@ -426,9 +431,11 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/classify-change-risk.sh --selftest
           bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh --selftest
           bash plugins/productizer/skills/spec/scripts/measure-check-underfire.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/pr-spec-comment.sh --selftest
           bash plugins/productizer/skills/spec/scripts/req-trailer.sh --selftest
           bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
           bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/spec-diff.sh --selftest
           bash plugins/productizer/skills/spec/scripts/spec-doctor.sh --selftest
           bash plugins/productizer/skills/spec/scripts/spec-requirements.sh --selftest
           bash plugins/productizer/skills/spec/scripts/stage-advance.sh --selftest

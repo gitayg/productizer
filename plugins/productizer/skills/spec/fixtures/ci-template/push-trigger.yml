@@ -1,0 +1,54 @@
+# Fixture for check-ci-template.py: good.yml with ONE violation - push-trigger.
+name: fixture
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      issue:
+        type: number
+        required: true
+      permissions:
+        type: choice
+        default: repo-settings
+        options:
+          - repo-settings
+          - edits-only
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          set -euo pipefail
+          echo "issue $ISSUE"
+  generate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        with:
+          github_token: ${{ github.token }}
+          prompt: fixed text
+  deliver:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: echo deliver

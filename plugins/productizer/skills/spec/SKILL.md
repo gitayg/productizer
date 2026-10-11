@@ -409,6 +409,7 @@ spans several repos, and what breaks when it is split:
 | The queue in front of intake | `references/backlog.md` |
 | Onboarding an existing repo, end to end | `references/onboarding.md` |
 | The spec diff handed to Build | `references/build-diff.md` |
+| Building from the spec in CI, unattended (optional template) | `references/ci-build.md` |
 | The normative spec grammar | `references/format-spec.md` |
 | Evidence and judgment, split | `references/signals.md` |
 | Requirement-to-commit traceability | `references/traceability.md` |
@@ -445,7 +446,9 @@ contract before wiring one into a gate.
 | `scripts/score.sh` | judgment over signals, keyed to their hash | 0 scored · 1 crash · 2 usage · 3 refused |
 | `scripts/req-trailer.sh` | `Productizer-Req:` provenance, orphans, coverage | 0 · 2 no spec · 3 findings · 4 cannot determine |
 | `scripts/check-citations.sh` | a citation this change ADDS that resolves to no requirement, and a new citation of a superseded one; advisory | 0 · 1 findings · 2 refused |
-| `scripts/stage-advance.sh` | may this work item's stage move, on this change's evidence; call it before any tracker move | 0 allowed · 1 produced nothing · 2 usage · 3 forbidden path · 4 cannot determine · 5 not forward |
+| `scripts/stage-advance.sh` | may this work item's stage move, on this change's evidence, judged on the paths git applies; call it before any tracker move | 0 allowed · 1 produced nothing · 2 usage · 3 forbidden path · 4 cannot determine · 5 not forward |
+| `scripts/build-dispatch.sh` | both ends of an unattended run in the copyable CI template: `prepare` before the model, `deliver` a draft PR after it | 0 · 2 usage · 3 repo not readable as needed · 4 spec unchanged · 5 no plan committed · 6 refused by stage-advance.sh · 7 delivery failed |
+| `scripts/check-ci-template.py` | the CI template's seven static safety properties, on the YAML itself | 0 · 1 findings · 2 could not run |
 | `scripts/retrieval-budget.sh` | retrieval regression, deterministic | 0 in band · 4 out of band · 5 no baseline |
 | `scripts/ab-harness.sh` | same model, with the process and without | 0 · 2 usage · 3 no arms · 5 no runs · 6 arm incomplete · 7 did not complete |
 | `scripts/stage-snapshot.sh` | what a stage produced before a human touched it | 0 · 1 exists · 2 usage · 3 no dir · 5 no snapshot · 6 artifact gone · 7 no delta · 8 produced nothing |
@@ -463,7 +466,7 @@ a PR. Repo copies in `.claude/productizer/templates/` win over these.
 | 0c · import | `import.md` |
 | 1 · intent | `backlog.md` `intent.md` `jira-intent.md` |
 | 2 · design | `intake.md` `spec-delta.md` `spec-command.md` `ruling.md` |
-| 3 · build | `plan.md` |
+| 3 · build | `plan.md` `build-from-spec.yml` |
 | 4 · test | `verification-section.md` `agent-verifier.md` `agent-evals.yml` `threshold.sh` |
 | 5 · checks | `checks.yaml` |
 | 6 · deploy | `agent-reviewer.md` `production-gate.sh` `triage-step.yml` `SKILL-secure-api-review.md` |

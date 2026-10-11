@@ -172,7 +172,7 @@ inside an AI coding agent, where the halt actually lands on the thing writing th
 code.
 
 Requirement ids are permanent. Nothing is deleted; a replaced requirement is
-marked `Superseded by R58.` and keeps its original text, because plans, tests,
+marked `Superseded by R0.` and keeps its original text, because plans, tests,
 review findings and PR titles all cite these ids, and a reused id redirects every
 one of those citations silently. BMAD holds the same rule in nearly the same
 words, so this is table stakes done properly rather than a differentiator — but
@@ -772,16 +772,16 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Fifty-one requirements are active**, and they are the whole of what has been
-agreed.
+**Fifty-eight requirements are active**, and they are the whole of what has
+been agreed.
 
-Six more are superseded and none withdrawn, and neither kind is listed here.
+Seven more are superseded and none withdrawn, and neither kind is listed here.
 The spec keeps both forever with their text intact, so a citation written two
 years ago still leads somewhere — but a guide is read by someone deciding what
 to do next, and a superseded sentence gives them no sign it stopped being
 true.
 
-**Always, with no trigger.** Eight requirements hold whatever else is
+**Always, with no trigger.** Eleven requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -798,8 +798,14 @@ happening:
   touches.
 - **R57** — Every reviewer agent shall be granted no tool that can write a
   file.
+- **R61** — Every pull request an unattended run opens shall name the run that
+  opened it.
+- **R62** — Every unattended agent step shall run without a token that can
+  write to the repository.
+- **R65** — Every unattended agent step shall run with no permission beyond
+  what the repository's committed agent settings grant.
 
-**When something arrives.** Twelve things happen on a discrete trigger:
+**When something arrives.** Fifteen things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -826,6 +832,12 @@ happening:
   tree, the lifecycle shall report which declaration moved and what it was.
 - **R49** — When a published view draws a state, the lifecycle shall make that
   state distinguishable from every other state without colour.
+- **R58** — When the Build stage starts, the lifecycle shall hand it the
+  spec's diff against the base it builds from.
+- **R59** — When an unattended run produces a change, the lifecycle shall
+  deliver it as a draft pull request.
+- **R64** — When an unattended run's change has been committed, the lifecycle
+  shall push nothing until a decision made on that commit allows it.
 
 **For as long as a state lasts.** Four requirements are true for the duration
 of a state, not at a moment inside it:
@@ -839,7 +851,7 @@ of a state, not at a moment inside it:
 - **R45** — While a change's risk tier is reported, the lifecycle shall report
   that change's complexity as unmeasured.
 
-**When something goes wrong.** Twenty-three defences, written as `If … then`
+**When something goes wrong.** Twenty-four defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -889,8 +901,12 @@ because a designed path and a defended one are not the same thing:
   bookkeeping, then the lifecycle shall not advance that work's stage.
 - **R55** — If a stage advance would move work to a stage at or before its
   current stage, then the lifecycle shall refuse it.
-- **R56** — If a stage run changed a path its target stage does not permit,
-  then the lifecycle shall refuse to deliver that change.
+- **R60** — If an unattended run would write to the default branch, then the
+  lifecycle shall refuse to write it.
+- **R63** — If a stage run changed a path its target stage does not permit, or
+  a path that decides what CI runs, what an agent is told or allowed, or how
+  git treats a path, then the lifecycle shall refuse to deliver that change,
+  judging the paths git applies rather than the text of the patch.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

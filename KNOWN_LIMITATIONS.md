@@ -316,15 +316,16 @@ remedy is the `<!-- EXAMPLE:BEGIN -->` marker the check already honours, and
 nothing in this repository is wrapped in one yet (B101). The reading of the 92
 is a judgement, not a measurement.
 
-### 12 · `stage-advance.sh` has no caller
+### 12 · `stage-advance.sh` has one caller, and it is not a tracker
 
 It decides whether a work item's stage may move, and `references/integrations.md`
-says every tracker move goes through it first. Nothing here does: no hook,
-workflow step or script invokes it, so a stage can still move on a run that
-produced nothing. `stage-advance-guard` runs its self-test, which proves the
-decider, not that anyone asks it. Searched 2026-10-10: outside its own file it
-is named only in documentation, the spec, the backlog and the self-test lines of
-`checks.yaml` and the workflow.
+says every tracker move goes through it first. Since v4.67.0 one thing does
+call it: `build-dispatch.sh deliver`, in the copyable CI template, asks it
+before delivering an unattended run's patch, and again on the commit it made. No tracker move, label or hook
+calls it, so a ticket's stage can still move on a run that produced nothing.
+`stage-advance-guard` runs its self-test, which proves the decider, not that
+anyone asks it. Searched 2026-10-10: outside its own file it is invoked only by
+`build-dispatch.sh` and the self-test lines of `checks.yaml` and the workflow.
 
 ### 13 · `/productizer:spec-review` Part B is unmeasured
 
@@ -334,3 +335,50 @@ by hand over this spec (B102), so what Part B finds, misses and invents is not
 known. R57 holds that a reviewer agent is granted no tool that can write a
 file, and `check-frontmatter.py` asserts it on the frontmatter `name` only. A
 reviewer that writes through Bash or an MCP tool passes.
+
+### 14 · The CI build template has never run end to end
+
+`templates/build-from-spec.yml` runs a stage unattended in an adopter's
+repository. It has **never run on GitHub**: this repository is public, holds no
+model secrets, and a run costs model spend. What is measured is its static
+properties (`check-ci-template.py`, 9 of 9) and both ends of
+`build-dispatch.sh` against local repositories, with `gh` stubbed and origin a
+local bare repository (52 of 52). Not measured: the action itself, a real
+`gh`, that a draft stays a draft, and that the workflow calls the script the
+way the self-test does. A pull request it opens with the workflow's
+`GITHUB_TOKEN` does not start the adopter's `pull_request` checks - GitHub's
+rule, quoted in `references/ci-build.md`, not measured here.
+
+### 15 · The paths `stage-advance.sh` refuses are a list, not a proof
+
+Since 1.1 it judges the paths git applies rather than the patch's text, and
+refuses by default everything under `.github/` and `.claude/` and a named set of
+files that steer CI or an agent - CLAUDE.md, AGENTS.md, `.mcp.json`,
+`.gitattributes`, `.gitmodules`, hook managers and others. Its own self-test
+says what it still allows: a Unicode-normalisation variant of a forbidden path,
+and a gitlink or a symlink at an allowed path. Nothing shows the list is
+complete (B114).
+
+The same default-deny refuses a design move that writes
+`.claude/productizer/` files such as `requirement-index.md`, which this
+repository's own design commits do. Which of those a design stage may write is
+undecided (B112).
+
+The 1.0 this replaced judged a patch by its `diff --git` headers, and git
+writes other paths than those: nine reproductions had it allow a patch while git
+wrote a workflow or `checks.yaml`. That version is in v4.66.0 (f1f44f3), which
+was never pushed.
+
+### 16 · Whether the action honours committed permissions is unmeasured
+
+The CI template gives the agent the repository's committed Claude Code settings
+and lets the dispatcher narrow them, never widen them (R65). Measured locally on
+2026-10-10, `claude -p` 2.1.295 in a workspace it had not been told to trust
+**ignored** a committed `permissions.allow` entry and a committed
+`defaultMode: bypassPermissions`, while it honoured committed deny rules and a
+committed `defaultMode: acceptEdits` (`references/ci-build.md`). The action runs
+the Agent SDK, not `claude -p`. If it behaves the same, build mode cannot run
+the repository's tests under the default option. Not measured on a runner: this
+repository holds no model secrets, a run costs model spend, and trust state
+lives in the user's own Claude Code configuration in their home directory,
+outside any repository (B113).

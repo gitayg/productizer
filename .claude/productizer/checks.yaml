@@ -1887,17 +1887,26 @@ checks:
 
   # --- a stage that moves on nothing, backwards, or over its own rules --------
   #
-  # B91, R54-R56. Adapted from the forward-only, rank-gated status advance in the
+  # B91, R54, R55 and R63 (which superseded R56 in v4.67.0, B110). Adapted from the forward-only, rank-gated status advance in the
   # AI Unified Process (Apache-2.0, by Simon Martinelli); no code is copied. The
   # forbidden-path rule is this repository's own.
   #
   # DECLARED AS ITS SELF-TEST, the way solver-corpus declares
   # contradiction-check.py's: the guard is a pure decider over one stage move,
   # and no change to this repository IS a stage move, so the verdict a commit
-  # can return is whether the decider still decides correctly. NOTHING CALLS IT
-  # YET. No tracker move in this repository invokes stage-advance.sh, so
-  # R54-R56 are Covered as properties of the tool and not yet as a step anybody
-  # takes (B91).
+  # can return is whether the decider still decides correctly. ONE CALLER, AND
+  # IT IS NOT A TRACKER: since v4.67.0 build-dispatch.sh asks it before
+  # delivering an unattended run's patch. No tracker move invokes it, so for a
+  # ticket R54, R55 and R63 are Covered as properties of the tool and not yet
+  # as a step anybody takes (B91).
+  #
+  # 1.1 IS A SECURITY FIX (B110). 1.0 read the changed paths out of the patch's
+  # `diff --git` headers with awk, and git writes the paths it APPLIES: nine
+  # reproductions had 1.0 allow a patch while git wrote a workflow or
+  # checks.yaml. 1.1 applies the patch to a scratch index and reads git's own
+  # answer, and refuses `.github/**`, `.claude/**` and the other files that
+  # steer CI or an agent by default. The broken 1.0 is in v4.66.0 (f1f44f3),
+  # which was never pushed.
   - id: stage-advance-guard
     why: a stage that moves on a run that produced nothing, backwards, or over a change to the rules it is judged by is a status that lies, and every tracker move reads it
     when:
@@ -1932,15 +1941,165 @@ checks:
             Exit 5, NOT A FORWARD MOVE: the `backward-move`, `same-stage` and `order-from-config`
             cases exit 5, the last reading the stage order from config.json rather than from the
             script.
-        - id: R56
+        - id: R63
           verdict: Covered
           evidence: >-
-            Exit 3, FORBIDDEN PATH: the `workflow-forbidden`, `build-mode-spec-forbidden` and
-            `plan-mode-code-forbidden` cases exit 3, and `build-mode-code-allowed` exits 0, so the
-            rule is not refusing everything.
+            Exit 3, FORBIDDEN PATH, judged on the paths git applies: the `diff-*` cases exit 3 on
+            patches whose headers name an allowed file while git writes a workflow or checks.yaml,
+            a renamed path among them (`diff-header-names-differ`, `diff-rename-into-forbidden`);
+            the `rule-*` cases exit 3 on a composite action, agent, command and skill
+            definitions, CLAUDE.md at any depth, .mcp.json, .gitattributes, config.json and case
+            variants such as `.GitHub/workflows`; `workflow-forbidden`,
+            `build-mode-spec-forbidden` and `plan-mode-code-forbidden` still exit 3, and
+            `backlog-allowed` and `build-mode-code-allowed` exit 0, so the rule is not refusing
+            everything. 69 cases.
     limitations:
-      - Nothing calls it. No tracker move, label or workflow in this repository invokes stage-advance.sh, so a stage can still move without it.
-      - Renamed paths in a patch, and a stage other than design or build with evidence of its own, are driven by no case.
+      - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
+      - The forbidden set is a list, not a proof. A Unicode-normalisation variant of a forbidden path, and a gitlink or a symlink at an allowed path, are allowed (B114).
+      - Default-deny over `.claude/**` also refuses a design move that touches `.claude/productizer/` files such as requirement-index.md, as this repository's own design commits do. Which of those a design stage may write is undecided (B112).
+      - A stage other than design or build with evidence of its own is driven by no case.
+
+  # --- the two ends of an unattended run -----------------------------------
+  #
+  # B93, R58-R62 and R64; B111, R65. templates/build-from-spec.yml is a workflow an adopter copies
+  # into their own repository; it runs one stage with no person at the
+  # keyboard. Adapted from the AI Unified Process generate workflow
+  # (Apache-2.0, by Simon Martinelli); no code is copied. The maintainer ruled
+  # on 2026-10-10 that the person who dispatches the run is the decision, and
+  # that its pull request is always a draft.
+  #
+  # TWO CHECKS, BECAUSE THE GUARANTEES LIVE IN TWO PLACES. What happens on
+  # either side of the model is shell in build-dispatch.sh, proven by its
+  # self-test against local repositories with gh stubbed. What the model's job
+  # may hold is YAML, and one edit to the YAML removes it while every script
+  # stays green, so check-ci-template.py reads the template itself. Neither
+  # runs GitHub: the template has never run end to end (B93).
+  - id: build-dispatch
+    why: the two ends of an unattended run - no model when the spec is unchanged, and nothing delivered but a draft pull request from a new branch after stage-advance.sh allowed it - would otherwise be untested shell inside a workflow
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/build-dispatch.sh, git, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/build-dispatch.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/build-dispatch.sh, --selftest]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the effect it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of [0-9]+ cases held'
+      min_covered: 1
+      spec_units:
+        - id: R58
+          verdict: Partial
+          reason: >-
+            Asserted for the UNATTENDED path only - the copyable template. A Build stage a person
+            starts in a session is handed the diff by spec-diff.sh when the skill tells the agent
+            to run it, and nothing asserts that it was run. Nor that the workflow calls this script
+            the way the cases do.
+          evidence: >-
+            `prepare-plan` and `plan-data-has-fenced-diff` - prepare writes the spec's diff
+            against the base as a fenced PRODUCTIZER-SPEC-DIFF block in the data file the agent
+            reads; `plan-base-is-parent-of-spec-change` - the base is the parent of the spec
+            change; `prepare-unchanged` - an unchanged spec exits 4 before any model is called.
+        - id: R59
+          verdict: Covered
+          evidence: >-
+            `deliver-build` and `gh-asked-for-a-draft` - the patch is committed to a new branch,
+            pushed, and `gh pr create` is given --draft. Falsified 2026-10-10 on a copy with
+            --draft removed: 32 of 33, `FAIL gh-asked-for-a-draft`.
+        - id: R60
+          verdict: Covered
+          evidence: >-
+            `default-branch-untouched` - origin's default branch did not move, and
+            `pushed-the-run-branch` - only productizer/<mode>-<issue>-<run> was pushed, by an
+            explicit refspec; `prepare-not-tip` - a HEAD that is not the tip of the default branch
+            exits 3 before anything is written.
+        - id: R61
+          verdict: Covered
+          evidence: >-
+            `body-names-the-run` and `dry-run-body-names-run` - the pull request body says
+            `Productizer-Run: <run id>`; the commit carries the same trailer; `deliver-bad-run-id`
+            - a run id that is not id-shaped exits 2.
+        - id: R64
+          verdict: Covered
+          evidence: >-
+            `deliver-recheck-on-commit` - after committing, deliver asks stage-advance.sh again with
+            --base the tip and --head the commit git made, and exits 6 on a commit carrying a
+            workflow; `recheck-pushed-nothing`, `recheck-deleted-the-branch` and
+            `recheck-called-no-gh` - origin gained no branch, none was left, gh was never called.
+            Falsified 2026-10-10 on a copy with the second call replaced by `true`: 47 of 52, those
+            five red.
+        - id: R65
+          verdict: Partial
+          reason: >-
+            The CLI's real enforcement inside the action is not exercised. Locally `claude -p`
+            ignored committed allow rules and a committed bypass in an untrusted workspace; whether
+            the action does is unmeasured (B113). One addition is made, and stated: with no
+            committed defaultMode, `--permission-mode acceptEdits` is added, because a run with no
+            mode was measured denying every write; the mode admits edits only.
+          evidence: >-
+            The exact agent arguments per option: `repo-settings-no-mode-adds-accept-edits`,
+            `owner-mode-passes-no-flag`, `edits-only-denies-bash`, `owner-mode-edits-only-narrows`;
+            an owner's committed bypass is warned about and never written into the arguments
+            (`prepare-owner-bypass-warned`, `owner-bypass-not-produced`); and the
+            `no-args-file-ever-says-bypass` sweep finds bypassPermissions in no arguments file any
+            case produced.
+    limitations:
+      - The real gh, a real GitHub and the action itself are never exercised. gh is a stub and origin is a local bare repository.
+      - That the workflow template calls this script the way the cases do is not asserted.
+
+  - id: ci-template-safe
+    why: the template runs a model in other people's repositories with their secrets, and one edit to its YAML removes a guarantee while every script stays green
+    when:
+      always: true
+    severity: block
+    requires: [python3]
+    version_command: [python3, ./plugins/productizer/skills/spec/scripts/check-ci-template.py, --version]
+    mode: batch
+    command: [python3, ./plugins/productizer/skills/spec/scripts/check-ci-template.py]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # at least one of the nine assertions does not hold on the template
+      refused: [2]     # usage, or a template that could not be read or parsed
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 9 assertions held'
+      min_covered: 1
+      spec_units:
+        - id: R62
+          verdict: Partial
+          reason: >-
+            Static only: it reads the YAML and never runs GitHub. A token reaching the agent
+            another way - an environment secret, a reusable workflow's own permissions, or the
+            action minting one - is not seen.
+          evidence: >-
+            The `agent-job` assertion: the job running anthropics/claude-code-action grants no
+            write permission on any scope, id-token included, and every checkout in it sets
+            persist-credentials false. Fixtures agent-job-write.yml and
+            agent-checkout-credentials.yml; 22 self-test cases over exit codes 0 1 2. Falsified
+            2026-10-10 on a copy with the agent job's contents read turned to write: rc 1, 5 of 7
+            (the checker had seven assertions then).
+        - id: R65
+          verdict: Partial
+          reason: >-
+            Static only, and about the workflow's text: what each permissions option adds to the
+            agent's arguments is build-dispatch.sh's, asserted there, and the CLI's enforcement
+            inside the action is not measured here.
+          evidence: >-
+            `no-bypass` - neither bypassPermissions nor --dangerously-skip-permissions appears in
+            the workflow outside comments; `perms-input` - workflow_dispatch has a `permissions`
+            input of type choice, default `repo-settings`, options only repo-settings and
+            edits-only. The workflow admits only four flag shapes into the agent's arguments.
+            Fixtures bypass-in-args.yml, permissions-input-missing.yml, permissions-not-choice.yml
+            and permissions-default-widened.yml each exit 1.
+    limitations:
+      - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
+      - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.
 
   # --- a self-test that exists, and a self-test that runs ---------------------
   #

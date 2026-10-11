@@ -48,7 +48,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.66.0"`.
+`plugin.json` sets `"version": "4.67.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -270,6 +270,17 @@ repository's own history a finding has never once been a real citation: 92
 findings over 25 of 109 commits, all example ids. Wrap a worked example in an
 `<!-- EXAMPLE:BEGIN -->` / `<!-- EXAMPLE:END -->` block and its ids are listed,
 not resolved.
+
+### Building from the spec in CI (optional)
+
+`templates/build-from-spec.yml` is a workflow you copy into your own
+repository to run the plan or build stage unattended. A person dispatches it, it
+runs only from the default branch, and its only output is a **draft** pull
+request from a new branch; the job running the model holds no write token, and
+the model runs with your repository's committed Claude Code settings, which a
+`permissions` input can only narrow - never `bypassPermissions` unless you
+commit it yourself. It has never run end to end on GitHub. See `references/ci-build.md` before
+adopting it, starting with pinning `PRODUCTIZER_SHA`.
 
 ### Reporting a change on its pull request
 

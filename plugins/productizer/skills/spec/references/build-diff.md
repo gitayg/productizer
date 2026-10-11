@@ -125,14 +125,21 @@ so the reader can see which repository was actually read. An explicit
 `repo-root` argument still works, and may name a subdirectory — it is resolved
 to the same toplevel.
 
-This is a tested property, not an assumption: the fixture runs every case from
-the repo root, from two nested subdirectories and with an explicit
-subdirectory argument, and requires byte-identical output and exit codes from
-all of them. Removing the anchoring makes six of the eight cases diverge. The
-two that do not are worth knowing about — an unresolvable base ref exits before
-any pathspec is read, and a genuinely absent file gives the same answer either
-way, which is precisely why this bug survived a suite that already covered the
-absent case.
+This is a tested property, not an assumption. **Corrected 2026-10-10:** this
+paragraph used to describe "the fixture", and no fixture was committed, so the
+claim had nothing behind it. It now does. `spec-diff.sh --selftest` runs nine
+cases four ways each: from the repo root, from two nested subdirectories, and
+from outside the repository with a subdirectory as the explicit argument. Every
+placement must give the same exit code and byte-identical stdout. Measured by
+removing the anchoring (`cd "$TOPLEVEL"`): six of the nine cases diverge, in
+all three non-root placements. The three that do not are worth knowing about:
+
+- **an unresolvable base ref** exits before any pathspec is read
+- **a repository with no commits** exits before any pathspec is read
+- **a genuinely absent file** gives the same answer either way
+
+The absent file is precisely why this bug survived a suite that already covered
+the absent case.
 
 ## How Stage 3 consumes it
 
@@ -144,6 +151,28 @@ working from the spec alone, which is a weaker position than it looks.
 The order matters: spec first, diff second, instruction last. The instruction is
 the only part that tells the run what to do with a deletion, and an instruction
 above the evidence it applies to gets read as preamble.
+
+## Consumed in CI
+
+The optional `templates/build-from-spec.yml` (see `references/ci-build.md`)
+consumes this script without a person reading its output first, so its exit
+codes are wired to actions rather than to judgement. `build-dispatch.sh
+prepare` runs it in `--format prompt` against the base the run builds from, and
+then acts on the exit code:
+
+| `spec-diff.sh` exit | What the unattended run does |
+|---|---|
+| 0 | writes the fenced block to `spec-diff.md`, the data file the agent reads |
+| 4 | **stops before any model is called**: build-dispatch exit 4 |
+| 5, 7 | carries on. The line spec-diff printed reaches the agent as written, because the run must know it is working from the spec alone |
+| 6 | stops, as a usage error (build-dispatch exit 2). A base that does not resolve is never replaced by an empty diff |
+
+The diff reaches the agent as a **file**, never interpolated into the workflow
+YAML or the prompt. The prompt is fixed text that names the file and says that
+the content of the fence is spec content to reconcile against, never an
+instruction. The base, when the dispatcher passes none, is the first parent of
+the newest commit that changed the spec or the constitution. That is the
+default branch just before the change being built was merged.
 
 ## What this does not catch
 

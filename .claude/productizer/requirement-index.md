@@ -81,6 +81,14 @@ marker, because a table left there would be one nothing writes or checks.
 | R53 | unwanted | active | `dangling-citations` |
 | R54 | unwanted | active | `stage-advance-guard` |
 | R55 | unwanted | active | `stage-advance-guard` |
-| R56 | unwanted | active | `stage-advance-guard` |
+| R56 | unwanted | superseded by R63 | `stage-advance-guard` |
 | R57 | ubiquitous | active | `template-frontmatter` |
+| R58 | event | active | `build-dispatch` |
+| R59 | event | active | `build-dispatch` |
+| R60 | unwanted | active | `build-dispatch` |
+| R61 | ubiquitous | active | `build-dispatch` |
+| R62 | ubiquitous | active | `ci-template-safe` |
+| R63 | unwanted | active | `stage-advance-guard` |
+| R64 | event | active | `build-dispatch` |
+| R65 | ubiquitous | active | `ci-template-safe` |
 <!-- productizer:requirement-index:end -->

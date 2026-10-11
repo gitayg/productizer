@@ -27,14 +27,36 @@
 #        .claude/productizer/checks-result.json  (run-checks.sh output)
 #        .claude/productizer/classifications/**  (record-classification.sh)
 #   5  NOT A FORWARD MOVE. --to is at or before --from in the stage order.
-#   3  FORBIDDEN PATH. The change touches a path the target stage may not:
-#        any mode   .github/workflows/**  .claude/hooks/**
-#                   .claude/settings*.json  .claude/productizer/checks.yaml
-#                   .claude/productizer/calibration.yaml
-#                   .claude/productizer/constitution.md
+#   3  FORBIDDEN PATH. The change touches a path the target stage may not.
+#      THE FORBIDDEN SET lives in one function, forbidden_any_mode(), and is
+#      matched on the path LOWER-CASED, so a case variant that a
+#      case-insensitive checkout would fold onto a rule file is refused too:
+#        any mode   .github/**             every workflow, composite action,
+#                                          CODEOWNERS, dependabot: all of it
+#                   .claude/**             DEFAULT-DENY: settings, hooks,
+#                                          agents, commands, skills, and every
+#                                          rule under .claude/productizer
+#                                          (checks.yaml, calibration.yaml,
+#                                          constitution.md, config.json, ...)
+#                                          EXCEPT the bookkeeping below,
+#                                          .claude/productizer/backlog.md, and
+#                                          the spec outside build mode
+#                   */.claude/**           a nested .claude directory, no
+#                                          exceptions
+#                   CLAUDE.md CLAUDE.local.md AGENTS.md .mcp.json
+#                   .gitattributes .gitmodules   at any depth
+#                   .git/**  .husky/**  .githooks/**  .pre-commit-config.yaml
+#                   lefthook.yml  .lefthook.yml  lefthook-local.yml
+#                   .lefthook-local.yml  CODEOWNERS  docs/CODEOWNERS
+#                   REVIEW.md  .productizer-run/**  .productizer-tools/**
 #        build mode also the spec (config.json spec.path)
 #        plan mode  anything but the plan file, <artifacts.path>/plan.md
 #                   (bookkeeping stays allowed; it is nothing, not a change)
+#      These are the files that decide what CI runs, what an agent is told and
+#      allowed, how git treats a path, and what the run is judged by. A stage
+#      run is the wrong actor to edit any of them. An artifacts.path under
+#      .claude/ or .github/ therefore cannot hold a plan an unattended run may
+#      write: the any-mode set is checked first.
 #
 # STAGE ORDER is the key order of `github.issues.stage_labels` in
 # .claude/productizer/config.json; a STAGE may be given as the key (`build`) or
@@ -56,13 +78,22 @@
 #   done    merge is not visible in a patch or a diff between two refs.
 #   other   (test, or a stage a config adds) any non-bookkeeping path.
 #
-# INPUT. --patch FILE reads the `diff --git` headers of a patch (a quoted or
-# undecodable header is exit 4, never a guess). --base REF reads
-# `git diff --name-status --no-renames BASE...HEAD`: the same set as
-# `--name-only`, with deletions marked, so a deleted plan.md is not evidence.
-# For design with --patch, the spec's base and head are rebuilt by applying the
-# patch to a copy of the working-tree spec in a temporary repository, forward
-# if it applies, else in reverse if it is already applied, else exit 4.
+# INPUT. The patch text is never parsed here. --patch FILE is APPLIED BY GIT
+# ITSELF, `git apply --cached --binary`, to a scratch index read from HEAD's
+# tree, forward if it applies, else in reverse if it is already applied, else
+# exit 4. New objects go to a temporary object directory, so the repository is
+# not written. The changed paths are then git's own
+# `git diff-tree -r -z --name-status --no-renames` between the two trees: the
+# paths judged are the paths `git apply --index` writes, with a rename's old
+# side as a deletion, and a section git applies but a header reader would skip
+# (a traditional `---`/`+++` section, a CRLF or tab-suffixed name, hunk
+# headers naming another file than `diff --git`) is judged like any other.
+# --base REF reads `git diff --name-status --no-renames -z BASE...HEAD`. In
+# both, deletions are marked, so a deleted plan.md is not evidence, and a path
+# holding a control character (newline, tab, carriage return) is exit 4, never
+# a guess. --patch needs a repository with a HEAD commit to apply against.
+# For design with --patch, the spec's base and head are read from the two
+# trees the patch was applied between.
 #
 # OUTPUT. On exit 0, the evidence paths, one per line, on stdout. The reason,
 # on every exit, on stderr. --format json prints one object on stdout for
@@ -79,7 +110,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.0"
+VERSION="stage-advance 1.1"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -274,9 +305,106 @@ JSON
   drive plan-deleted-not-evidence 1 "no plan.md under docs/sdlc/<slug> is in this change" \
     "$R" --from design --to build --mode plan --patch "$WORK/delete.patch"
 
-  printf 'diff --git "a/sp ace\\t.sh" "b/sp ace\\t.sh"\nindex 1..2 100644\n' > "$WORK/quoted.patch"
-  drive quoted-header 4 "cannot decode the patch header" \
+  printf 'diff --git "a/sp ace\\t.sh" "b/sp ace\\t.sh"\nnew file mode 100644\n--- /dev/null\n+++ "b/sp ace\\t.sh"\n@@ -0,0 +1 @@\n+x\n' > "$WORK/quoted.patch"
+  drive quoted-path-with-tab 4 "holds a control character" \
     "$R" --from design --to build --mode build --patch "$WORK/quoted.patch"
+  printf 'diff --git "a/sp ace\\t.sh" "b/sp ace\\t.sh"\nindex 1..2 100644\n' > "$WORK/garbage.patch"
+  drive patch-git-cannot-apply 4 "applies the patch to HEAD neither forward nor in reverse" \
+    "$R" --from design --to build --mode build --patch "$WORK/garbage.patch"
+
+  # --- THE PARSER DIFFERENTIAL. Each patch below was accepted (exit 0) by the
+  # header-reading parser of stage-advance 1.0 while `git apply --index` wrote
+  # the forbidden path. The paths judged now are the paths git writes.
+  newrepo diff; R="$WORK/diff"
+  mkdir -p "$R/.github/workflows" "$R/docs/sdlc/greet"
+  printf 'on: push\n' > "$R/.github/workflows/ci.yml"
+  printf 'checks: []\n' > "$R/.claude/productizer/checks.yaml"
+  commit "$R"
+  local wf_mod='--- a/.github/workflows/ci.yml\n+++ b/.github/workflows/ci.yml\n@@ -1 +1 @@\n-on: push\n+on: pull_request_target\n'
+  # shellcheck disable=SC2059  # the format strings are the patch fixtures
+  {
+    printf 'diff --git a/src/app.sh b/.github/workflows/x.yml\n--- a/src/app.sh\n+++ b/.github/workflows/x.yml\n@@ -1 +1 @@\n-echo hi\n+on: push\n' > "$WORK/d-names.patch"
+    printf "diff --git a/src/app.sh b/src/app.sh\n$wf_mod" > "$WORK/d-hunk-names.patch"
+    printf "diff --git a/src/app.sh b/src/app.sh\n--- a/src/app.sh\n+++ b/src/app.sh\n@@ -1 +1 @@\n-echo hi\n+echo bye\n$wf_mod" > "$WORK/d-traditional.patch"
+    printf 'diff --git a/src/app.sh b/.claude/productizer/checks.yaml\r\n--- a/.claude/productizer/checks.yaml\r\n+++ b/.claude/productizer/checks.yaml\r\n@@ -1 +1 @@\n-checks: []\n+checks: [x]\n' > "$WORK/d-crlf.patch"
+    printf 'diff --git a/src/app.sh b/.claude/productizer/checks.yaml\n--- a/.claude/productizer/checks.yaml\tx\n+++ b/.claude/productizer/checks.yaml\tx\n@@ -1 +1 @@\n-checks: []\n+checks: [x]\n' > "$WORK/d-tab-suffix.patch"
+    printf 'diff --git a/src/app.sh b/.github/workflows/x.yml\n--- a/src/app.sh\n+++ b/.github/workflows/x.yml\n@@ -1 +1 @@\n-echo hi\n+on: push\n\\ No newline at end of file\n' > "$WORK/d-no-newline.patch"
+    printf "diff --git a/docs/sdlc/greet/plan.md b/docs/sdlc/greet/plan.md\n$wf_mod" > "$WORK/d-plan-hunk-names.patch"
+    printf "diff --git a/docs/sdlc/greet/plan.md b/docs/sdlc/greet/plan.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/sdlc/greet/plan.md\n@@ -0,0 +1 @@\n+# Plan\n$wf_mod" > "$WORK/d-plan-traditional.patch"
+    printf 'diff --git a/src/app.sh b/.github/workflows/x.yml\nsimilarity index 100%%\nrename from src/app.sh\nrename to .github/workflows/x.yml\n' > "$WORK/d-rename.patch"
+    printf 'diff --git a/src/link b/src/link\nnew file mode 120000\n--- /dev/null\n+++ b/src/link\n@@ -0,0 +1 @@\n+../.github/workflows\n\\ No newline at end of file\ndiff --git a/src/link/x.yml b/src/link/x.yml\nnew file mode 100644\n--- /dev/null\n+++ b/src/link/x.yml\n@@ -0,0 +1 @@\n+on: push\n' > "$WORK/d-symlink.patch"
+    printf 'diff --git a/./.github/workflows/x.yml b/./.github/workflows/x.yml\nnew file mode 100644\n--- /dev/null\n+++ b/./.github/workflows/x.yml\n@@ -0,0 +1 @@\n+on: push\n' > "$WORK/d-dot-slash.patch"
+  }
+  drive diff-header-names-differ 3 "forbidden for test: .github/workflows/x.yml" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-names.patch"
+  drive diff-hunk-names-another-file 3 "forbidden for test: .github/workflows/ci.yml" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-hunk-names.patch"
+  drive diff-traditional-section 3 "forbidden for test: .github/workflows/ci.yml" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-traditional.patch"
+  drive diff-crlf-header 3 "forbidden for test: .claude/productizer/checks.yaml" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-crlf.patch"
+  drive diff-tab-suffixed-name 3 "forbidden for test: .claude/productizer/checks.yaml" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-tab-suffix.patch"
+  drive diff-no-newline-marker 3 "forbidden for test: .github/workflows/x.yml" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-no-newline.patch"
+  drive diff-plan-hunk-names 3 "forbidden for build: .github/workflows/ci.yml" \
+    "$R" --from design --to build --mode plan --patch "$WORK/d-plan-hunk-names.patch"
+  drive diff-plan-traditional-section 3 "forbidden for build: .github/workflows/ci.yml" \
+    "$R" --from design --to build --mode plan --patch "$WORK/d-plan-traditional.patch"
+  drive diff-rename-into-forbidden 3 "forbidden for test: .github/workflows/x.yml" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-rename.patch"
+  drive diff-write-beyond-symlink 4 "beyond a symbolic link" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-symlink.patch"
+  drive diff-dot-slash-path 4 "invalid path" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-dot-slash.patch"
+  local objs_before objs_after
+  objs_before="$(find "$R/.git/objects" -type f | wc -l)"
+  drive diff-patch-applied-in-scratch 3 "forbidden for test: .github/workflows/x.yml" \
+    "$R" --from build --to test --mode build --patch "$WORK/d-names.patch"
+  objs_after="$(find "$R/.git/objects" -type f | wc -l)"
+  CASES=$((CASES + 1)); CODES="$CODES 0"
+  if [ "$objs_before" = "$objs_after" ] && [ -z "$(G "$R" status --porcelain)" ]; then
+    HELD=$((HELD + 1)); printf '  ok    %-44s exit 0\n' "applying the patch wrote nothing to the repo"
+  else
+    printf '  FAIL  %-44s objects %s -> %s, or the tree changed\n' "applying the patch wrote nothing to the repo" "$objs_before" "$objs_after"
+  fi
+
+  # A NEWLINE IN A PATH, --base mode: 1.0 split git's -z output on newlines,
+  # so a name ending in "\nM" swallowed the next path's status line.
+  newrepo nl; R="$WORK/nl"
+  printf 'x\n' > "$R/.a"$'\n'"M"
+  mkdir -p "$R/.github/workflows"; printf 'on: push\n' > "$R/.github/workflows/x.yml"
+  commit "$R"
+  drive base-newline-in-path 4 "holds a control character" \
+    "$R" --from build --to test --mode build --base base
+
+  # --- THE FORBIDDEN SET. Each path below changes what CI runs, what an agent
+  # is told or allowed, or how git treats a path, and 1.0 allowed it.
+  newrepo rules; R="$WORK/rules"
+  local p n=0
+  for p in .github/actions/setup/action.yml .github/CODEOWNERS .github/dependabot.yml \
+           .claude/agents/a.md .claude/commands/c.md .claude/skills/s/SKILL.md \
+           .claude/productizer/risk-tiers.yaml .claude/productizer/bands.yaml sub/.claude/settings.json \
+           .mcp.json CLAUDE.md src/CLAUDE.md AGENTS.md REVIEW.md CODEOWNERS \
+           .gitattributes src/.gitattributes .gitmodules .husky/pre-commit .pre-commit-config.yaml \
+           lefthook.yml .productizer-tools/x.sh .GitHub/workflows/x.yml .Claude/Settings.json; do
+    n=$((n + 1))
+    # Written as text, not made on disk: a case-insensitive file system
+    # would fold .Claude onto .claude before git saw it.
+    printf 'diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+x\n' \
+      "$p" "$p" "$p" > "$WORK/rule-$n.patch"
+    drive "rule-$(printf "%s" "$p" | tr / :)" 3 "forbidden for test: $p" \
+      "$R" --from build --to test --mode build --patch "$WORK/rule-$n.patch"
+  done
+  # config.json decides the stage order, the spec path and the plan path.
+  printf '{}\n' > "$R/.claude/productizer/config.json"
+  G "$R" diff > "$WORK/config.patch"; G "$R" restore -- .claude/productizer/config.json
+  drive rule-config-json-modified 3 "forbidden for test: .claude/productizer/config.json" \
+    "$R" --from build --to test --mode build --patch "$WORK/config.patch"
+  # The two exceptions under .claude, so the rule is not refusing everything.
+  printf 'diff --git a/.claude/productizer/backlog.md b/.claude/productizer/backlog.md\nnew file mode 100644\n--- /dev/null\n+++ b/.claude/productizer/backlog.md\n@@ -0,0 +1 @@\n+- B1\n' > "$WORK/backlog.patch"
+  drive backlog-allowed 0 ".claude/productizer/backlog.md" \
+    "$R" --from build --to test --mode build --patch "$WORK/backlog.patch"
 
   drive deploy-not-visible 4 "a merge is not visible to this script" \
     "$R" --from test --to deploy --base base
@@ -310,7 +438,7 @@ JSON
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: renamed paths in a patch; a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD; a requirement WITHDRAWN; that nothing is written outside the one fixture checked for it.\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the two fixtures checked for it; a Unicode-normalisation variant of a forbidden path; a gitlink (submodule entry) or a symlink at an allowed path, both allowed; that the forbidden set is every file that steers CI or an agent.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -439,39 +567,48 @@ case "$TO_KEY" in
 esac
 
 # --- the changed paths: one "STATUS<TAB>path" per line, STATUS M or D ---------
+# read_name_status: git's NUL-separated `--name-status -z` stream on stdin ->
+# one "M|D<TAB>path" line per path. The list below is newline-separated, so a
+# path holding a control character is printed as "?<TAB><quoted path>" and
+# refused: a name is never split, joined or guessed at.
+read_name_status() {
+  local st p
+  while IFS= read -r -d '' st && IFS= read -r -d '' p; do
+    if [[ "$p" == *[[:cntrl:]]* ]]; then printf '?\t%q\n' "$p"; continue; fi
+    if [ "$st" = D ]; then printf 'D\t%s\n' "$p"; else printf 'M\t%s\n' "$p"; fi
+  done
+}
+
 if [ -n "$PATCH" ]; then
-  CHANGES="$(awk '
-    function flush() {
-      if (!pending) return
-      if (bad || !resolved) print "?\t" hdr
-      else print (del ? "D" : "M") "\t" cur
-      pending = 0
-    }
-    function take(p) { if (substr(p, 1, 1) == "\"") { bad = 1; return } cur = p; resolved = 1 }
-    /^diff --git / {
-      flush()
-      hdr = $0; rest = substr($0, 12); pending = 1; resolved = 0; bad = 0; del = 0; inhdr = 1
-      if (substr(rest, 1, 1) == "\"") { bad = 1; next }
-      n = length(rest)
-      if (n % 2 == 1) { x = substr(rest, 3, (n - 5) / 2); if (rest == "a/" x " b/" x) take(x) }
-      next
-    }
-    !inhdr { next }
-    /^@@ / || /^Binary files / || /^GIT binary patch/ { inhdr = 0; next }
-    /^deleted file mode / { del = 1; next }
-    /^rename from / { p = substr($0, 13); if (substr(p, 1, 1) == "\"") bad = 1; else print "D\t" p; next }
-    /^rename to /   { take(substr($0, 11)); next }
-    /^copy to /     { take(substr($0, 9)); next }
-    /^\+\+\+ b\//   { if (!resolved) take(substr($0, 7)); next }
-    /^\+\+\+ \/dev\/null/ { del = 1; next }
-    /^--- a\//      { if (!resolved) { take(substr($0, 7)) } next }
-    END { flush() }
-  ' "$PATCH")"
-  if printf '%s\n' "$CHANGES" | grep -q '^?'; then
-    finish 4 "cannot decode the patch header '$(printf '%s\n' "$CHANGES" | grep '^?' | head -1 | cut -f2-)': a quoted or ambiguous path is not guessed at"
-  fi
-  if [ -z "$CHANGES" ] && grep -q '[^[:space:]]' "$PATCH"; then
-    finish 4 "cannot determine the changed paths: $PATCH is not empty but holds no 'diff --git' header"
+  if ! grep -q '[^[:space:]]' "$PATCH"; then
+    CHANGES=""
+  else
+    git -C "$ROOT" rev-parse --verify --quiet 'HEAD^{commit}' > /dev/null \
+      || finish 4 "cannot determine the changed paths: a patch is judged by applying it to HEAD, and $ROOT has no HEAD commit"
+    TMP="$(mktemp -d)" || finish 4 "cannot create a temporary directory to apply the patch in"
+    mkdir "$TMP/objects"
+    OBJ="$(git -C "$ROOT" rev-parse --path-format=absolute --git-path objects)" \
+      || finish 4 "cannot find the object directory of $ROOT"
+    # Git with a scratch index and a scratch object directory: it reads the
+    # repository's objects and writes only under $TMP.
+    SG() { GIT_INDEX_FILE="$TMP/index" GIT_OBJECT_DIRECTORY="$TMP/objects" \
+           GIT_ALTERNATE_OBJECT_DIRECTORIES="$OBJ" git -C "$ROOT" "$@"; }
+    HEAD_TREE="$(git -C "$ROOT" rev-parse 'HEAD^{tree}')"
+    SG read-tree "$HEAD_TREE" || finish 4 "cannot read HEAD's tree into a scratch index"
+    if SG apply --cached --binary "$PATCH" 2> "$TMP/apply.err"; then
+      PT_BASE="$HEAD_TREE"
+      PT_HEAD="$(SG write-tree)" || finish 4 "cannot write the tree the patch produced"
+    else
+      SG read-tree "$HEAD_TREE" || finish 4 "cannot read HEAD's tree into a scratch index"
+      if SG apply -R --cached --binary "$PATCH" 2>> "$TMP/apply.err"; then
+        PT_BASE="$(SG write-tree)" || finish 4 "cannot write the tree the reversed patch produced"
+        PT_HEAD="$HEAD_TREE"
+      else
+        finish 4 "cannot determine the changed paths: git apply applies the patch to HEAD neither forward nor in reverse, so what it would write is unknown ($(head -1 "$TMP/apply.err"))"
+      fi
+    fi
+    CHANGES="$(SG diff-tree -r -z --name-status --no-renames "$PT_BASE" "$PT_HEAD" | read_name_status)" \
+      || finish 4 "cannot determine the changed paths: git diff-tree between the patch's trees failed"
   fi
 else
   git -C "$ROOT" rev-parse --is-inside-work-tree > /dev/null \
@@ -482,9 +619,11 @@ else
     || finish 4 "cannot determine the changed paths: --head $HEAD_REF does not resolve to a commit"
   MB="$(git -C "$ROOT" merge-base "$BASE" "$HEAD_REF")" \
     || finish 4 "cannot determine the changed paths: $BASE and $HEAD_REF share no merge base"
-  RAW="$(git -C "$ROOT" diff --name-status --no-renames -z "$BASE...$HEAD_REF" | tr '\0' '\n')" \
+  CHANGES="$(git -C "$ROOT" diff --name-status --no-renames -z "$BASE...$HEAD_REF" | read_name_status)" \
     || finish 4 "cannot determine the changed paths: git diff $BASE...$HEAD_REF failed"
-  CHANGES="$(printf '%s\n' "$RAW" | awk 'NF==0{next} st==""{st=$0; next} { print (st=="D" ? "D" : "M") "\t" $0; st="" }')"
+fi
+if printf '%s\n' "$CHANGES" | grep -q '^?'; then
+  finish 4 "cannot determine the changed paths: a changed path holds a control character (newline, tab or carriage return), and such a name is not judged: $(printf '%s\n' "$CHANGES" | grep '^?' | head -1 | cut -f2-)"
 fi
 CHANGES="$(printf '%s\n' "$CHANGES" | awk 'NF' | sort -u)"
 
@@ -492,7 +631,8 @@ CHANGES="$(printf '%s\n' "$CHANGES" | awk 'NF' | sort -u)"
 ere_escape() { printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g'; }
 ART_RE="^$(ere_escape "$ART" | sed 's/<[^>]*>/[^\/]+/g')/"
 PLAN_RE="${ART_RE}plan\\.md\$"
-SPEC_RE="^$(ere_escape "$SPEC")\$"
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+SPEC_LC="$(lower "$SPEC")"
 
 is_bookkeeping() {
   case "$1" in
@@ -501,13 +641,31 @@ is_bookkeeping() {
   esac
   return 1
 }
-is_forbidden() {
-  case "$1" in
-    .github/workflows/*|.claude/hooks/*) return 0 ;;
-    .claude/productizer/checks.yaml|.claude/productizer/calibration.yaml|.claude/productizer/constitution.md) return 0 ;;
+# THE FORBIDDEN SET, every mode. The one place it is written; the header's
+# FORBIDDEN PATH list and references/ci-build.md describe this function.
+forbidden_any_mode() {
+  local lc base
+  lc="$(lower "$1")"; base="${lc##*/}"
+  case "$lc" in
+    .github/*) return 0 ;;
+    .claude/*)
+      is_bookkeeping "$1" && return 1
+      [ "$lc" = ".claude/productizer/backlog.md" ] && return 1
+      [ "$MODE" != "build" ] && [ "$lc" = "$SPEC_LC" ] && return 1
+      return 0 ;;
+    */.claude/*|.git/*|*/.git/*) return 0 ;;
+    .husky/*|.githooks/*|.productizer-run/*|.productizer-tools/*) return 0 ;;
+    .pre-commit-config.yaml|lefthook.yml|.lefthook.yml|lefthook-local.yml|.lefthook-local.yml) return 0 ;;
+    codeowners|docs/codeowners|review.md) return 0 ;;
   esac
-  [[ "$1" =~ ^\.claude/settings[^/]*\.json$ ]] && return 0
-  [ "$MODE" = "build" ] && [[ "$1" =~ $SPEC_RE ]] && return 0
+  case "$base" in
+    claude.md|claude.local.md|agents.md|.mcp.json|.gitattributes|.gitmodules) return 0 ;;
+  esac
+  return 1
+}
+is_forbidden() {
+  forbidden_any_mode "$1" && return 0
+  [ "$MODE" = "build" ] && [ "$(lower "$1")" = "$SPEC_LC" ] && return 0
   [ "$MODE" = "plan" ] && ! [[ "$1" =~ $PLAN_RE ]] && ! is_bookkeeping "$1" && return 0
   return 1
 }
@@ -535,22 +693,14 @@ case "$TO_KEY" in
   design)
     [ -f "$SCRIPT_DIR/spec-requirements.sh" ] \
       || finish 4 "cannot judge the spec: spec-requirements.sh is not beside this script"
-    TMP="$(mktemp -d)" || finish 4 "cannot create a temporary directory to rebuild the spec in"
+    [ -n "$TMP" ] || TMP="$(mktemp -d)" || finish 4 "cannot create a temporary directory to rebuild the spec in"
     if [ -n "$PATCH" ]; then
-      W="$TMP/w"; mkdir -p "$W"
-      git -C "$W" init --quiet || finish 4 "cannot create the scratch repository the patch is applied in"
-      mkdir -p "$W/$(dirname "$SPEC")"
-      [ ! -f "$ROOT/$SPEC" ] || cp "$ROOT/$SPEC" "$W/$SPEC"
-      if git -C "$W" apply --include="$SPEC" --check "$PATCH" > "$TMP/apply.err" 2>&1; then
-        [ ! -f "$W/$SPEC" ] || cp "$W/$SPEC" "$TMP/base.md"
-        git -C "$W" apply --include="$SPEC" "$PATCH" || finish 4 "the patch checked but did not apply to $SPEC"
-        [ ! -f "$W/$SPEC" ] || cp "$W/$SPEC" "$TMP/head.md"
-      elif git -C "$W" apply -R --include="$SPEC" --check "$PATCH" >> "$TMP/apply.err" 2>&1; then
-        [ ! -f "$W/$SPEC" ] || cp "$W/$SPEC" "$TMP/head.md"
-        git -C "$W" apply -R --include="$SPEC" "$PATCH" || finish 4 "the patch checked in reverse but did not apply to $SPEC"
-        [ ! -f "$W/$SPEC" ] || cp "$W/$SPEC" "$TMP/base.md"
-      else
-        finish 4 "cannot rebuild the spec's base and head: the patch applies to $SPEC neither forward nor in reverse ($(head -1 "$TMP/apply.err"))"
+      # The two trees the patch was applied between, in the scratch objects.
+      if SG cat-file -e "$PT_BASE:$SPEC" 2> "$TMP/cat.err"; then
+        SG show "$PT_BASE:$SPEC" > "$TMP/base.md"
+      fi
+      if SG cat-file -e "$PT_HEAD:$SPEC" 2>> "$TMP/cat.err"; then
+        SG show "$PT_HEAD:$SPEC" > "$TMP/head.md"
       fi
     else
       if git -C "$ROOT" cat-file -e "$MB:$SPEC" 2> "$TMP/cat.err"; then
