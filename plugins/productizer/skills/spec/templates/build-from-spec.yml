@@ -1,3 +1,12 @@
+# EXPERIMENTAL — this workflow has never run on a real GitHub runner. Its main
+# protection, that the AI gets no shell, was measured only with a local CLI.
+# Do not adopt it yet.
+#
+# The runner measurements it is waiting on are backlog items B113 (whether the
+# action honours the committed permission settings) and B121 (the no-shell
+# template measured end to end on GitHub), in .claude/productizer/backlog.md of
+# the productizer repository.
+#
 # build-from-spec.yml - turn a merged spec change into a DRAFT pull request.
 #
 # A COPYABLE TEMPLATE, not a workflow productizer runs. Copy it to
@@ -14,6 +23,10 @@
 # THE SHAPE. Three jobs, so that no write token ever sits beside the model:
 #   prepare   contents: read. Decides whether there is anything to do, before
 #             any model is paid for, and hands the agent its data as files.
+#             It also renders the pull request body - the only step that runs
+#             the repository's own code (pr-spec-comment.sh runs its solver
+#             probe) - here, with no write token and before the agent runs, and
+#             hands it on as a separate artifact the agent's job never fetches.
 #   generate  contents: read. The agent edits the working tree, under the
 #             committed rules, with Bash ALWAYS denied (no shell in CI);
 #             the `permissions` input can only narrow further. Before the agent
@@ -24,10 +37,13 @@
 #             Its checkout keeps no credentials, and it passes its own
 #             read-only token to the action explicitly, so the action never
 #             exchanges for an app token that could write.
-#   deliver   contents: write, pull-requests: write. No model runs here. It asks
-#             stage-advance.sh whether the patch is a change this stage may
-#             make, commits it, asks again of that commit, then pushes a NEW
-#             branch and opens a DRAFT pull request.
+#   deliver   contents: write, pull-requests: write. No model runs here, and no
+#             code from the repository it writes to: it runs git with hooks
+#             pinned off, gh, and the pinned productizer scripts, copied out of
+#             the workspace after their commit is verified. The body arrives as
+#             text. It asks stage-advance.sh whether the patch is a change this
+#             stage may make, commits it, asks again of that commit, then pushes
+#             a NEW branch and opens a DRAFT pull request.
 #
 # Every `uses:` is pinned to a full commit id, the tag beside it in a comment.
 # No `${{ }}` expression is interpolated into a `run:` script; every value
@@ -134,7 +150,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          args=(prepare . --mode "$MODE" --issue "$ISSUE" --default-branch "$DEFAULT_BRANCH" --permissions "$PERMISSIONS" --out "$RUNNER_TEMP/productizer-run")
+          args=(prepare . --mode "$MODE" --issue "$ISSUE" --default-branch "$DEFAULT_BRANCH" --permissions "$PERMISSIONS" --out "$RUNNER_TEMP/productizer-run" --body-out "$RUNNER_TEMP/productizer-body")
           if [ -n "$SPEC_BASE" ]; then args+=(--spec-base "$SPEC_BASE"); fi
           bash "$TOOLS/build-dispatch.sh" "${args[@]}"
           printf 'spec_base=%s\n' "$(cat "$RUNNER_TEMP/productizer-run/spec-base")" >> "$GITHUB_OUTPUT"
@@ -144,6 +160,17 @@ jobs:
         with:
           name: productizer-run
           path: ${{ runner.temp }}/productizer-run/
+          if-no-files-found: error
+          retention-days: 7
+
+      # The pull request body, rendered above from HEAD and the spec delta in
+      # this read-only job. A SEPARATE artifact: the agent's job never downloads
+      # it, so nothing the agent does can reach the text deliver posts.
+      - name: Hand the pull request body to the deliver job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: productizer-body
+          path: ${{ runner.temp }}/productizer-body/
           if-no-files-found: error
           retention-days: 7
 
@@ -326,6 +353,35 @@ jobs:
           name: productizer-patch
           path: ${{ runner.temp }}/productizer-patch
 
+      - name: Fetch the pull request body prepare rendered
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: productizer-body
+          path: ${{ runner.temp }}/productizer-body
+
+      # The scripts this job runs are productizer's, at the pinned commit - not
+      # the repository's. Before anything runs, the checkout is checked to BE
+      # that commit with nothing added or changed (the repository being written
+      # to could itself carry a .productizer-tools directory), then copied out
+      # of the workspace and the in-workspace copy removed.
+      - name: Verify and stage the pinned productizer scripts
+        run: |
+          set -euo pipefail
+          got="$(git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C .productizer-tools rev-parse HEAD)"
+          if [ "$got" != "$PRODUCTIZER_SHA" ]; then
+            echo "::error::.productizer-tools is at $got, not the pinned $PRODUCTIZER_SHA; refusing to run it"
+            exit 1
+          fi
+          dirty="$(git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C .productizer-tools status --porcelain --untracked-files=all)"
+          if [ -n "$dirty" ]; then
+            echo "::error::.productizer-tools differs from the pinned commit; refusing to run it"
+            exit 1
+          fi
+          cp -R "$TOOLS" "$RUNNER_TEMP/productizer-tools"
+          rm -rf .productizer-tools
+
+      # The body is TEXT: deliver refuses one rendered for another HEAD or over
+      # its size cap, and hands it to gh as --body-file; nothing evaluates it.
       # stage-advance.sh decides first on the patch, then again on the commit
       # git made from it; a refusal at either is exit 6 and nothing is
       # pushed. Then a NEW branch productizer/<mode>-<issue>-<run id>, a
@@ -345,6 +401,6 @@ jobs:
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           set -euo pipefail
-          args=(deliver . --mode "$MODE" --issue "$ISSUE" --patch "$RUNNER_TEMP/productizer-patch/productizer.patch" --run-id "$RUN_ID" --default-branch "$DEFAULT_BRANCH")
+          args=(deliver . --mode "$MODE" --issue "$ISSUE" --patch "$RUNNER_TEMP/productizer-patch/productizer.patch" --body "$RUNNER_TEMP/productizer-body" --run-id "$RUN_ID" --default-branch "$DEFAULT_BRANCH")
           if [ -n "$SPEC_BASE" ]; then args+=(--spec-base "$SPEC_BASE"); fi
-          bash "$TOOLS/build-dispatch.sh" "${args[@]}"
+          bash "$RUNNER_TEMP/productizer-tools/build-dispatch.sh" "${args[@]}"

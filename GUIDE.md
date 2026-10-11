@@ -772,7 +772,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Sixty-three requirements are active**, and they are the whole of what has
+**Sixty-four requirements are active**, and they are the whole of what has
 been agreed.
 
 Seven more are superseded and none withdrawn, and neither kind is listed here.
@@ -847,7 +847,7 @@ happening:
   from the agent or alterable by it, that names a file for the shell to
   source.
 
-**For as long as a state lasts.** Four requirements are true for the duration
+**For as long as a state lasts.** Five requirements are true for the duration
 of a state, not at a moment inside it:
 
 - **R12** — While a contradiction is unruled, the lifecycle shall merge no
@@ -858,6 +858,9 @@ of a state, not at a moment inside it:
   as failed and waived, and never as passed.
 - **R45** — While a change's risk tier is reported, the lifecycle shall report
   that change's complexity as unmeasured.
+- **R71** — While an unattended run holds a token that can write to the
+  repository, the lifecycle shall execute no code from the repository it is
+  writing to.
 
 **When something goes wrong.** Twenty-six defences, written as `If … then`
 because a designed path and a defended one are not the same thing:

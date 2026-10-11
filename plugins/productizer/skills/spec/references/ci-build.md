@@ -1,5 +1,11 @@
 # Building from the spec in CI — an optional, copyable workflow
 
+> **EXPERIMENTAL — this workflow has never run on a real GitHub runner. Its main
+> protection, that the AI gets no shell, was measured only with a local CLI. Do
+> not adopt it yet.** The runner measurements it waits on are backlog items B113
+> (whether the action honours the committed permission settings) and B121 (the
+> no-shell template measured end to end on GitHub).
+
 `templates/build-from-spec.yml` turns a merged spec change into a **draft**
 pull request, with no person at the keyboard while the model works. It is a
 file you copy into your own repository, in the same way as
@@ -35,9 +41,9 @@ decision is the person who dispatches the run:
 
 | Job | Token | What it does |
 |---|---|---|
-| `prepare` | `contents: read`, checkout keeps no credentials | `build-dispatch.sh prepare`: decides whether there is anything to do, then writes the agent's data as files. **No model is called.** |
+| `prepare` | `contents: read`, checkout keeps no credentials | `build-dispatch.sh prepare`: decides whether there is anything to do, then writes the agent's data as files, and renders the pull request body (`--body-out`) - the one step that runs the repository's own code, here with no write token and before the agent runs - as a separate artifact the agent's job never fetches. **No model is called.** |
 | `generate` | `contents: read`, checkout keeps no credentials, Bash denied, `.git` moved out before the agent runs | `anthropics/claude-code-action` with a fixed prompt, then `build-dispatch.sh capture` turns the working tree into a patch against the stashed git-dir |
-| `deliver` | `contents: write`, `pull-requests: write` | `build-dispatch.sh deliver`: `stage-advance.sh` decides on the patch, then a new branch and a commit, then `stage-advance.sh` decides again on that commit, then a push and `gh pr create --draft`. **No model runs here.** |
+| `deliver` | `contents: write`, `pull-requests: write` | the pinned productizer scripts are checked to be the pinned commit and copied out of the workspace; then `build-dispatch.sh deliver`: `stage-advance.sh` decides on the patch, then a new branch and a commit, then `stage-advance.sh` decides again on that commit, then a push and `gh pr create --draft` with prepare's body as text. **No model runs here, and no code from the repository being written to** (R71). |
 
 A write token never sits beside the model. The agent job's only token is its
 own read-only `GITHUB_TOKEN`, and that token is passed to the action
@@ -125,11 +131,37 @@ carrying `.gitattributes` or anything under `.github` before `git apply`. And
 `pr-spec-comment.sh`, which renders the body, reads the Stage 5 result with an
 isolated interpreter (`python3 -I` and a `sys.path` scrub) so a `json.py`
 planted beside the result cannot be imported in place of the standard library -
-measured defense in depth, since `deliver` renders from the default-branch tip,
-not the agent's tree. `check-ci-template.py` asserts the `BASH_ENV` pin
+measured defense in depth, since the body is rendered from the default-branch
+tip, not the agent's tree - and since v4.67.3 in `prepare`, not `deliver`. `check-ci-template.py` asserts the `BASH_ENV` pin
 (`post-agent-env`) and `build-dispatch.sh` self-tests the `gh` working directory
 (`gh-ran-at-repo-root-not-the-worktree`); that a real runner honours the pin is
 unmeasured (B121).
+
+**The job that can write runs no code from the repository it writes to** (R71,
+added v4.67.3). The pull request body is the one artifact that needed the
+repository's own code: `pr-spec-comment.sh` runs the repository's solver probe.
+It is rendered in `prepare` (`--body-out`), which holds no write token and runs
+before the agent, from HEAD and the spec delta - nothing the agent produces is
+an input - and travels to `deliver` as its own artifact, `productizer-body`,
+which the agent's job never downloads. `deliver` treats it as text: it refuses
+a body whose recorded HEAD is not the HEAD it is delivering onto or that is over
+60000 bytes (both exit 7, nothing pushed), appends the run's trailer line, and
+passes it to `gh pr create --body-file`. What `deliver` then runs while holding
+the write token is: `actions/checkout` and `actions/download-artifact` (pinned
+by commit); `git` against the repository's committed configuration, with
+`core.hooksPath=/dev/null` and `--no-verify` wherever a hook could fire
+(`worktree add`, `commit`, `push`); `gh pr create`, from the repository root;
+`python3 -I` heredocs that are the scripts' own code reading `config.json` as
+data; and productizer's own scripts - `build-dispatch.sh`, `stage-advance.sh`,
+`spec-requirements.sh`, `req-trailer.sh` - which are not the adopter's code:
+they come from `PRODUCTIZER_SHA`, are checked at run time to be exactly that
+commit with nothing added or changed, and are copied to `$RUNNER_TEMP` before
+they run, so a `.productizer-tools` directory in the repository being written to
+cannot stand in for them. `check-ci-template.py` holds the YAML half of that
+(`write-job-no-repo-code`) and `build-dispatch.sh`'s self-test the script half
+(`deliver-ran-no-repository-code`: a probe that leaves a mark ran in prepare and
+in no deliver case). Unmeasured on a runner: that GitHub artifacts cannot be
+replaced by a later job (B121).
 
 ### Inputs
 
@@ -345,11 +377,12 @@ and the files left behind:
 build-dispatch.sh prepare [repo-root] --mode plan|build --issue N
                           --default-branch NAME --out DIR [--spec-base SHA]
                           [--permissions repo-settings|edits-only]
+                          [--body-out DIR]
 build-dispatch.sh stash-git [repo-root] --git-dir DIR
 build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE
 build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
-                          --patch FILE --run-id ID --default-branch NAME
-                          [--spec-base SHA] [--dry-run]
+                          --patch FILE --body DIR --run-id ID
+                          --default-branch NAME [--spec-base SHA] [--dry-run]
 ```
 
 `stash-git` moves the working tree's `.git` out to `DIR` (which must be outside
@@ -365,7 +398,7 @@ run in the `generate` job around the agent step.
 | 4 | the spec is unchanged against the base. The run stops before any model call |
 | 5 | build mode, and no plan is committed at the plan path |
 | 6 | refused by `stage-advance.sh`, on the patch or on the commit made from it, whose reason is relayed verbatim. The branch is deleted and nothing is pushed |
-| 7 | delivery failed after the decision. The step is named: the body, the branch, the commit, the push or `gh` |
+| 7 | delivery failed after the decision. The step is named: the body (missing, rendered for another HEAD, or over the 60000-byte cap), the branch, the commit, the push or `gh` |
 | 8 | `capture` refused: a `.git` reappeared in the working tree after `stash-git` moved the real one out |
 
 `spec-diff.sh` exits 5 (no baseline) and 7 (over the cap) do not stop the run.
@@ -405,6 +438,13 @@ workflow given as a path:
   `BASH_ENV` to the empty string, so a post-agent shell reading the tree the
   agent edited sources no file an agent-influenced environment could name
   (`post-agent-env`)
+- a job holding any write permission runs no code from the repository it writes
+  to: no local action, no run: naming an interpreter or package runner (python,
+  python3, node, bun, deno, ruby, perl, php, npm, npx, yarn, pnpm, make) or
+  `pr-spec-comment.sh`, no sourced file or `./` path, and every `bash`/`sh`
+  runs a script staged under `$RUNNER_TEMP` (`write-job-no-repo-code`). It reads
+  the run: text, so an interpreter a staged script itself starts, or a command
+  spelled through a variable, is not seen
 - every `uses:` is pinned to a full 40-character commit id
 - no `${{ github.event.` and no `${{ inputs.` inside a `run:`
 - no `continue-on-error`, `|| true` or `2>/dev/null`

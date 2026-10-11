@@ -2100,6 +2100,23 @@ checks:
             `gh-ran-at-repo-root-not-the-worktree` - the gh stub records its working directory, and
             it is the repository root, not the applied worktree. Falsified 2026-10-11 on a copy that
             ran gh from the worktree again: 68 of 69, that case red.
+        - id: R71
+          verdict: Partial
+          reason: >-
+            deliver renders no body and runs no repository code: the body is rendered by
+            prepare (--body-out), the job with no write token, and deliver reads it as text.
+            NOT driven: a repository-configured hook firing without the hooksPath pin - the
+            self-test repositories configure none, so the pin is present but not exercised -
+            and the template wiring that keeps the body artifact out of the agent's job, which
+            is runtime YAML (B118) unmeasured on a real runner (B121).
+          evidence: >-
+            `prepare-renders-body`, `body-names-the-head-it-describes` and
+            `prepare-ran-the-repository-probe` - a solver probe that leaves a mark ran when
+            prepare rendered the body; `deliver-ran-no-repository-code` - it ran in no deliver
+            case, the real push-and-open included; `deliver-without-body` (exit 2),
+            `deliver-body-for-another-head` and `deliver-body-over-cap` (exit 7). Falsified
+            2026-10-11 three ways, each 75 of 76: deliver re-rendering through
+            pr-spec-comment.sh, the HEAD comparison neutered, the size cap neutered.
     limitations:
       - The real gh, a real GitHub and the action itself are never exercised. gh is a stub and origin is a local bare repository.
       - That the workflow template calls this script the way the cases do is not asserted.
@@ -2118,11 +2135,11 @@ checks:
     timeout_seconds: 60
     exit_codes:
       pass: [0]
-      fail: [1]        # at least one of the eleven assertions does not hold on the template
+      fail: [1]        # at least one of the twelve assertions does not hold on the template
       refused: [2]     # usage, or a template that could not be read or parsed
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 11 assertions held'
+      pattern: '([0-9]+) of 12 assertions held'
       min_covered: 1
       spec_units:
         - id: R62
@@ -2135,9 +2152,9 @@ checks:
             The `agent-job` assertion: the job running anthropics/claude-code-action grants no
             write permission on any scope, id-token included, and every checkout in it sets
             persist-credentials false. Fixtures agent-job-write.yml and
-            agent-checkout-credentials.yml; 24 self-test cases over exit codes 0 1 2. Falsified
+            agent-checkout-credentials.yml; 26 self-test cases over exit codes 0 1 2. Falsified
             2026-10-10 on a copy with the agent job's contents read turned to write: rc 1, 5 of 7
-            (the checker had seven assertions then; eleven since v4.67.2).
+            (the checker had seven assertions then; twelve since v4.67.3).
         - id: R65
           verdict: Partial
           reason: >-
@@ -2179,6 +2196,25 @@ checks:
             string (ENV beside it). Fixture post-agent-env-missing.yml, a post-agent run: step in
             the agent job with no such pin, exits 1; falsified 2026-10-11 by deleting the pin from
             the shipped template: 10 of 11, `post-agent-env` red.
+        - id: R71
+          verdict: Partial
+          reason: >-
+            Static only, and over the run: text: an interpreter a staged script itself starts,
+            or a command spelled through a variable or an alias, is not seen; git and gh are
+            allowed, and what they could run - hooks, filters, extensions - is the scripts'
+            hardening, held in build-dispatch's self-test, not here. That the staged scripts
+            really are the pinned commit is verified by the template at run time, never run
+            on GitHub (B121).
+          evidence: >-
+            `write-job-no-repo-code` - a job holding any write permission has no local action,
+            names no interpreter or package runner (python, python3, node, bun, deno, ruby,
+            perl, php, npm, npx, yarn, pnpm, make) and not pr-spec-comment.sh, sources no file,
+            runs no ./ path, and runs bash/sh only on scripts staged under $RUNNER_TEMP.
+            Fixtures write-job-runs-python.yml and write-job-runs-repo-script.yml exit 1; the
+            v4.67.2 template, which ran `$TOOLS/build-dispatch.sh` from the workspace, is red
+            under it. Falsified 2026-10-11 by neutering the interpreter rule
+            (write-job-runs-python.yml went 1 -> 0) and by restoring the in-workspace
+            invocation in the shipped template (11 of 12).
     limitations:
       - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
       - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.

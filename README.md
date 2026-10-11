@@ -48,7 +48,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.67.2"`.
+`plugin.json` sets `"version": "4.67.3"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -273,10 +273,16 @@ not resolved.
 
 ### Building from the spec in CI (optional)
 
+> **EXPERIMENTAL — this workflow has never run on a real GitHub runner. Its main
+> protection, that the AI gets no shell, was measured only with a local CLI. Do
+> not adopt it yet.** It waits on the runner measurements in backlog items B113
+> and B121.
+
 `templates/build-from-spec.yml` is a workflow you copy into your own
 repository to run the plan or build stage unattended. A person dispatches it, it
 runs only from the default branch, and its only output is a **draft** pull
-request from a new branch; the job running the model holds no write token, and
+request from a new branch; the job running the model holds no write token, the job that writes runs no
+code from your repository, and
 the model runs with your repository's committed Claude Code settings, which a
 `permissions` input can only narrow - never `bypassPermissions` unless you
 commit it yourself. It has never run end to end on GitHub. See `references/ci-build.md` before

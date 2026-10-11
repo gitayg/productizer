@@ -341,9 +341,9 @@ reviewer that writes through Bash or an MCP tool passes.
 `templates/build-from-spec.yml` runs a stage unattended in an adopter's
 repository. It has **never run on GitHub**: this repository is public, holds no
 model secrets, and a run costs model spend. What is measured is its static
-properties (`check-ci-template.py`, 11 of 11) and both ends of
+properties (`check-ci-template.py`, 12 of 12) and both ends of
 `build-dispatch.sh` against local repositories, with `gh` stubbed and origin a
-local bare repository (69 of 69). Not measured: the action itself, a real
+local bare repository (76 of 76). Not measured: the action itself, a real
 `gh`, that a draft stays a draft, and that the workflow calls the script the
 way the self-test does. A pull request it opens with the workflow's
 `GITHUB_TOKEN` does not start the adopter's `pull_request` checks - GitHub's
@@ -402,11 +402,27 @@ a real GitHub runner are still unmeasured (B121, B122):
 - **`pr-spec-comment.sh` reads the Stage 5 result with an isolated interpreter**
   (`python3 -I` plus a `sys.path` scrub). A `json.py` planted beside the result
   was reproduced being imported in place of the standard library on the HEAD
-  version; it is **not reachable through the template** (deliver renders the
-  body from `$ROOT`, the default-branch tip, never the applied worktree), so the
-  fix is defense in depth for the general tool, with a falsified regression test.
+  version; it is **not reachable through the template** (the body is rendered
+  from the default-branch tip, never the applied worktree - and since v4.67.3 in
+  `prepare`, with no write token), so the fix is defense in depth for the
+  general tool, with a falsified regression test.
 
 Not proven without a runner: that the action's own post steps (it runs
 `post-buffered-inline-comments` under `bun` with the read-only token) touch
 nothing agent-controlled in the working directory; and everything already listed
 under item 14 and B121.
+
+### 18 · EXPERIMENTAL — the CI build template has never run on a real GitHub runner
+
+This workflow has never run on a real GitHub runner. Its main protection, that
+the AI gets no shell, was measured only with a local CLI. Do not adopt it yet.
+
+That statement heads `templates/build-from-spec.yml`, `references/ci-build.md`,
+the README section on the template and the SKILL.md rows for the two scripts
+that serve it. It stays until the runner measurements it waits on are made:
+B113 (whether the action honours the repository's committed permission
+settings) and B121 (the no-shell template measured end to end on GitHub). Each
+guarantee the template states - no shell for the agent, no write token beside
+it, no repository code in the job that writes (R71, v4.67.3), a draft pull
+request only - is proven by self-tests against local repositories and by static
+checks of the YAML, and by nothing that ran on GitHub.

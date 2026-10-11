@@ -2,11 +2,12 @@
 # build-dispatch.sh prepare [repo-root] --mode plan|build --issue N
 #                           --default-branch NAME --out DIR [--spec-base SHA]
 #                           [--permissions repo-settings|edits-only]
+#                           [--body-out DIR]
 # build-dispatch.sh stash-git [repo-root] --git-dir DIR
 # build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE
 # build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
-#                           --patch FILE --run-id ID --default-branch NAME
-#                           [--spec-base SHA] [--dry-run]
+#                           --patch FILE --body DIR --run-id ID
+#                           --default-branch NAME [--spec-base SHA] [--dry-run]
 # build-dispatch.sh --selftest | --version | --help
 #
 # THE TWO ENDS OF AN UNATTENDED RUN. `templates/build-from-spec.yml` is a
@@ -19,7 +20,10 @@
 #            there is anything to do at all, and writes the data the agent
 #            reads: the spec's diff against the base it builds from, the plan
 #            path, and the model flags taken from config.json. Nothing here
-#            calls a model, so a refusal here costs nothing.
+#            calls a model, so a refusal here costs nothing. With --body-out it
+#            also renders the pull request body (pr-spec-comment.sh, which runs
+#            the repository's own solver probe) - HERE, in the job with no write
+#            token, before the agent runs - with the HEAD it describes beside it.
 #   stash-git runs BEFORE the model, after prepare's data is in place. It moves
 #            the workspace's `.git` to a directory OUTSIDE the agent's cwd, so
 #            the agent cannot write a `.git/config`, a `.git/hooks/*` or a
@@ -47,6 +51,11 @@
 #            `git apply --index` actually staged, never on the patch text.
 #            Only then does it push the branch and open a DRAFT pull request.
 #            A refusal at either point is exit 6, and the branch is deleted.
+#            It EXECUTES NO REPOSITORY CODE: it renders no body (it reads the one
+#            prepare rendered, as text, refusing one for another HEAD or over a
+#            size cap), its git runs with hooks pinned to nowhere, and gh runs
+#            from the repository root. What it runs is git, gh and this
+#            script's own pinned siblings.
 #
 # Adapted from the AI Unified Process generate workflow (Apache-2.0, Simon
 # Martinelli), `.github/workflows/aiup-generate.yml`: a dispatched run whose
@@ -129,8 +138,9 @@
 #   5  build mode, and no plan is committed at the plan path
 #   6  refused by stage-advance.sh, on the patch or on the commit made from
 #      it; its reason is relayed verbatim
-#   7  delivery failed after the decision: the body, the branch, the commit,
-#      the push or gh - the step is named
+#   7  delivery failed after the decision: the body (missing, rendered for
+#      another HEAD, or over the size cap), the branch, the commit, the push
+#      or gh - the step is named
 #   8  capture refused: a `.git` exists in the work tree after stash-git moved
 #      the real one out
 # --selftest exits 0 when every case held, 1 when one did not.
@@ -144,6 +154,10 @@ SELF="$HERE/$(basename -- "${BASH_SOURCE[0]}")"
 SPEC_REL=".claude/productizer/spec.md"
 CONST_REL=".claude/productizer/constitution.md"
 CONFIG_REL=".claude/productizer/config.json"
+# The pull request body is capped below the 65536-character limit GitHub
+# reports for a pull request body (recalled, not measured here), leaving room
+# for the lines deliver appends. Over the cap is refused, never truncated.
+BODY_MAX_BYTES=60000
 
 die_usage() { printf 'build-dispatch: %s\n' "$1" >&2; exit 2; }
 fail() { local code="$1"; shift; printf 'build-dispatch: %s\n' "$*" >&2; exit "$code"; }
@@ -152,11 +166,11 @@ say() { printf '%s\n' "$*"; }
 usage() {
   printf 'usage: build-dispatch.sh prepare [repo-root] --mode plan|build --issue N\n'
   printf '                         --default-branch NAME --out DIR [--spec-base SHA]\n'
-  printf '                         [--permissions repo-settings|edits-only]\n'
+  printf '                         [--permissions repo-settings|edits-only] [--body-out DIR]\n'
   printf '       build-dispatch.sh stash-git [repo-root] --git-dir DIR\n'
   printf '       build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE\n'
   printf '       build-dispatch.sh deliver [repo-root] --mode plan|build --issue N\n'
-  printf '                         --patch FILE --run-id ID --default-branch NAME\n'
+  printf '                         --patch FILE --body DIR --run-id ID --default-branch NAME\n'
   printf '                         [--spec-base SHA] [--dry-run]\n'
   printf '       build-dispatch.sh --selftest | --version | --help\n'
   printf 'exit: 0 ok, 2 usage, 3 repository not usable or HEAD not the default-branch tip,\n'
@@ -164,7 +178,7 @@ usage() {
   printf '      7 delivery failed (named), 8 capture refused (the change touches .git)\n'
 }
 
-CMD=""; ROOT=""; MODE=""; ISSUE=""; SPEC_BASE=""; OUT=""; PATCH=""; RUN_ID=""
+CMD=""; ROOT=""; MODE=""; ISSUE=""; SPEC_BASE=""; OUT=""; PATCH=""; RUN_ID=""; BODY_OUT=""; BODY_IN=""
 DEFAULT=""; DRY_RUN=0; SELFTEST=0; PERMS=""; PERMS_SET=0; GITDIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -177,6 +191,8 @@ while [ $# -gt 0 ]; do
     --git-dir) [ $# -ge 2 ] || die_usage "--git-dir needs a directory"; GITDIR="$2"; shift 2 ;;
     --out)     [ $# -ge 2 ] || die_usage "--out needs a directory or file"; OUT="$2"; shift 2 ;;
     --patch)   [ $# -ge 2 ] || die_usage "--patch needs a file"; PATCH="$2"; shift 2 ;;
+    --body-out) [ $# -ge 2 ] || die_usage "--body-out needs a directory"; BODY_OUT="$2"; shift 2 ;;
+    --body)    [ $# -ge 2 ] || die_usage "--body needs the directory prepare --body-out wrote"; BODY_IN="$2"; shift 2 ;;
     --run-id)  [ $# -ge 2 ] || die_usage "--run-id needs the workflow run id"; RUN_ID="$2"; shift 2 ;;
     --default-branch) [ $# -ge 2 ] || die_usage "--default-branch needs a branch name"; DEFAULT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -391,9 +407,22 @@ JSON
 
   # --- deliver ---------------------------------------------------------------
   newrepo del; R="$ST/del"
+  # The repository's own solver probe. It runs when the body is rendered, and
+  # it must run in prepare - the job with no write token - and never in deliver.
+  mkdir -p "$R/evals"
+  printf 'import os\nopen("%s/PROBE_RAN_MARK", "a").write("x")\nprint("  true positives   1")\n' "$ST" > "$R/evals/solver-probe.py"
+  commit_push "$R" "a solver probe"
+  drive prepare-renders-body 0 "rendered the pull request body for" \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-del" \
+    --spec-base "$(G "$R" rev-parse HEAD~2)" --body-out "$ST/body-del"
+  also body-names-the-head-it-describes "body-head is the HEAD prepare rendered from" \
+    test "$(cat "$ST/body-del/body-head")" = "$(G "$R" rev-parse HEAD)"
+  also prepare-ran-the-repository-probe "the repository's probe ran in prepare, the job with no write token" \
+    test -e "$ST/PROBE_RAN_MARK"
+  rm -f "$ST/PROBE_RAN_MARK"
   mkpatch "$R" "$ST/plan.patch" docs/sdlc/issue-7/plan.md '# Plan for #7'
   drive deliver-plan-dry-run 0 "DRY RUN: nothing was pushed and no pull request was opened" \
-    deliver "$R" --mode plan --issue 7 --patch "$ST/plan.patch" --run-id 123 \
+    deliver "$R" --body "$ST/body-del" --mode plan --issue 7 --patch "$ST/plan.patch" --run-id 123 \
     --default-branch main --dry-run
   also dry-run-called-no-gh "gh was never invoked" test ! -e "$ST/deliver-plan-dry-run.gh.args"
   also dry-run-left-no-branch "no branch or worktree left behind" \
@@ -401,28 +430,42 @@ JSON
   also dry-run-body-names-run "the rendered body names the run" \
     grep -qx 'Productizer-Run: 123' "$ST/deliver-plan-dry-run.out"
 
+  drive deliver-without-body 2 "deliver needs --body DIR" \
+    deliver "$R" --mode plan --issue 7 --patch "$ST/plan.patch" --run-id 123 \
+    --default-branch main --dry-run
+  mkdir -p "$ST/body-other"; cp "$ST/body-del/body.md" "$ST/body-other/body.md"
+  G "$R" rev-parse HEAD~1 > "$ST/body-other/body-head"
+  drive deliver-body-for-another-head 7 "the body was rendered for" \
+    deliver "$R" --body "$ST/body-other" --mode plan --issue 7 --patch "$ST/plan.patch" --run-id 123 \
+    --default-branch main --dry-run
+  mkdir -p "$ST/body-big"; cp "$ST/body-del/body-head" "$ST/body-big/body-head"
+  head -c 60001 /dev/zero | tr '\0' 'x' > "$ST/body-big/body.md"
+  drive deliver-body-over-cap 7 "over the 60000-byte cap" \
+    deliver "$R" --body "$ST/body-big" --mode plan --issue 7 --patch "$ST/plan.patch" --run-id 123 \
+    --default-branch main --dry-run
+
   mkpatch "$R" "$ST/code.patch" src/new.sh 'echo new'
   drive deliver-plan-touching-code 6 "forbidden for build: src/new.sh" \
-    deliver "$R" --mode plan --issue 7 --patch "$ST/code.patch" --run-id 123 \
+    deliver "$R" --body "$ST/body-del" --mode plan --issue 7 --patch "$ST/code.patch" --run-id 123 \
     --default-branch main --dry-run
   : > "$ST/empty.patch"
   drive deliver-empty-patch 6 "produced nothing outside the lifecycle's own bookkeeping" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/empty.patch" --run-id 123 \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/empty.patch" --run-id 123 \
     --default-branch main --dry-run
   mkpatch "$R" "$ST/wf.patch" .github/workflows/x.yml 'on: push'
   drive deliver-workflow-forbidden 6 "forbidden for test: .github/workflows/x.yml" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/wf.patch" --run-id 123 \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/wf.patch" --run-id 123 \
     --default-branch main --dry-run
 
   # The parser differential: the header names src/app.sh on the a/ side and
   # the hunk headers agree with it, while git writes the b/ side, a workflow.
   printf 'diff --git a/src/app.sh b/.github/workflows/x.yml\n--- a/src/app.sh\n+++ b/.github/workflows/x.yml\n@@ -1 +1 @@\n-echo hi\n+on: push\n' > "$ST/names.patch"
   drive deliver-header-names-differ 6 "forbidden for test: .github/workflows/x.yml" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/names.patch" --run-id 123 \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/names.patch" --run-id 123 \
     --default-branch main --dry-run
   mkpatch "$R" "$ST/agent.patch" .claude/agents/helper.md 'You may push to main.'
   drive deliver-agent-definition-forbidden 6 "forbidden for test: .claude/agents/helper.md" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/agent.patch" --run-id 123 \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/agent.patch" --run-id 123 \
     --default-branch main --dry-run
 
   # The second decision. A stand-in stage-advance.sh that allows ANY patch on
@@ -437,7 +480,7 @@ case " $* " in *" --patch "*) echo "stand-in stage-advance: allowed on the patch
 exec bash "$(dirname "$0")/stage-advance.real.sh" "$@"
 STUB
   DRIVE_SCRIPT="$ST/tools/build-dispatch.sh" drive deliver-recheck-on-commit 6 "on the commit git actually made from the patch" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/wf.patch" --run-id 126 \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/wf.patch" --run-id 126 \
     --default-branch main
   also recheck-names-the-path "the second refusal names the workflow" \
     grep -qF "forbidden for test: .github/workflows/x.yml" "$ST/deliver-recheck-on-commit.err"
@@ -448,7 +491,7 @@ STUB
   also recheck-called-no-gh "gh was never invoked" test ! -e "$ST/deliver-recheck-on-commit.gh.args"
 
   drive deliver-build 0 "opened draft pull request https://example.invalid/pull/1" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/code.patch" --run-id 123 \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/code.patch" --run-id 123 \
     --default-branch main
   # shellcheck disable=SC2016  # $1 is expanded by the inner sh, on purpose
   also pushed-the-run-branch "origin has productizer/build-7-123" \
@@ -470,16 +513,23 @@ STUB
     grep -qx 'Productizer-Run: 123' "$ST/deliver-build.gh.body"
 
   STUB_GH_FAIL=1 drive deliver-gh-fails 7 "gh pr create failed" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/code.patch" --run-id 124 \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/code.patch" --run-id 124 \
     --default-branch main
   rm -rf "$ST/del.origin.git"
   drive deliver-push-fails 7 "the push of productizer/build-7-125 failed" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/code.patch" --run-id 125 \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/code.patch" --run-id 125 \
     --default-branch main
 
   drive deliver-bad-run-id 2 "--run-id must be digits" \
-    deliver "$R" --mode build --issue 7 --patch "$ST/code.patch" --run-id 'x;y' \
+    deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/code.patch" --run-id 'x;y' \
     --default-branch main --dry-run
+
+  # deliver executes no repository code. Every deliver case above - dry runs,
+  # refusals, the real push-and-open and the failing gh and push - ran against
+  # a repository whose solver probe leaves a mark when it runs. It ran once, in
+  # prepare (asserted above, then cleared); it never ran in any deliver.
+  also deliver-ran-no-repository-code "no deliver case ran the repository's probe" \
+    test ! -e "$ST/PROBE_RAN_MARK"
 
   # --- stash-git and capture -------------------------------------------------
   # The two halves of taking the agent's edits without trusting a version-
@@ -553,7 +603,7 @@ STUB
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f&&/^#      /{next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the workflow template calls this script the way these cases do; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing.\n'
+  printf '    NOT ASSERTED: that the template hands deliver the body prepare rendered and not another (that wiring is runtime YAML no self-test runs, B118, and GitHub'"'"'s artifact immutability is not measured here); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the workflow template calls this script the way these cases do; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -572,7 +622,7 @@ fi
 # before the heavier repository checks below.
 # ===========================================================================
 if [ "$CMD" = stash-git ] || [ "$CMD" = capture ]; then
-  [ -z "$MODE$ISSUE$SPEC_BASE$PATCH$RUN_ID$DEFAULT" ] && [ "$DRY_RUN" = 0 ] && [ "$PERMS_SET" = 0 ] \
+  [ -z "$MODE$ISSUE$SPEC_BASE$PATCH$RUN_ID$DEFAULT$BODY_OUT$BODY_IN" ] && [ "$DRY_RUN" = 0 ] && [ "$PERMS_SET" = 0 ] \
     || die_usage "$CMD takes only [repo-root], --git-dir and (capture) --out"
   [ -n "$GITDIR" ] || die_usage "$CMD needs --git-dir DIR"
   [ -n "$ROOT" ] || ROOT="."
@@ -644,7 +694,7 @@ if [ -n "$SPEC_BASE" ] && ! [[ "$SPEC_BASE" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 if [ "$CMD" = prepare ]; then
   [ -n "$OUT" ] || die_usage "prepare needs --out DIR"
-  [ -z "$PATCH$RUN_ID" ] && [ "$DRY_RUN" = 0 ] || die_usage "--patch, --run-id and --dry-run belong to deliver"
+  [ -z "$PATCH$RUN_ID$BODY_IN" ] && [ "$DRY_RUN" = 0 ] || die_usage "--patch, --run-id, --body and --dry-run belong to deliver"
   [ "$PERMS_SET" = 1 ] || PERMS="repo-settings"
   case "$PERMS" in
     repo-settings|edits-only) ;;
@@ -653,6 +703,12 @@ if [ "$CMD" = prepare ]; then
 else
   [ "$PERMS_SET" = 0 ] || die_usage "--permissions belongs to prepare"
   [ -n "$PATCH" ] || die_usage "deliver needs --patch FILE"
+  [ -z "$BODY_OUT" ] || die_usage "--body-out belongs to prepare"
+  # The body is rendered by prepare, in a job that holds no write token and
+  # runs before the agent. deliver only ever reads it as text.
+  [ -n "$BODY_IN" ] || die_usage "deliver needs --body DIR, the pull request body prepare --body-out rendered; deliver renders none itself, because rendering runs the repository's own code"
+  [ -d "$BODY_IN" ] || die_usage "--body is not a directory: $BODY_IN"
+  BODY_IN="$(cd "$BODY_IN" && pwd)"
   [ -f "$PATCH" ] && [ -r "$PATCH" ] || die_usage "cannot read the patch: $PATCH"
   [[ "$RUN_ID" =~ ^[0-9]{1,20}$ ]] || die_usage "--run-id must be digits, the workflow run id; got: ${RUN_ID:-nothing}"
   [ -z "$OUT" ] || die_usage "--out belongs to prepare"
@@ -804,6 +860,28 @@ PY
     fail 5 "build mode, and no plan is committed at $PLAN_PATH. Run plan mode for issue #$ISSUE and merge its pull request first."
   fi
 
+  # THE PULL REQUEST BODY, rendered HERE and never in deliver. Rendering runs
+  # the repository's own code (pr-spec-comment.sh runs its solver probe), and
+  # this job holds no write token and runs before the agent, so nothing the
+  # agent wrote can reach it. It goes to its own directory, which the template
+  # hands to deliver as a separate artifact the agent's job never downloads,
+  # beside the HEAD it describes so deliver can refuse a body for another HEAD.
+  if [ -n "$BODY_OUT" ]; then
+    mkdir -p "$BODY_OUT" || fail 3 "cannot create the body directory: $BODY_OUT"
+    if [ -n "$BASE_SHA" ]; then
+      PSC_RC=0
+      bash "$HERE/pr-spec-comment.sh" . --base "$BASE_SHA" > "$BODY_OUT/body.md" || PSC_RC=$?
+      case "$PSC_RC" in
+        0|5) ;;
+        *) fail 3 "could not render the pull request body: pr-spec-comment.sh exited $PSC_RC; its message is above" ;;
+      esac
+    else
+      say "**NOT MEASURED.** The spec was created in the root commit, so there is no base to render its movement against." > "$BODY_OUT/body.md"
+    fi
+    printf '%s\n' "$HEAD_SHA" > "$BODY_OUT/body-head"
+    say "build-dispatch: rendered the pull request body for ${HEAD_SHA:0:12} into $BODY_OUT ($(wc -c < "$BODY_OUT/body.md" | tr -d ' ') bytes)."
+  fi
+
   printf '%s\n' "$MODE" > "$OUT/mode"
   printf '%s\n' "$ISSUE" > "$OUT/issue"
   printf '%s\n' "$PLAN_PATH" > "$OUT/plan-path"
@@ -830,33 +908,41 @@ bash "$HERE/stage-advance.sh" "$ROOT" --from "$FROM" --to "$TO" --patch "$PATCH"
 [ "$SA_RC" -eq 0 ] \
   || fail 6 "refused by stage-advance.sh (exit $SA_RC) for $FROM -> $TO in $MODE mode; its reason is the line above. Nothing was committed, pushed or opened."
 
+# Every git call from here on that can fire a hook (worktree add runs
+# post-checkout, commit runs pre-commit and commit-msg, push runs pre-push, a ref
+# update or branch delete runs reference-transaction) runs with hooks pinned to
+# nowhere and --no-verify where git offers it: this job holds a write token, and
+# a hook is code the repository could name.
+dgit() { git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
 WORK="$(mktemp -d)" || fail 7 "cannot create a temporary directory"
 WT="$WORK/wt"
 REFUSED=0
 # shellcheck disable=SC2329  # invoked by the EXIT trap below
 cleanup() {
-  if [ -d "$WT" ]; then git -C "$ROOT" worktree remove --force "$WT" || printf 'build-dispatch: could not remove the worktree %s\n' "$WT" >&2; fi
+  if [ -d "$WT" ]; then dgit -C "$ROOT" worktree remove --force "$WT" || printf 'build-dispatch: could not remove the worktree %s\n' "$WT" >&2; fi
   if { [ "$DRY_RUN" = 1 ] || [ "$REFUSED" = 1 ]; } && git -C "$ROOT" rev-parse --verify --quiet "refs/heads/$BRANCH" > /dev/null; then
-    git -C "$ROOT" branch -D --quiet "$BRANCH"
+    dgit -C "$ROOT" branch -D --quiet "$BRANCH"
   fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
-# 2. The body, rendered from HEAD BEFORE the patch is applied anywhere: the
-#    renderer runs the repository's own solver probe if there is one, and code
-#    the model wrote must never execute in the job that holds a write token.
+# 2. The body. prepare rendered it, in a job with no write token, before the
+#    agent ran; here it is DATA. It is checked to describe this HEAD, capped in
+#    size, copied, and only ever handed to gh as --body-file. Nothing in it is
+#    evaluated, and no repository code runs in this job to produce it.
 BODY="$WORK/body.md"
-if [ -n "$BASE_SHA" ]; then
-  PSC_RC=0
-  bash "$HERE/pr-spec-comment.sh" "$ROOT" --base "$BASE_SHA" > "$BODY" || PSC_RC=$?
-  case "$PSC_RC" in
-    0|5) ;;
-    *) fail 7 "could not render the pull request body: pr-spec-comment.sh exited $PSC_RC; its message is above" ;;
-  esac
-else
-  say "**NOT MEASURED.** The spec was created in the root commit, so there is no base to render its movement against." > "$BODY"
-fi
+[ -f "$BODY_IN/body.md" ] && [ ! -L "$BODY_IN/body.md" ] \
+  || fail 7 "the body: $BODY_IN/body.md is not a regular file; nothing was pushed or opened"
+[ -f "$BODY_IN/body-head" ] && [ ! -L "$BODY_IN/body-head" ] \
+  || fail 7 "the body: $BODY_IN/body-head is missing, so the HEAD the body describes is unknown; nothing was pushed or opened"
+BODY_HEAD="$(head -n 1 "$BODY_IN/body-head")"
+[ "$BODY_HEAD" = "$HEAD_SHA" ] \
+  || fail 7 "the body was rendered for ${BODY_HEAD:0:12}, not for this HEAD ${HEAD_SHA:0:12}; a body describing another commit is refused. Nothing was pushed or opened."
+BODY_BYTES="$(wc -c < "$BODY_IN/body.md" | tr -d ' ')"
+[ "$BODY_BYTES" -le "$BODY_MAX_BYTES" ] \
+  || fail 7 "the body is $BODY_BYTES bytes, over the $BODY_MAX_BYTES-byte cap; refusing rather than truncating. Nothing was pushed or opened."
+cp "$BODY_IN/body.md" "$BODY" || fail 7 "the body could not be copied"
 {
   say ""
   say "This pull request is a proposal to be reviewed, not a change that was accepted. A person dispatched the run that opened it; a person decides whether it merges."
@@ -878,8 +964,8 @@ IDS="$(awk -F'\t' 'NR==FNR { base[$1] = $0; next } !($1 in base) || base[$1] != 
   "$WORK/base.tsv" "$WORK/head.tsv" | sort -u -V | paste -sd, -)"
 
 # 4. The branch and the commit, in a worktree so the caller's tree is untouched.
-git worktree add --quiet -b "$BRANCH" "$WT" HEAD || fail 7 "could not create the branch $BRANCH"
-git -C "$WT" apply --index --binary "$PATCH" || fail 7 "the patch did not apply to HEAD; nothing was committed"
+dgit worktree add --quiet -b "$BRANCH" "$WT" HEAD || fail 7 "could not create the branch $BRANCH"
+dgit -C "$WT" apply --index --binary "$PATCH" || fail 7 "the patch did not apply to HEAD; nothing was committed"
 MSG="$WORK/msg"
 {
   say "productizer $MODE: #$ISSUE"
@@ -897,7 +983,7 @@ else
 fi
 git interpret-trailers --in-place --trailer "Productizer-Run: $RUN_ID" "$MSG" \
   || fail 7 "could not write the Productizer-Run trailer"
-git -C "$WT" commit --quiet -F "$MSG" || fail 7 "the commit on $BRANCH failed"
+dgit -C "$WT" commit --quiet --no-verify -F "$MSG" || fail 7 "the commit on $BRANCH failed"
 COMMIT="$(git -C "$WT" rev-parse HEAD)"
 
 # 4b. The decision again, on what git ACTUALLY committed, before anything
@@ -923,7 +1009,7 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 # 5. Push the run's branch, by explicit refspec, and nothing else.
-git -C "$WT" push --quiet origin "$COMMIT:refs/heads/$BRANCH" \
+dgit -C "$WT" push --quiet --no-verify origin "$COMMIT:refs/heads/$BRANCH" \
   || fail 7 "the push of $BRANCH failed; no pull request was opened"
 
 # 6. The draft pull request. The title reaches gh through the environment.

@@ -29,6 +29,21 @@ WHAT IT ASSERTS, each a separate finding:
                  agent's own job pins BASH_ENV to the empty string, so no
                  startup file an agent-influenced environment could name is
                  sourced by a post-agent shell that reads the edited tree
+  write-job-no-repo-code
+                 a job holding any write permission runs no code from the
+                 repository it writes to, by a rule read off the YAML: it has
+                 no local action (`uses: ./...`); no run: names an interpreter
+                 or package runner (python, python3, node, bun, deno, ruby,
+                 perl, php, npm, npx, yarn, pnpm, make) or pr-spec-comment.sh,
+                 sources a file, or runs a `./` path; and every `bash`/`sh`
+                 invocation runs a script under $RUNNER_TEMP, where the template
+                 stages the pinned productizer scripts after verifying their
+                 commit. LIMITS: it reads the run: text, so an interpreter a
+                 staged script itself starts is not seen (the staged scripts are
+                 productizer's own, pinned by commit); a command spelled through
+                 a variable or an alias is not seen; git and gh are allowed, and
+                 what they run - hooks, filters, extensions - is the scripts'
+                 hardening, not this rule's
   pinned         every `uses:` is pinned to a full 40-character commit id
   run-injection  no `${{ github.event.` and no `${{ inputs.` inside a run:
   swallow        no continue-on-error, and no `|| true` or `2>/dev/null` in a
@@ -79,6 +94,13 @@ DENY_BASH_RX = re.compile(r"--disallowedTools\s+[\"']?Bash(?![\w(])")
 BYPASS_WORDS = ("bypassPermissions", "dangerously-skip-permissions")
 PERMS_OPTIONS = ("repo-settings", "edits-only")
 PIN_RX = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
+REPO_CODE_WORDS = ("python", "python3", "node", "bun", "deno", "ruby", "perl", "php",
+                   "npm", "npx", "yarn", "pnpm", "make")
+REPO_CODE_RX = re.compile(r"(?<![\w./$-])(%s)(?![\w.-])" % "|".join(REPO_CODE_WORDS))
+SHELL_SCRIPT_RX = re.compile(r"(?<![\w./-])(?:bash|sh)((?:\s+-[-\w]+)*)\s+(\S+)")
+SOURCE_RX = re.compile(r"(?:^|[\s;&|(])source\s+\S")
+DOT_SLASH_RX = re.compile(r"(?:^|[\s;&|(])\./\S")
+TEMP_PREFIXES = ('"$RUNNER_TEMP/', "$RUNNER_TEMP/", '"${RUNNER_TEMP}/', "${RUNNER_TEMP}/")
 INJECT_RX = re.compile(r"\$\{\{\s*(github\.event\.|inputs\.)")
 SWALLOW = (("|| true", re.compile(r"\|\|\s*true\b")),
            ("2>/dev/null", re.compile(r"2>\s*/dev/null")))
@@ -245,6 +267,37 @@ def check(path):
                              "the agent action step must deny the agent a shell with a "
                              "standalone --disallowedTools Bash (never a shell in CI); a "
                              "Bash(git:*) deny alone does not satisfy it")
+    for jname, job in jobs.items():
+        if not isinstance(job, dict) or not write_perms(job.get("permissions")):
+            continue
+        for i, s in enumerate(job.get("steps") or []):
+            if not isinstance(s, dict):
+                continue
+            where = "jobs.%s.steps[%d]" % (jname, i)
+            if str(s.get("uses", "")).startswith("./"):
+                find("write-job-no-repo-code", where, "a job holding a write token runs a "
+                     "local action, which is code from the repository it writes to: %s"
+                     % s.get("uses"))
+            if "run" not in s:
+                continue
+            run = str(s["run"])
+            m = REPO_CODE_RX.search(run)
+            if m:
+                find("write-job-no-repo-code", where, "a job holding a write token names "
+                     "%s in a run:; it must execute no code from the repository it writes to"
+                     % m.group(1))
+            if "pr-spec-comment.sh" in run:
+                find("write-job-no-repo-code", where, "a job holding a write token runs "
+                     "pr-spec-comment.sh, which runs the repository's solver probe; render "
+                     "the body in a job with no write token")
+            if SOURCE_RX.search(run) or DOT_SLASH_RX.search(run):
+                find("write-job-no-repo-code", where, "a job holding a write token sources "
+                     "a file or runs a ./ path from the workspace")
+            for sm in SHELL_SCRIPT_RX.finditer(run):
+                target = sm.group(2)
+                if not target.startswith(TEMP_PREFIXES):
+                    find("write-job-no-repo-code", where, "a job holding a write token runs "
+                         "a shell script that is not staged under $RUNNER_TEMP: %s" % target)
     if not agent_jobs:
         die("no job in %s runs %s, so the agent job's assertions could not run. "
             "Unmeasured, not clean." % (path, AGENT_ACTION))
@@ -295,7 +348,7 @@ def check(path):
 
 
 ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "deny-bash",
-              "post-agent-env", "pinned", "run-injection", "swallow", "no-bypass",
+              "post-agent-env", "write-job-no-repo-code", "pinned", "run-injection", "swallow", "no-bypass",
               "perms-input")
 
 
@@ -380,7 +433,11 @@ def selftest():
           "declared (deny-bash checks the workflow declares it, not that the CLI honours "
           "it - measured against local claude -p, references/ci-build.md); that a "
           "permissions option really narrows - what each one adds to the agent's "
-          "arguments is build-dispatch.sh's, asserted in its own self-test.")
+          "arguments is build-dispatch.sh's, asserted in its own self-test; that a "
+          "write job runs no repository code beyond what its run: text names - an "
+          "interpreter a staged script starts, or a command spelled through a variable, "
+          "is not seen by write-job-no-repo-code; that the $RUNNER_TEMP copy really is "
+          "the pinned commit (the template verifies that at run time, not this checker).")
     if got != doc:
         print("FAIL: reached and documented exit codes differ")
         return 1

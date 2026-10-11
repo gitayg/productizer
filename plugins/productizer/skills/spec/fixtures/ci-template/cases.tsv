@@ -20,3 +20,5 @@ permissions-input-missing.yml	1	no permissions input; the dispatching person has
 permissions-not-choice.yml	1	must be type choice, not 'string'
 permissions-default-widened.yml	1	default must be repo-settings; found 'anything-goes'
 post-agent-env-missing.yml	1	a run: step after the agent action must pin BASH_ENV to the empty string
+write-job-runs-python.yml	1	names python3 in a run:; it must execute no code from the repository it writes to
+write-job-runs-repo-script.yml	1	runs a shell script that is not staged under $RUNNER_TEMP: scripts/render-body.sh

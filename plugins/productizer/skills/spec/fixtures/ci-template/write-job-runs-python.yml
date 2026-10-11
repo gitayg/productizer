@@ -1,0 +1,56 @@
+# Fixture: good.yml with the write job running the repository's own python - its solver probe.
+# assertion. Each other fixture here is this file with ONE violation.
+name: fixture
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        type: number
+        required: true
+      permissions:
+        type: choice
+        default: repo-settings
+        options:
+          - repo-settings
+          - edits-only
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          set -euo pipefail
+          echo "issue $ISSUE"
+  generate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        with:
+          github_token: ${{ github.token }}
+          prompt: fixed text
+          claude_args: |
+            --permission-mode acceptEdits
+            --disallowedTools Bash
+  deliver:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 evals/solver-probe.py
