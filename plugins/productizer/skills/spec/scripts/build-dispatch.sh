@@ -257,7 +257,7 @@ JSON
     G "$S" add -A; G "$S" commit --quiet -m base
     printf -- '- **R2** \342\200\224 The tool shall wave.\n' >> "$S/.claude/productizer/spec.md"
     G "$S" add -A; G "$S" commit --quiet -m "spec: R2"
-    G "$ST" init --quiet --bare "$ST/$1.origin.git"
+    G "$ST" init --quiet --bare --initial-branch=main "$ST/$1.origin.git"
     G "$S" push --quiet "$ST/$1.origin.git" main
     G "$ST" -c init.defaultBranch=main clone --quiet "$ST/$1.origin.git" "$R"
   }
