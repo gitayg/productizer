@@ -524,10 +524,9 @@ checks:
             `window["ev"+"al"]("window.cla"+"ude.u"+"se('artifact')")` exits 0 under 2.0 and 1
             under 3.0, naming `artifact`. Seven assertions over 35 cases, each falsified alone
             against a patched classifier, and each case asserts the resolved NAME or `none` so a
-            folded request is told from an unreadable one. 3.1 drives a real build over a fixture
-            backlog row naming a home-directory config path (`prose-path`, must exit 0) and the
-            same row quoting the call syntax (`quoted-call`, must exit 1), so data the page embeds
-            is told from code it runs (B115).
+            folded request is told from an unreadable one. The 3.1 change that skipped matches in
+            text the check read as prose (B115) was reverted in v4.68.1 after a security review
+            found a parser differential in it; every byte is read again, as in 3.0 (B133).
       # One bare path per repository file hashed. `must_cover: none` and NOT
       # all_triggering, deliberately: this examines the whole tree rather than
       # the change, so a commit that DELETES a file would name a path that no
