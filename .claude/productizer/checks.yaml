@@ -1993,7 +1993,7 @@ checks:
             variants such as `.GitHub/workflows`; `workflow-forbidden`,
             `build-mode-spec-forbidden` and `plan-mode-code-forbidden` still exit 3, and
             `backlog-allowed` and `build-mode-code-allowed` exit 0, so the rule is not refusing
-            everything. 99 cases.
+            everything. 109 cases.
         - id: R66
           verdict: Covered
           evidence: >-
@@ -2046,7 +2046,8 @@ checks:
           evidence: >-
             Exit 3 when a write-once record is modified: `bk-classification-rewritten` and
             `bk-snapshot-rewritten`; `bk-checks-result-rewritten-inert` exits 1, because the
-            checks result is rewritten by every run-checks.sh run and is not write-once.
+            checks result is rewritten by every run-checks.sh run and is not write-once (when
+            attended; under --unattended any change to it is R83's refusal).
             Falsified 2026-10-12 with the rewrite refusal made never to fire: 97 of 99, those two
             red.
         - id: R77
@@ -2057,9 +2058,22 @@ checks:
             `backlog-row-added-build-mode` exit 0, so only build mode is held to it and an added
             row stays allowed. Falsified 2026-10-12 with the refusal made never to fire: 98 of 99,
             that case red.
+        - id: R83
+          verdict: Covered
+          evidence: >-
+            Exit 3 under --unattended on any change to the checks result:
+            `unattended-checks-result-added`, `unattended-checks-result-modified`,
+            `unattended-checks-result-deleted`, `unattended-checks-result-beside-code` (beside real
+            code) and `unattended-checks-result-base-mode` (under --base);
+            `unattended-code-allowed` exits 0, so the flag refuses only the checks result. Attended
+            behaviour is held unchanged: `attended-checks-result-added-inert` and
+            `attended-checks-result-modified-inert` exit 1, `attended-checks-result-beside-code`
+            exits 0, `attended-checks-result-deleted-r66` exits 3 by R66. Each unattended case
+            exited 2 against 7e5b2c4, which did not know the flag. Falsified 2026-10-12 with the
+            refusal made never to fire: 104 of 109, five unattended cases red.
     limitations:
       - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
-      - The forbidden set is a list, not a proof; a cross-script homoglyph is not folded, and a modified checks-result.json is inert (ruling pending).
+      - The forbidden set is a list, not a proof; a cross-script homoglyph is not folded. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
       - Default-deny over `.claude/**` also refuses a design move that touches `.claude/productizer/` files such as requirement-index.md, as this repository's own design commits do. Which of those a design stage may write is undecided (B112).
       - A stage other than design or build with evidence of its own is driven by no case.
 
@@ -2234,6 +2248,33 @@ checks:
             `agent-args-refuses-a-shape`, `agent-args-refuses-a-crlf-line`,
             `agent-args-reads-an-unterminated-last-line`, `agent-args-refuses-a-repeat`,
             `agent-args-refuses-no-bash-deny` and `agent-args-refuses-no-file`.
+        - id: R83
+          verdict: Covered
+          evidence: >-
+            The wiring: `deliver` passes --unattended on both of its stage-advance.sh calls.
+            `deliver-refuses-a-checks-result-patch` and `first-refusal-names-the-checks-result` - a
+            checks result written beside real code, which an attended stage-advance.sh allows, is
+            refused on the patch, exit 6, nothing committed; past a stand-in that allows the patch,
+            `deliver-recheck-refuses-a-checks-result`, `recheck-names-the-checks-result` and
+            `recheck-checks-result-pushed-nothing` - the commit is refused, exit 6, and nothing is
+            pushed. Against 7e5b2c4 the first exited 0 and the second pushed the branch. Falsified
+            2026-10-12: the flag dropped from the second call, 91 of 94, those three red; from the
+            first, 93 of 94.
+        - id: R84
+          verdict: Partial
+          reason: >-
+            prepare --body-out is where the CI template renders a body, and it is covered here. The
+            renderer itself, pr-spec-comment.sh 1.2, also refuses (exit 3, nothing rendered; its
+            case `no-probe-refused`), but its self-test is run only by the workflow, not by a
+            declared check (B130), so a person rendering a body by hand is not covered by this
+            claim.
+          evidence: >-
+            `prepare-body-refused-without-probe` - with no evals/solver-probe.py, prepare --body-out
+            exits 3 naming the file and that the CI build template requires the adopter to provide
+            it; `prepare-without-probe-wrote-no-body` - no body directory was written;
+            `prepare-renders-body` still renders when the probe exists. Against 7e5b2c4 prepare
+            rendered a partial body and exited 0. Falsified 2026-10-12 with the check made always
+            true: 92 of 94, those two red.
     limitations:
       - The real gh, a real GitHub and the action itself are never exercised. gh is a stub and origin is a local bare repository.
       - That GitHub runs the template's calls of this script as written is not measured; check-ci-template.py's guards assert the call text (agent-args, stash-git, capture) and the agent-args cases drive the subcommand, but no case runs the YAML.

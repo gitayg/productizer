@@ -350,7 +350,7 @@ repository. It has **never run on GitHub**: this repository is public, holds no
 model secrets, and a run costs model spend. What is measured is its static
 properties (`check-ci-template.py`, 14 of 14) and both ends of
 `build-dispatch.sh` against local repositories, with `gh` stubbed and origin a
-local bare repository (87 of 87). Not measured: the action itself, a real
+local bare repository (94 of 94). Not measured: the action itself, a real
 `gh`, that a draft stays a draft, and that GitHub runs the template's calls of
 the script as written (check-ci-template.py asserts the call text since B118,
 not its execution). A pull request it opens with the workflow's
@@ -366,8 +366,11 @@ files that steer CI or an agent - CLAUDE.md, AGENTS.md, `.mcp.json`,
 matched after folding case, Unicode normalisation and format characters, so a
 variant a checkout folds onto a rule file is refused, and a symbolic link or a
 submodule entry is refused at any path. Still allowed: a homoglyph from another
-script, and a rewritten checks result (its writer rewrites it every run).
-Nothing shows the list is complete (B125).
+script, and, in an attended run only, a rewritten checks result (its writer,
+`run-checks.sh`, rewrites it every run). Since 1.3, under `--unattended` - which
+the CI template's `deliver` passes on both of its calls - any change to the
+checks result is refused, because nothing in an unattended pipeline writes it
+(maintainer ruling 2026-10-12, B126). Nothing shows the list is complete (B125).
 
 The same default-deny refuses a design move that writes
 `.claude/productizer/` files such as `requirement-index.md`, which this

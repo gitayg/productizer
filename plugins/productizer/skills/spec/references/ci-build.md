@@ -200,8 +200,8 @@ refuses (exit 5) unless the plan is committed there.
 
 | Mode | Asked | Evidence it needs | What it forbids |
 |---|---|---|---|
-| `plan` | `design -> build --mode plan` | a `plan.md` under `artifacts.path` | every path except the plan |
-| `build` | `build -> test --mode build` | a path outside `artifacts.path` (a plan alone is not a build), and never the backlog | the spec, plus the forbidden set below |
+| `plan` | `design -> build --mode plan --unattended` | a `plan.md` under `artifacts.path` | every path except the plan |
+| `build` | `build -> test --mode build --unattended` | a path outside `artifacts.path` (a plan alone is not a build), and never the backlog | the spec, plus the forbidden set below |
 
 **The forbidden set, every mode.** It is written once, in `forbidden_any_mode()`
 in `stage-advance.sh`, and matched on the folded key described below it:
@@ -243,8 +243,21 @@ erases one can flip a check from a finding to clean. So a deletion of a
 bookkeeping path is refusal 3 in every mode, exactly as editing a rule file is;
 a stage run is the wrong actor to erase the record it is judged by. A snapshot or
 a classification MODIFIED is refused too: their writers never overwrite one. The
-checks result is rewritten by every `run-checks.sh` run, so its modification
-stays 'nothing'.
+checks result is rewritten by every `run-checks.sh` run, so when a person runs
+the stage its modification stays 'nothing'.
+
+**Unattended, the checks result is never written** (maintainer ruling
+2026-10-12, B126). `deliver` passes `--unattended` on both of its calls, and
+under it ANY change to `.claude/productizer/checks-result.json` - added,
+modified, deleted or retyped, alone or beside real code - is refusal 3, and
+`deliver` exits 6. Nothing in this pipeline runs `run-checks.sh`, so a change to
+that file is the agent's own: a forged verdict that whatever reads the file
+after the merge would take as a measurement. Without the flag nothing changes,
+because an attended run legitimately rewrites the file every time it runs the
+checks. Self-tested in `stage-advance.sh` (`unattended-checks-result-*`, and
+the `attended-checks-result-*` cases that hold the attended behaviour) and in
+`build-dispatch.sh` (`deliver-refuses-a-checks-result-patch` on the patch,
+`deliver-recheck-refuses-a-checks-result` on the commit).
 
 **The patch text is never parsed.** `stage-advance.sh --patch` has git apply
 the patch to a scratch index read from `HEAD`, in a temporary object
@@ -416,7 +429,7 @@ run in the `generate` job around the agent step.
 |---|---|
 | 0 | ok, or the dry run printed what it would have pushed and opened |
 | 2 | usage, including a `--spec-base` that is not 40 lower-case hex digits or does not resolve, and a `--permissions` value outside `repo-settings` and `edits-only` |
-| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, (`stash-git`/`capture`) the git-dir could not be moved or read, or (`agent-args`) the prepared `claude-args` are missing, hold a line outside the fixed shapes or a repeated flag, or lack the Bash deny |
+| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, (`prepare --body-out`) no `evals/solver-probe.py`, which the body requires, or a body that could not be rendered, (`stash-git`/`capture`) the git-dir could not be moved or read, or (`agent-args`) the prepared `claude-args` are missing, hold a line outside the fixed shapes or a repeated flag, or lack the Bash deny |
 | 4 | the spec is unchanged against the base. The run stops before any model call |
 | 5 | build mode, and no plan is committed at the plan path |
 | 6 | refused by `stage-advance.sh`, on the patch or on the commit made from it, whose reason is relayed verbatim. The branch is deleted and nothing is pushed |
@@ -429,7 +442,10 @@ prescribes. Its exit 6, a base that does not resolve, is a usage error here.
 
 `prepare --body-out` renders the pull request body, before the agent runs and
 in a job with no write token: the renderer, `pr-spec-comment.sh`, runs the
-repository's own solver probe when one exists. `deliver` renders nothing; it
+repository's own solver probe. The probe is required (maintainer ruling
+2026-10-12, B129): with no `evals/solver-probe.py`, `pr-spec-comment.sh` exits 3
+and renders nothing, and `prepare` refuses the run with exit 3 before any model
+is called, naming the file (see "Adopting it"). `deliver` renders nothing; it
 reads that body as text (see "The job that can write runs no code from the
 repository it writes to" above). The body is that report, followed by the
 sentence saying the pull request is a proposal to be reviewed, and the line
@@ -528,16 +544,42 @@ your copy after every edit.
    object `d669edc…`, `refs/tags/v4.65.1^{}` the commit `d9573c0…`). Keep the
    value quoted. Then run `check-ci-template.py` on your copy: its `tools-pin`
    assertion refuses anything but 40 lower-case hex digits.
-3. **Set the secret.** Add `ANTHROPIC_API_KEY` as a repository secret.
-4. **Protect the default branch.** Require a pull request review before
+3. **Provide the solver probe.** The template requires
+   `evals/solver-probe.py` in your repository; without it `prepare` refuses
+   every run, exit 3, before any model is called. The pull request body reports
+   it, and the maintainer ruled (2026-10-12, B129) that a body which says it is
+   partial on every pull request is a run that should not proceed. The
+   interface the body expects:
+   - It is run as `python3 evals/solver-probe.py` from the repository root,
+     with no arguments, in `prepare` (read-only token, before the agent).
+   - It exits 0. A non-zero exit renders its section **NOT MEASURED** and the
+     body says it is partial; the run still proceeds.
+   - It prints its counts on stdout, one per line, each line starting with
+     exactly two spaces and then `true positives`, `true negatives`,
+     `false positives`, `false negatives` or `undecided`, with the count as
+     the line's last
+     whitespace-separated field (for example `  true positives : 9`). Those
+     lines are shown verbatim, and their sum is reported as the number of cases
+     it ran - so every case it runs must land on exactly one of them. Lines
+     starting with two spaces and `precision` or `recall` are shown too.
+     Everything else it prints is ignored. A probe that prints none of the
+     count lines is **NOT MEASURED**, as above.
+   - It is your repository's code, and it runs where the template runs code
+     from your default branch: in the job with no write token.
+
+   This repository's own `evals/solver-probe.py` is an example: it scores the
+   deterministic contradiction checker over its own eval corpus. What your
+   probe measures is yours to decide; the body only reports it.
+4. **Set the secret.** Add `ANTHROPIC_API_KEY` as a repository secret.
+5. **Protect the default branch.** Require a pull request review before
    merging, and require your status checks. The draft pull request is a
    proposal. Branch protection is what stops a proposal from merging without a
    person.
-5. **Review your committed Claude Code settings.** `.claude/settings.json`
+6. **Review your committed Claude Code settings.** `.claude/settings.json`
    is what the agent gets: its deny lists and its `defaultMode`. Add denies
    for anything an unattended agent must never run. See
    [Permissions](#permissions).
-6. **Dispatch it** from the Actions tab or with
+7. **Dispatch it** from the Actions tab or with
    `gh workflow run build-from-spec.yml -f mode=plan -f issue=<N>`, from the
    default branch. The shell is denied in every run; `-f
    permissions=edits-only` is accepted as an alias of `repo-settings`.

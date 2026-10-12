@@ -369,7 +369,11 @@ created or retargeted, and a gitlink (submodule entry) added, repointed or
 removed, is exit 3 at any path: the script judges names, and a link makes a
 name stand for something else. Erasing a lifecycle record (a classification,
 a stage snapshot, the checks result) is exit 3, and so is rewriting a
-classification or a snapshot, which their writers never do. The backlog is
+classification or a snapshot, which their writers never do. With
+`--unattended`, which the CI build template's `deliver` passes, ANY change to
+the checks result is exit 3 too: nothing in an unattended pipeline writes it.
+A tracker move a person makes does not pass it, because a person's run
+rewrites the checks result every time it runs the checks. The backlog is
 never evidence, and in build mode a backlog item may be added but not changed.
 `design` needs a requirement id added, refined, superseded or withdrawn; a
 whitespace-only spec edit is not one.

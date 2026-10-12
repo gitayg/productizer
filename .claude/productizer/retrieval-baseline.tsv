@@ -5,6 +5,7 @@
 # spec: .claude/productizer/spec.md
 # spec-bytes: 85462
 # spec-sha256: 1ff0adb88231b7811c9c129dff16840334266e9f7803069d1970947740206a7a
+# signed off: by the maintainer, 2026-10-12 - this re-record (v4.68.0, ab74c5a), which reset all ten budgets against the 85462-byte spec above after three prompts had gone over band
 hollow-check	1624	19
 id-permanence	1141	29
 merge-nothing	1679	0

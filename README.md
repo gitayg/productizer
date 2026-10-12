@@ -48,7 +48,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.68.2"`.
+`plugin.json` sets `"version": "4.69.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -298,7 +298,9 @@ the spec as markdown **on stdout**. It posts nothing: `--post`, `--publish`,
 `.claude/hooks/publish-gate.sh`, because posting to a pull request is a publish
 and this repository routes every publish through that gate. Exit `5` means the
 report was rendered but at least one section could not be measured and says so
-in place.
+in place. Exit `3` means nothing was rendered - among other reasons, because the
+repository has no `evals/solver-probe.py`, which the report requires; the CI
+build template then refuses the run (`references/ci-build.md`, "Adopting it").
 
 ## Precedence, and the personal copy at `~/.claude/skills/`
 

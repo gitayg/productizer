@@ -653,8 +653,9 @@ base ref does not resolve*, *the diff was over the cap so it was not read* and
 different facts. Each gets its own sentence, and the ones that are an absence
 of measurement rather than a measured absence exit **`5` — rendered, but
 partial** — so a caller knows the report has a hole without reading it. Exit
-`3` means it never started: not a git work tree, no such directory, or
-`spec-diff.sh` unusable.
+`3` means it never started: not a git work tree, no such directory,
+`spec-diff.sh` unusable, or no `evals/solver-probe.py` - the report requires the
+repository's solver probe, so its absence is a refusal, not a partial report.
 
 The delta itself comes from `spec-diff.sh`, and the base commit that tool
 resolves is the base every other section is measured against. One resolution of
@@ -772,7 +773,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Seventy-five requirements are active**, and they are the whole of what has
+**Seventy-seven requirements are active**, and they are the whole of what has
 been agreed.
 
 Seven more are superseded and none withdrawn, and neither kind is listed here.
@@ -878,7 +879,7 @@ of a state, not at a moment inside it:
   template shall refuse to run before checking anything out, naming the
   command that prints a release's commit id.
 
-**When something goes wrong.** Thirty-one defences, written as `If … then`
+**When something goes wrong.** Thirty-three defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -954,6 +955,10 @@ because a designed path and a defended one are not the same thing:
 - **R79** — If a flag line prepared for an unattended run is outside the fixed
   shapes `build-dispatch.sh prepare` writes, repeats a flag, or the prepared
   flags lack the Bash deny, then the CI build template shall refuse the run.
+- **R83** — If an unattended stage run's change touches the lifecycle's checks
+  result, then the lifecycle shall refuse to deliver that change.
+- **R84** — If the repository has no solver probe, then the lifecycle shall
+  refuse to render a pull request body.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

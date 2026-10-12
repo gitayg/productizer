@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # stage-advance.sh [repo-root] --from STAGE --to STAGE
 #                  (--patch FILE | --base REF [--head REF])
-#                  [--mode plan|build] [--format text|json]
+#                  [--mode plan|build] [--unattended] [--format text|json]
 #                  [--selftest] [--version] [--help]
 #
 # MAY THIS WORK ITEM'S STAGE MOVE FROM --from TO --to, ON THE EVIDENCE OF THIS
@@ -35,8 +35,9 @@
 #      record-classification.sh both refuse to overwrite one (their exit 1),
 #      and in this repository's history neither store was ever modified, only
 #      added to, so a rewrite is never their writer's. The checks result is
-#      rewritten by every run of run-checks.sh, so its modification is
-#      "nothing", like an addition.
+#      rewritten by every run of run-checks.sh, so in an ATTENDED run its
+#      modification is "nothing", like an addition. Under --unattended it is
+#      refusal 3 instead, whatever the change (see UNATTENDED below).
 #      `.claude/productizer/backlog.md` is never evidence either: it is the
 #      queue in front of intake, and a row is a wish, not a result.
 #   5  NOT A FORWARD MOVE. --to is at or before --from in the stage order.
@@ -84,6 +85,17 @@
 #      run is the wrong actor to edit any of them. An artifacts.path under
 #      .claude/ or .github/ therefore cannot hold a plan an unattended run may
 #      write: the any-mode set is checked first.
+#
+# UNATTENDED. --unattended says no person is at the keyboard: the copyable CI
+# template's deliver (build-dispatch.sh) passes it on both of its calls. Under
+# it, ANY change to .claude/productizer/checks-result.json - added, modified,
+# deleted, or a change of type - is refusal 3, in every mode and beside any
+# other change. Nothing in an unattended pipeline writes that file (the
+# template runs no run-checks.sh), so a change to it is the run's own: a forged
+# verdict that whatever reads the file after the merge would take as a
+# measurement (maintainer ruling 2026-10-12, B126). Without the flag nothing
+# changes: a person's run legitimately rewrites the file every time it runs
+# run-checks.sh, so attended, its addition or modification stays "nothing".
 #
 # STAGE ORDER is the key order of `github.issues.stage_labels` in
 # .claude/productizer/config.json; a STAGE may be given as the key (`build`) or
@@ -142,7 +154,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.2"
+VERSION="stage-advance 1.3"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -151,14 +163,16 @@ die_usage() { printf 'stage-advance: %s\n' "$1" >&2; exit 2; }
 usage() {
   printf 'usage: stage-advance.sh [repo-root] --from STAGE --to STAGE\n'
   printf '                        (--patch FILE | --base REF [--head REF])\n'
-  printf '                        [--mode plan|build] [--format text|json]\n'
+  printf '                        [--mode plan|build] [--unattended] [--format text|json]\n'
   printf '       stage-advance.sh --selftest | --version | --help\n'
+  printf '  --unattended  no person is at the keyboard: any change to\n'
+  printf '                .claude/productizer/checks-result.json is refused (exit 3)\n'
   printf 'exit: 0 advance allowed, 1 produced nothing, 2 usage, 3 forbidden path,\n'
   printf '      4 cannot determine, 5 not a forward move\n'
 }
 
 ROOT=""; FROM=""; TO=""; PATCH=""; BASE=""; HEAD_REF=""; MODE=""; FORMAT="text"
-SELFTEST=0
+SELFTEST=0; UNATTENDED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
@@ -178,6 +192,7 @@ while [ $# -gt 0 ]; do
     --mode=*) MODE="${1#--mode=}"; shift ;;
     --format) [ $# -ge 2 ] || die_usage "--format needs text or json"; FORMAT="$2"; shift 2 ;;
     --format=*) FORMAT="${1#--format=}"; shift ;;
+    --unattended) UNATTENDED=1; shift ;;
     -*) die_usage "unknown option: $1. Run with --help for the contract." ;;
     *)  [ -z "$ROOT" ] || die_usage "only one repo-root; got a second: $1"; ROOT="$1"; shift ;;
   esac
@@ -561,6 +576,42 @@ JSON
   drive bk-checks-result-rewritten-inert 1 "produced nothing outside the lifecycle's own bookkeeping" \
     "$R" --from build --to test --mode build --base snap-rewritten
 
+  # --- B126. --unattended: ANY change to the checks result is refused, alone
+  # or beside code, under --patch and --base. Attended, nothing changes: an
+  # addition or a modification is inert, and a deletion is R66's refusal.
+  local CR=".claude/productizer/checks-result.json"
+  newrepo un-cr; R="$WORK/un-cr"
+  printf '{"pass": true}\n' > "$R/$CR"
+  G "$R" add -A; G "$R" diff --cached > "$WORK/un-add.patch"; G "$R" reset --quiet --hard
+  drive unattended-checks-result-added 3 "Changed: $CR (added)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-add.patch"
+  drive attended-checks-result-added-inert 1 "produced nothing outside the lifecycle's own bookkeeping" \
+    "$R" --from build --to test --mode build --patch "$WORK/un-add.patch"
+  printf '{"pass": false}\n' > "$R/$CR"; commit "$R"; G "$R" tag with-result
+  printf '{"pass": true}\n' > "$R/$CR"
+  G "$R" diff > "$WORK/un-mod.patch"
+  printf 'echo bye\n' > "$R/src/app.sh"
+  G "$R" diff > "$WORK/un-mod-code.patch"; G "$R" restore -- .
+  G "$R" rm --quiet "$CR"; G "$R" diff --cached > "$WORK/un-del.patch"; G "$R" reset --quiet --hard
+  printf 'echo bye\n' > "$R/src/app.sh"; G "$R" diff > "$WORK/un-code.patch"; G "$R" restore -- src/app.sh
+  drive unattended-checks-result-modified 3 "Changed: $CR (modified)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-mod.patch"
+  drive attended-checks-result-modified-inert 1 "produced nothing outside the lifecycle's own bookkeeping" \
+    "$R" --from build --to test --mode build --patch "$WORK/un-mod.patch"
+  drive unattended-checks-result-deleted 3 "Changed: $CR (deleted)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-del.patch"
+  drive attended-checks-result-deleted-r66 3 "a stage run may not erase an audit record" \
+    "$R" --from build --to test --mode build --patch "$WORK/un-del.patch"
+  drive unattended-checks-result-beside-code 3 "a stage run may not write the verdict it is judged by" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-mod-code.patch"
+  drive attended-checks-result-beside-code 0 "src/app.sh" \
+    "$R" --from build --to test --mode build --patch "$WORK/un-mod-code.patch"
+  drive unattended-code-allowed 0 "src/app.sh" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-code.patch"
+  printf '{"pass": true}\n' > "$R/$CR"; printf 'echo bye\n' > "$R/src/app.sh"; commit "$R"
+  drive unattended-checks-result-base-mode 3 "Changed: $CR (modified)" \
+    "$R" --from build --to test --mode build --unattended --base with-result
+
   # --- B120. The backlog in build mode: an item may be added, none changed.
   newrepo bl; R="$WORK/bl"
   printf '| B1 | a wish | todo |\n' > "$R/.claude/productizer/backlog.md"
@@ -621,7 +672,7 @@ JSON
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; a homoglyph from another script (a Cyrillic letter for a Latin one), which is not folded; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED, which stays inert because run-checks.sh rewrites it every run, so a forged one is not caught here; a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent.\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; a homoglyph from another script (a Cyrillic letter for a Latin one), which is not folded; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -854,6 +905,7 @@ ART_RE="^$(ere_escape "$ART" | sed 's/<[^>]*>/[^\/]+/g')/"
 ART_KEY_RE="^$(ere_escape "$ART_KEY" | sed 's/<[^>]*>/[^\/]+/g')/"
 PLAN_RE="${ART_RE}plan\\.md\$"
 BACKLOG=".claude/productizer/backlog.md"
+CHECKS_RESULT=".claude/productizer/checks-result.json"
 
 is_bookkeeping() {
   case "$1" in
@@ -902,7 +954,7 @@ is_forbidden() {
   return 1
 }
 
-REAL=""; BK_DELETED=""; BK_REWRITTEN=""; LINKS=""; BACKLOG_ST=""
+REAL=""; BK_DELETED=""; BK_REWRITTEN=""; BK_UNATTENDED=""; LINKS=""; BACKLOG_ST=""
 while IFS=$'\t' read -r st om nm p k; do
   [ -n "$p" ] || continue
   # A LINK, any path, any mode. A symbolic link makes one name stand for
@@ -925,8 +977,13 @@ while IFS=$'\t' read -r st om nm p k; do
     # or a classification MODIFIED (or retyped) is refused the same way: their
     # writers never update one, so a rewrite is never theirs. The checks
     # result is rewritten by every run of run-checks.sh, so its modification
-    # stays inert, like an addition.
-    if [ "$st" = D ]; then BK_DELETED="$BK_DELETED$p"$'\n'
+    # stays inert, like an addition - when a person runs it. UNATTENDED, any
+    # change to the checks result is the run's own: nothing in an unattended
+    # pipeline writes it (B126).
+    if [ "$UNATTENDED" = 1 ] && [ "$p" = "$CHECKS_RESULT" ]; then
+      case "$st" in A) w=added ;; D) w=deleted ;; T) w=retyped ;; *) w=modified ;; esac
+      BK_UNATTENDED="$BK_UNATTENDED$p ($w)"$'\n'
+    elif [ "$st" = D ]; then BK_DELETED="$BK_DELETED$p"$'\n'
     elif [ "$st" != A ] && is_write_once "$p"; then BK_REWRITTEN="$BK_REWRITTEN$p"$'\n'
     fi
     continue
@@ -936,6 +993,10 @@ while IFS=$'\t' read -r st om nm p k; do
   if is_forbidden "$p" "$k"; then FORBIDDEN="$FORBIDDEN$p"$'\n'; fi
 done <<< "$CHANGES"
 
+if [ -n "$BK_UNATTENDED" ]; then
+  FORBIDDEN="$CHECKS_RESULT"
+  finish 3 "the change touches the lifecycle's checks result in an unattended run; nothing in an unattended pipeline writes $CHECKS_RESULT, so any change to it is the run's own, and a stage run may not write the verdict it is judged by. Changed: $(printf '%s' "$BK_UNATTENDED" | tr '\n' ' ' | sed 's/ $//')"
+fi
 if [ -n "$BK_DELETED" ]; then
   FORBIDDEN="$BK_DELETED"
   finish 3 "the change deletes lifecycle bookkeeping that a later stage and the governance checks read; a stage run may not erase an audit record (a classification, a snapshot or the checks result). Deleted: $(printf '%s' "$BK_DELETED" | tr '\n' ' ' | sed 's/ $//')"

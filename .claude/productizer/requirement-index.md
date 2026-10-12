@@ -108,4 +108,6 @@ marker, because a table left there would be one nothing writes or checks.
 | R80 | ubiquitous | active | `ci-template-safe` |
 | R81 | state | active | `ci-template-safe` |
 | R82 | event | active | `stderr-suppression` |
+| R83 | unwanted | active | `stage-advance-guard`, `build-dispatch` |
+| R84 | unwanted | active | `build-dispatch` |
 <!-- productizer:requirement-index:end -->

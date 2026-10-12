@@ -33,14 +33,21 @@
 #
 # Exit: 0 rendered, every section measured
 #       2 usage, or a refused publish
-#       3 not a git work tree, no such directory, or spec-diff.sh is unusable
+#       3 not a git work tree, no such directory, spec-diff.sh unusable, or no evals/solver-probe.py
 #       5 rendered, but at least one section could NOT be measured and says so
+#
+# THE PROBE IS REQUIRED (maintainer ruling 2026-10-12, B129). A repository with
+# no readable evals/solver-probe.py is exit 3 before anything is rendered, not a
+# partial report: the CI build template renders this report as every pull
+# request's body, and an adopter without a probe would read "This report is
+# partial" on every one. A probe that exists but fails or prints no counts is
+# still a section marked NOT MEASURED, and exit 5.
 #
 # --selftest builds real repositories under mktemp -d, with the real sibling
 # spec-diff.sh, and exits 0 when every case held and 1 when one did not.
 set -euo pipefail
 
-VERSION="pr-spec-comment 1.1"
+VERSION="pr-spec-comment 1.2"
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$HERE/$(basename -- "${BASH_SOURCE[0]}")"
@@ -100,10 +107,10 @@ selftest() {
 
   G() { git -C "$1" -c user.email=selftest@example.invalid -c user.name=selftest \
           -c commit.gpgsign=false "${@:2}"; }
-  # newrepo <name> [bare|noconst]: a spec holding R1, tagged `base`. Unless
-  # `bare`, also a classification store, a Stage 5 result and a solver probe, so
-  # that every section of the report is measurable. `noconst` leaves out the
-  # constitution and nothing else.
+  # newrepo <name> [bare|noconst|noprobe]: a spec holding R1, tagged `base`, and
+  # a solver probe. Unless `bare`, also a classification store and a Stage 5
+  # result, so that every section of the report is measurable. `noconst` leaves
+  # out the constitution and nothing else; `noprobe` the probe and nothing else.
   newrepo() {
     local R="$ST/$1"
     mkdir -p "$R/.claude/productizer"
@@ -114,7 +121,7 @@ selftest() {
     # turns its exit into 5 for the whole run.
     [ "${2:-}" = noconst ] || printf '# Constitution\n\n1. Small steps.\n' > "$R/.claude/productizer/constitution.md"
     if [ "${2:-}" != bare ]; then
-      mkdir -p "$R/.claude/productizer/classifications" "$R/evals"
+      mkdir -p "$R/.claude/productizer/classifications"
       printf 'Intent: seed\nClassification: extend\n' > "$R/.claude/productizer/classifications/0-seed.md"
       cat > "$R/.claude/productizer/checks-result.json" <<'JSON'
 {"verdict": "PASS", "exit_code": 0,
@@ -122,6 +129,9 @@ selftest() {
             "advisory_failures": 0, "not_triggered": 0, "spec_units_unsatisfied": 0},
  "checks": [{"id": "lint", "status": "pass"}], "change": {"files": ["src/a.sh"]}}
 JSON
+    fi
+    if [ "${2:-}" != noprobe ]; then
+      mkdir -p "$R/evals"
       printf 'print("  true positives   3")\nprint("  false negatives  0")\nprint("  precision 1.00")\n' \
         > "$R/evals/solver-probe.py"
     fi
@@ -249,6 +259,14 @@ PLANT
   # shellcheck disable=SC2016  # the backticks are literal markdown in the expected sentence
   drive adopter-gate-path-from-hook 0 'write `ops/release-list.md` with `Command: gh pr comment' "$R" --base base
 
+  # B129. The probe is required: with no evals/solver-probe.py the report is
+  # refused (exit 3) before a line is rendered, not rendered as partial.
+  newrepo noprobe noprobe; R="$ST/noprobe"
+  printf -- '- **R2** \342\200\224 The tool shall wave.\n' >> "$R/.claude/productizer/spec.md"
+  commit "$R"
+  drive no-probe-refused 3 "there is no readable evals/solver-probe.py in this tree" "$R" --base base
+  lacks no-probe-refused "## What this change did to the spec"
+
   printf '\n%s of %s cases held\n' "$HELD" "$CASES"
   local reached documented
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
@@ -275,6 +293,16 @@ cd "$(git rev-parse --show-toplevel)"
 [ -x "$SPEC_DIFF" ] || {
   echo "pr-spec-comment: spec-diff.sh is not executable at $SPEC_DIFF." >&2
   echo "The delta is computed there and nowhere else. Refusing rather than reimplementing it." >&2
+  exit 3; }
+
+# THE PROBE IS REQUIRED (maintainer ruling 2026-10-12, B129). The report carries
+# the repository's solver probe, and the CI build template renders this report
+# as every pull request's body; a repository without one would read "This report
+# is partial" on every pull request. So its absence is a refusal, checked before
+# a line is rendered, and the caller decides what to do without a body.
+[ -f "$PROBE_REL" ] && [ -r "$PROBE_REL" ] || {
+  echo "pr-spec-comment: there is no readable $PROBE_REL in this tree, and the report requires the repository's solver probe." >&2
+  echo "The CI build template requires an adopter to provide $PROBE_REL (references/ci-build.md, \"Adopting it\"). Nothing was rendered." >&2
   exit 3; }
 
 WORK="$(mktemp -d)"
@@ -616,14 +644,11 @@ fi
 # Everything said here is read from the tree the report runs in. This renders
 # the body of a pull request in an adopter's repository too, so a sentence about
 # this repository's own corpus, workflow or publish checklist would be a
-# reference to nothing there (B104). Absent the file, the sentence is omitted.
+# reference to nothing there (B104). Absent a workflow naming the probe, that
+# sentence is omitted. The probe itself was required above (B129).
 say "### Solver probe"
 say ""
-if [ ! -r "$PROBE_REL" ]; then
-  say "**NOT MEASURED.** There is no \`$PROBE_REL\` in this tree, so no solver probe was run."
-  say ""
-  UNMEASURED=1
-elif ! command -v python3 >/dev/null; then
+if ! command -v python3 >/dev/null; then
   say "**NOT MEASURED.** \`python3\` is not on PATH."
   say ""
   UNMEASURED=1
