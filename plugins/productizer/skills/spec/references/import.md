@@ -47,7 +47,7 @@ Imported requirements land as **inferred** and become active only when a human
 confirms them.
 
 An inferred requirement is a normal EARS sentence with a marker line beneath it,
-in the same position `templates/spec.md` already puts `Superseded by R58.` and
+in the same position `templates/spec.md` already puts `Superseded by R0.` and
 `Withdrawn.`:
 
 ```

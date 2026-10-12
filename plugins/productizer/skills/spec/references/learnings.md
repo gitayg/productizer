@@ -86,6 +86,7 @@ Three consequences, all enforced somewhere rather than asserted here:
    fact.** It goes through intake like any other intent — the same road Stage 9
    uses for code-versus-spec drift. No script decides this; it needs a reader,
    and that limitation is printed in `check`'s own output.
+   <!-- EXAMPLE:BEGIN -->
 3. **Graduation is one-way and recorded.** When an observation turns out to be
    a real obligation, the requirement is merged into the spec first — an id in
    the spec *is* the merge — and `learnings.sh graduate --id L7 --to R58` then
@@ -93,6 +94,7 @@ Three consequences, all enforced somewhere rather than asserted here:
    noticed this" to "the spec now requires it" survives, and stops being served.
    `graduate` refuses an `R` id the spec does not define or no longer marks
    active: a trail to nowhere is worse than no trail, because it looks like one.
+   <!-- EXAMPLE:END -->
 
 ## The citation, and the check it makes possible
 
@@ -222,6 +224,7 @@ not miss.
 
 ## Using it
 
+<!-- EXAMPLE:BEGIN -->
 ```bash
 S=plugins/productizer/skills/spec/scripts/learnings.sh
 
@@ -236,6 +239,7 @@ bash "$S" check                    # citations, fields, states, obligation langu
 bash "$S" verify   --id L1 --by 'session 2026-08-30'   # refuses the observer
 bash "$S" graduate --id L1 --to R58                     # after R58 is merged
 ```
+<!-- EXAMPLE:END -->
 
 `--root` defaults to `git rev-parse --show-toplevel`, never the working
 directory. A default of `.` resolves to a different store from every

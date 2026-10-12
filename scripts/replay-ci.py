@@ -24,6 +24,8 @@ WHAT IT DOES.
      the copy of the tool this machine will use instead.
   4. Prints one line per step with its exit code, and the tail of each failing
      step's log.
+  5. Runs every step under RUNNER-LIKE GIT AND HOST SETTINGS, not this
+     machine's (B124). See RUNNER_GIT below for what is pinned and why.
 
 Every step runs, even after one fails. A step CI would skip after a failure
 (no `if: !cancelled()`) is marked so; its result is still reported, because a
@@ -99,6 +101,49 @@ HOST_REFUSALS = [
     (re.compile(r"^PyYAML\b"), "externally-managed-environment", re.compile(r"^Guard\b"),
      "PEP 668: this machine's python3 refuses a system-wide pip install; CI's setup-python accepts it"),
 ]
+
+# B124 - THE RUNNER'S GIT, NOT THIS MACHINE'S. v4.67.3 went red in CI (run
+# 38196237689) while this replay was green: a self-test's bare origin was made
+# with `git init --bare` and no branch name, so it took git's default - and the
+# default differs. Measured: this Mac's git (Apple Git-157) reads
+# `init.defaultBranch = main` from Xcode's built-in system gitconfig, while the
+# runner's actions/checkout logs "hint: Using 'master' as the name for the
+# initial branch" (git 2.55.0, ubuntu-24.04). So every step runs with:
+#   - no system and an EMPTY global git config (GIT_CONFIG_NOSYSTEM, and
+#     GIT_CONFIG_GLOBAL pointed at an empty file): this machine's credential
+#     helpers, identity, lfs filters and defaults do not reach a step;
+#   - init.defaultBranch=master, pinned through GIT_CONFIG_COUNT, so the replay
+#     says master even if a later git changes its built-in default - a fixture
+#     that leans on the default goes red here, as it did on the runner;
+#   - user.useConfigOnly=true. Measured: with an empty config this Mac's git
+#     still commits, as `<user>@<host>.local` it guessed; Linux git on a host
+#     named like a runner's (`fv-az123-456`, in a container) refuses with
+#     "unable to auto-detect email address". A fixture that commits without
+#     its own `-c user.email` would pass here and fail there;
+#   - TZ=UTC and LANG=C.UTF-8, the runner's, with this shell's LC_* dropped;
+#   - no GIT_* or EMAIL variable inherited from this shell (a replay started
+#     from a git hook would otherwise carry GIT_DIR into every step).
+RUNNER_GIT = [("init.defaultBranch", "master"), ("user.useConfigOnly", "true")]
+RUNNER_HOST = {"TZ": "UTC", "LANG": "C.UTF-8"}
+
+
+def runner_like_env(rt):
+    """(env, dropped) - this shell's environment made runner-like for a step."""
+    env, dropped = {}, []
+    for k, v in os.environ.items():
+        if k.startswith(("GIT_", "LC_")) or k in ("EMAIL", "LANG", "TZ"):
+            dropped.append(k)
+        else:
+            env[k] = v
+    empty = os.path.join(rt, "empty-global.gitconfig")
+    open(empty, "w").close()
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=empty, GIT_CONFIG_COUNT=str(len(RUNNER_GIT)))
+    for n, (k, v) in enumerate(RUNNER_GIT):
+        env[f"GIT_CONFIG_KEY_{n}"] = k
+        env[f"GIT_CONFIG_VALUE_{n}"] = v
+    env.update(RUNNER_HOST)
+    return env, sorted(dropped)
+
 
 EXPRESSIONS = {
     "github.event.before": None,  # the push base, filled in at run time
@@ -290,6 +335,11 @@ def run_steps(steps, ws, rt, logs, base):
     carried_env = {}
     prepend = []
     base_path = os.environ.get("PATH", "")
+    runner_env, dropped = runner_like_env(rt)
+    print("replay-ci: steps run runner-like: no system or global git config, "
+          + ", ".join(f"{k}={v}" for k, v in RUNNER_GIT) + ", "
+          + ", ".join(f"{k}={v}" for k, v in RUNNER_HOST.items())
+          + "; dropped from this shell: " + (", ".join(dropped) or "nothing"), flush=True)
     results = []  # (index, name, status, rc)
     refused = {}  # step index -> (verifier regex, why, pin)
     failed_so_far = False
@@ -321,7 +371,7 @@ def run_steps(steps, ws, rt, logs, base):
         path_file = os.path.join(rt, f"github-path-{i}")
         open(env_file, "w").close()
         open(path_file, "w").close()
-        env = dict(os.environ)
+        env = dict(runner_env)
         env.update(carried_env)
         for k, v in (s.get("env") or {}).items():
             env[str(k)] = EXPR.sub(lambda mm: base if mm.group(1) == "github.event.before"
@@ -547,6 +597,30 @@ FIXTURE_STEPS = {
           echo "boom-marker-7f3a"
           exit 3
 """,
+    "runner-git": """\
+      - name: Runner git - default branch, identity, config and clock are the runner's
+        run: |
+          set -euo pipefail
+          test "$(git config --get init.defaultBranch)" = master
+          test -z "$(git config --global --list)"
+          if git var GIT_AUTHOR_IDENT; then echo "an identity was guessed"; exit 1; fi
+          test "$TZ" = UTC
+          test -z "${GIT_FIXTURE_LEAK:-}"
+          git init -q --bare "$RUNNER_TEMP/plain.git"
+          test "$(git -C "$RUNNER_TEMP/plain.git" symbolic-ref HEAD)" = refs/heads/master
+""",
+    "bare-origin": """\
+      - name: Bare origin - the v4.67.3 fixture, leaning on git's default branch
+        run: |
+          set -euo pipefail
+          git init -q --bare "$RUNNER_TEMP/origin.git"
+          git init -q --initial-branch=main "$RUNNER_TEMP/work"
+          cd "$RUNNER_TEMP/work"
+          git -c user.email=fixture@example.invalid -c user.name=fixture commit -q --allow-empty -m one
+          git push -q "$RUNNER_TEMP/origin.git" main
+          git clone -q "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/clone"
+          git -C "$RUNNER_TEMP/clone" rev-parse --verify HEAD
+""",
     "secret": """\
       - name: Secret - an expression the replay cannot evaluate
         env:
@@ -616,6 +690,13 @@ def _cases():
         ("the install step fails WITHOUT the host-refusal marker: an ordinary FAIL",
          [p if p != "pyyaml" else "pyyaml-other" for p in P], lambda s, a, b: [],
          lambda a, b: {"FIXTURE_EXPECT_BASE": a}, True, 1, ["1 step(s) failed", "#2 PyYAML"]),
+        ("B124: steps see the runner's git - master, no identity, no global config - and UTC, not this shell's",
+         P + ["runner-git"], lambda s, a, b: [], lambda a, b: {"FIXTURE_EXPECT_BASE": a, "GIT_FIXTURE_LEAK": "1"},
+         True, 0, ["every step that ran passed", "steps run runner-like", "init.defaultBranch=master",
+                   "user.useConfigOnly=true", "TZ=UTC", "GIT_FIXTURE_LEAK"]),
+        ("B124: a fixture whose bare origin takes git's default branch goes red, as it did on the runner",
+         P + ["bare-origin"], lambda s, a, b: [], lambda a, b: {"FIXTURE_EXPECT_BASE": a}, True, 1,
+         ["1 step(s) failed", "#9 Bare origin", "remote HEAD refers to nonexistent ref"]),
         ("an expression the replay cannot evaluate: could not run",
          P + ["secret"], lambda s, a, b: [], lambda a, b: {}, True, 2,
          ["could not run: workflow unparseable", "secrets.TOKEN"]),
@@ -692,7 +773,9 @@ def selftest():
     print(f"    exit codes reached: {' '.join(str(c) for c in codes)}   documented: 0 1 2")
     print("    NOT ASSERTED: that the real workflow replays the same way on this machine - it is never run here, "
           "it takes minutes; that a skipped install's local tool matches CI's pinned version; that a `uses:` "
-          "action's effect (setup-node, setup-python) is matched by this machine's own runtimes.")
+          "action's effect (setup-node, setup-python) is matched by this machine's own runtimes; that the "
+          "runner-like git and host settings are ALL the differences that matter - the runner's own identity "
+          "refusal and its LANG are not measured here, only the git default branch is quoted from a runner log.")
     missing = {0, 1, 2} - set(codes)
     if missing:
         sys.stdout.flush()

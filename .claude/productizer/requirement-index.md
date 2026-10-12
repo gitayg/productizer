@@ -97,4 +97,15 @@ marker, because a table left there would be one nothing writes or checks.
 | R69 | event | active | `ci-template-safe` |
 | R70 | unwanted | active | `build-dispatch` |
 | R71 | state | active | `ci-template-safe` |
+| R72 | unwanted | active | `stage-advance-guard` |
+| R73 | ubiquitous | active | `stage-advance-guard` |
+| R74 | ubiquitous | active | `stage-advance-guard` |
+| R75 | unwanted | active | `stage-advance-guard` |
+| R76 | unwanted | active | `stage-advance-guard` |
+| R77 | unwanted | active | `stage-advance-guard` |
+| R78 | event | active | `ci-template-safe` |
+| R79 | unwanted | active | `ci-template-safe` |
+| R80 | ubiquitous | active | `ci-template-safe` |
+| R81 | state | active | `ci-template-safe` |
+| R82 | event | active | `stderr-suppression` |
 <!-- productizer:requirement-index:end -->

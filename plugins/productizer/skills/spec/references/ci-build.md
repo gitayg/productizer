@@ -77,9 +77,10 @@ a cache written there is readable by every branch's workflows: cross-workflow
 cache poisoning. The template closes this by **denying the agent a shell
 outright**: `build-dispatch.sh prepare` adds `--disallowedTools Bash` in every
 `permissions` option, the agent step's `claude_args` carries it too, and the
-"Read the flags" step refuses to run the agent if the prepared flags do not
-deny Bash. `check-ci-template.py` asserts the agent step declares the standalone
-deny (`deny-bash`). Measured 2026-10-11 against local `claude -p` 2.1.295:
+"Read the flags" step - `build-dispatch.sh agent-args`, self-tested since B118 -
+refuses to run the agent if the prepared flags do not deny Bash.
+`check-ci-template.py` asserts the agent step declares the standalone deny
+(`deny-bash`) and that the "Read the flags" step calls `agent-args` (`guards`). Measured 2026-10-11 against local `claude -p` 2.1.295:
 denying Bash removes the built-in command tool, and the removal is honoured in
 sub-agents too, so a `Task` cannot reach a shell either. Running the
 repository's tests in CI is given up for this rule.
@@ -200,11 +201,10 @@ refuses (exit 5) unless the plan is committed there.
 | Mode | Asked | Evidence it needs | What it forbids |
 |---|---|---|---|
 | `plan` | `design -> build --mode plan` | a `plan.md` under `artifacts.path` | every path except the plan |
-| `build` | `build -> test --mode build` | any path outside the lifecycle's bookkeeping | the spec, plus the forbidden set below |
+| `build` | `build -> test --mode build` | a path outside `artifacts.path` (a plan alone is not a build), and never the backlog | the spec, plus the forbidden set below |
 
 **The forbidden set, every mode.** It is written once, in `forbidden_any_mode()`
-in `stage-advance.sh`, and matched on the path lower-cased, so a case variant
-that a case-insensitive checkout would fold onto a rule file is refused too:
+in `stage-advance.sh`, and matched on the folded key described below it:
 
 - `.github/**`: every workflow, composite action, `CODEOWNERS` and
   `dependabot.yml`, all of it.
@@ -221,6 +221,13 @@ that a case-insensitive checkout would fold onto a rule file is refused too:
   `docs/CODEOWNERS`, `REVIEW.md`, `.productizer-run/**`,
   `.productizer-tools/**`.
 
+Names are matched on a folded key (format characters removed, NFKC, Unicode
+case folding), so a variant a case- or normalisation-insensitive checkout folds
+onto a rule file is refused; exceptions are granted on the exact bytes only. A
+symbolic link created or retargeted, and a gitlink added, repointed or removed,
+is refused at any path. In build mode the backlog may gain an item but not lose
+or change one.
+
 These decide what CI runs, what an agent is told and may do, how git treats a
 path, and what the run is judged by. Because the set is checked first, an
 `artifacts.path` under `.claude/` or `.github/` cannot hold a plan an
@@ -234,11 +241,10 @@ of one of those records is a different act: a classification, a snapshot or the
 checks result is an audit record the governance checks read, and a run that
 erases one can flip a check from a finding to clean. So a deletion of a
 bookkeeping path is refusal 3 in every mode, exactly as editing a rule file is;
-a stage run is the wrong actor to erase the record it is judged by. What this
-does NOT catch is a bookkeeping record MODIFIED in place rather than added or
-deleted - git reports an add and a modify alike, so `stage-advance.sh` cannot
-tell them apart; a forged classification is caught instead by its spec-hash in
-`check-classification-provenance.sh`.
+a stage run is the wrong actor to erase the record it is judged by. A snapshot or
+a classification MODIFIED is refused too: their writers never overwrite one. The
+checks result is rewritten by every `run-checks.sh` run, so its modification
+stays 'nothing'.
 
 **The patch text is never parsed.** `stage-advance.sh --patch` has git apply
 the patch to a scratch index read from `HEAD`, in a temporary object
@@ -378,12 +384,28 @@ build-dispatch.sh prepare [repo-root] --mode plan|build --issue N
                           --default-branch NAME --out DIR [--spec-base SHA]
                           [--permissions repo-settings|edits-only]
                           [--body-out DIR]
+build-dispatch.sh agent-args [repo-root] --out FILE
 build-dispatch.sh stash-git [repo-root] --git-dir DIR
 build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE
 build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
                           --patch FILE --body DIR --run-id ID
                           --default-branch NAME [--spec-base SHA] [--dry-run]
 ```
+
+`agent-args` is the last check on the flags the agent runs with, in the
+`generate` job before the agent step. It re-reads `.productizer-run/claude-args`
+(prepare's output, fetched as an artifact) and refuses it - exit 3 - unless
+every line is one of the fixed shapes prepare writes (`--model <id>`,
+`--effort <level>`, `--permission-mode acceptEdits`, `--disallowedTools Bash`),
+no flag repeats, and the Bash deny is present. Only then does it append the
+lines it checked, not the file as it stands, to `$GITHUB_OUTPUT` as
+`claude_args` under a random heredoc delimiter. Until B118 this was shell inside
+the template's YAML, which no self-test ran, and a last line with no newline
+was never read by its loop yet still emitted: measured against the v4.67.4
+step, a file ending in an unterminated `--permission-mode bypassPermissions`
+passed the check and reached the step output. The self-test drives every
+`claude-args` its own `prepare` cases wrote through `agent-args`, so the two
+sets of shapes cannot drift apart.
 
 `stash-git` moves the working tree's `.git` out to `DIR` (which must be outside
 the tree) before the agent runs; `capture` computes the patch against that
@@ -394,7 +416,7 @@ run in the `generate` job around the agent step.
 |---|---|
 | 0 | ok, or the dry run printed what it would have pushed and opened |
 | 2 | usage, including a `--spec-base` that is not 40 lower-case hex digits or does not resolve, and a `--permissions` value outside `repo-settings` and `edits-only` |
-| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, or (`stash-git`/`capture`) the git-dir could not be moved or read |
+| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, (`stash-git`/`capture`) the git-dir could not be moved or read, or (`agent-args`) the prepared `claude-args` are missing, hold a line outside the fixed shapes or a repeated flag, or lack the Bash deny |
 | 4 | the spec is unchanged against the base. The run stops before any model call |
 | 5 | build mode, and no plan is committed at the plan path |
 | 6 | refused by `stage-advance.sh`, on the patch or on the commit made from it, whose reason is relayed verbatim. The branch is deleted and nothing is pushed |
@@ -405,11 +427,12 @@ run in the `generate` job around the agent step.
 The line it printed goes to the agent as written, as `build-diff.md`
 prescribes. Its exit 6, a base that does not resolve, is a usage error here.
 
-Deliver renders the pull request body **before** the patch is applied anywhere.
-The renderer, `pr-spec-comment.sh`, runs the repository's own solver probe when
-one exists, and code the model wrote must never execute in the job that holds
-a write token. The body is that report, followed by the sentence saying the
-pull request is a proposal to be reviewed, and the line
+`prepare --body-out` renders the pull request body, before the agent runs and
+in a job with no write token: the renderer, `pr-spec-comment.sh`, runs the
+repository's own solver probe when one exists. `deliver` renders nothing; it
+reads that body as text (see "The job that can write runs no code from the
+repository it writes to" above). The body is that report, followed by the
+sentence saying the pull request is a proposal to be reviewed, and the line
 `Productizer-Run: <run id>`.
 
 The commit carries `Productizer-Req:` with the requirement ids whose records
@@ -446,12 +469,37 @@ workflow given as a path:
   the run: text, so an interpreter a staged script itself starts, or a command
   spelled through a variable, is not seen
 - every `uses:` is pinned to a full 40-character commit id
-- no `${{ github.event.` and no `${{ inputs.` inside a `run:`
+- no `${{` expression of any context inside a `run:` (`run-injection`):
+  `github.event` and `inputs`, and since B119 also `steps`, `needs`, `env`,
+  `matrix`, `github.head_ref` and the rest, any of which can carry
+  attacker-influenced text into the shell. Every value reaches a `run:` through
+  `env:`. The template's own `${{ steps.args.outputs.claude_args }}` reaches
+  the action's `claude_args:` input, not a `run:`, so it is not caught
 - no `continue-on-error`, `|| true` or `2>/dev/null`
 - neither `bypassPermissions` nor `--dangerously-skip-permissions` appears
   anywhere outside a comment
 - a `permissions` input of type choice, default `repo-settings`, with options
   drawn only from `repo-settings` and `edits-only`
+- `PRODUCTIZER_SHA` in the top-level `env` is a quoted string of 40 lower-case
+  hex digits - the all-zero placeholder or a full commit id - and every
+  checkout of the productizer tools uses `ref: ${{ env.PRODUCTIZER_SHA }}`
+  (`tools-pin`, B107). An unquoted all-digit value is a YAML number and is
+  refused. When the value is the placeholder, the checker prints a note saying
+  the workflow will refuse to run and how to pin it
+- the runtime guards are in place, as the exact lines the template ships
+  (`guards`, B118): prepare's first step refuses a dispatch off the default
+  branch and an unpinned `PRODUCTIZER_SHA`; in the agent's job a step with id
+  `args` calls `build-dispatch.sh agent-args` before the agent, the agent's
+  `claude_args` reads its output, a step between them copies
+  `build-dispatch.sh` to `$RUNNER_TEMP` and stash-gits `.git` there, and a step
+  after the agent removes the run data and captures from that copy with the
+  same git-dir; in every write job, the step that checks the tools checkout is
+  `PRODUCTIZER_SHA` with nothing changed and stages it under `$RUNNER_TEMP`
+  comes before any step that runs the staged copy. Lines are matched in order,
+  with whitespace and comments ignored, not as control flow: a guard line made
+  unreachable by an earlier `exit 0` is not seen. The tools-verification step
+  stays YAML on purpose - it decides whether the productizer scripts may run,
+  so it cannot be one of them
 
 Exit 0 means every assertion held, 1 means a finding, and 2 means it could not
 run. It returns 2, not 0, when no job runs the agent at all: an assertion
@@ -466,8 +514,20 @@ your copy after every edit.
    `.github/workflows/build-from-spec.yml`.
 2. **Pin the scripts.** Set `PRODUCTIZER_SHA` to the full commit id of the
    productizer release you reviewed. The shipped placeholder, forty zeros, is
-   refused by the first step, which says why. A template cannot carry its own
-   commit id, so this value is the one thing you fill in.
+   refused by the first step, which says why and how to pin. A template cannot
+   carry its own commit id, so this value is the one thing you fill in. For
+   release `vX.Y.Z`:
+
+   ```
+   git ls-remote https://github.com/gitayg/productizer 'refs/tags/vX.Y.Z^{}'
+   ```
+
+   prints the commit id to use. Keep the `^{}`: release tags are annotated,
+   and without it `git ls-remote` prints the id of the tag object, not of the
+   commit it names (measured on `v4.65.1`: `refs/tags/v4.65.1` is the tag
+   object `d669edc…`, `refs/tags/v4.65.1^{}` the commit `d9573c0…`). Keep the
+   value quoted. Then run `check-ci-template.py` on your copy: its `tools-pin`
+   assertion refuses anything but 40 lower-case hex digits.
 3. **Set the secret.** Add `ANTHROPIC_API_KEY` as a repository secret.
 4. **Protect the default branch.** Require a pull request review before
    merging, and require your status checks. The draft pull request is a
@@ -479,8 +539,8 @@ your copy after every edit.
    [Permissions](#permissions).
 6. **Dispatch it** from the Actions tab or with
    `gh workflow run build-from-spec.yml -f mode=plan -f issue=<N>`, from the
-   default branch. Add `-f permissions=edits-only` to take the shell away for
-   that run.
+   default branch. The shell is denied in every run; `-f
+   permissions=edits-only` is accepted as an alias of `repo-settings`.
 
 ## Known limitations, stated plainly
 
@@ -499,10 +559,11 @@ your copy after every edit.
   `enableAllProjectMcpServers`, so an adopter who commits such a server gives
   the agent that path. The token is still a boundary too: the agent job cannot
   write, and `deliver` judges the commit git made, not the patch text.
-- **Build mode accepts a patch that edits only the plan.** `build -> test`
-  counts any non-bookkeeping path as evidence, so a run that rewrote only
-  `plan.md` opens a pull request containing just that change. The reviewer
-  sees it. Nothing refuses it.
+- **Build mode needs evidence outside the plan, not proof of code.** Since
+  `stage-advance.sh` 1.2, `build -> test` refuses a run that changed nothing
+  outside `artifacts.path` or changed only the backlog, so a run that rewrote
+  only `plan.md` no longer opens a pull request. Any other path still counts,
+  so a run that edited only a README does.
 - **The agent cannot run your tests, by design.** The no-shell rule removes the
   Bash tool, so build mode edits code without running it. Your checks on the
   pull request are what verify it, and they run only once a person pushes
@@ -515,7 +576,7 @@ your copy after every edit.
   change made against an older tree. Dispatch the run again.
 - **It has never run end to end here.** This repository is public, holds no
   model secrets, and a run costs model spend. What is measured is the
-  template's static properties (`check-ci-template.py`, 10 of 10, actionlint
+  template's static properties (`check-ci-template.py`, 14 of 14, actionlint
   1.7.12 clean), and all of `build-dispatch.sh` - `prepare`, `stash-git`,
   `capture`, `deliver` - against local repositories with a stub `gh`. The
   action's real behaviour inside GitHub Actions, that it tolerates its `.git`

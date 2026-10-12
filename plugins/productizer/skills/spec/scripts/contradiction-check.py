@@ -1550,6 +1550,7 @@ GRAMMAR_CASES = [
 # The fixture is one section carrying every shape the two reference parsers
 # distinguish, so a rule dropped from the transcription names itself here rather
 # than showing up as a verdict somewhere downstream.
+# <!-- EXAMPLE:BEGIN -->
 _ITEM_FIXTURE = (
     "# A living spec\n\n"
     "## Scope\n\n"
@@ -1583,6 +1584,7 @@ _ITEM_FIXTURE = (
     "  The stamp carries the expiry date.\n\n"
     "## Design\n\n"
     "- **R98** — The archive shall never be read as a requirement here.\n")
+# <!-- EXAMPLE:END -->
 
 # (id, status, joined text)
 ITEM_CASES = [
@@ -1626,12 +1628,14 @@ def selftest_items() -> int:
     # The two headings outside `## Requirements` carry a well-formed item each,
     # and neither may be read. Asserted by id rather than by count, so a reader
     # that picked one up and dropped another cannot balance out.
+    # <!-- EXAMPLE:BEGIN -->
     for stray in ("R98", "R99"):
         ok = stray not in {i.rid for i in got}
         if not ok:
             failures += 1
         print("  %-5s %s outside `## Requirements` is not a requirement"
               % ("ok" if ok else "FAIL", stray))
+    # <!-- EXAMPLE:END -->
     print("  %d of %d held" % (len(ITEM_CASES) + 2 - failures, len(ITEM_CASES) + 2))
     return failures
 

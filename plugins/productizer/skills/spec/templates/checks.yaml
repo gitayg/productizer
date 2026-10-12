@@ -443,10 +443,22 @@ checks:
   # repo-local tool path needs `policy.allow_repo_local_tools: true`.
   - id: stderr-suppression
     why: an error and a genuine no-match are indistinguishable once stderr is discarded, and a hollow check then looks exactly like a clean one
+    # The scanner reads a YAML file's `run:` values and a Markdown file's
+    # shell-fenced and `!` blocks as shell. Scoped here to the files whose shell
+    # actually runs - workflows, composite actions, Claude Code commands and
+    # skills - not to every document: a README's example block is not executed,
+    # and how much a wider scope finds in your docs is unmeasured. Widen it after
+    # one run tells you that number.
     when:
       paths:
         - "**/*.sh"
         - "**/*.bash"
+        - ".github/workflows/*.yml"
+        - ".github/workflows/*.yaml"
+        - ".github/actions/**/*.yml"
+        - ".github/actions/**/*.yaml"
+        - ".claude/commands/**/*.md"
+        - ".claude/skills/**/*.md"
     severity: block
     requires: [./scripts/check-stderr.sh]
     version_command: [./scripts/check-stderr.sh, --version]

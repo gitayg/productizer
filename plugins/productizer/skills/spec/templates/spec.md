@@ -37,7 +37,7 @@ is built from the delta this file gained, not from the intent.
   | Status | Meaning | Recorded as |
   |---|---|---|
   | Active | Current agreed behaviour | no marker; the requirement, plain |
-  | Superseded | Replaced by another requirement | `Superseded by R58.` plus one line on why |
+  | Superseded | Replaced by another requirement | `Superseded by R0.` plus one line on why |
   | Withdrawn | The behaviour no longer exists at all | `Withdrawn.` plus one line on why |
 
 - **Nothing is ever deleted.** A superseded or withdrawn requirement keeps its

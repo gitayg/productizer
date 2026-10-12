@@ -3,15 +3,15 @@
 # calibration: 3.79-4.31 bytes/token on candidate runs, 2026-09-05, evals/token-calibration.sh
 # fields: id, characters (compared against the band), mix percent (recorded, never compared)
 # spec: .claude/productizer/spec.md
-# spec-bytes: 39214
-# spec-sha256: f8caf629324bca513123aa888bd127d3560f56189dc3e8fa5e835bf72feee7be
-hollow-check	1322	15
-id-permanence	1227	21
-merge-nothing	1532	0
-missing-tool	1181	24
+# spec-bytes: 85462
+# spec-sha256: 1ff0adb88231b7811c9c129dff16840334266e9f7803069d1970947740206a7a
+hollow-check	1624	19
+id-permanence	1141	29
+merge-nothing	1679	0
+missing-tool	1466	27
 override-record	153	0
 superseded-r14	994	0
-unmeasured-zero	592	0
+unmeasured-zero	783	0
 unruled-merge	579	0
 view-read-only	212	0
 waived-not-pass	124	0

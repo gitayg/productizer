@@ -59,6 +59,14 @@ DISPATCH = (
     # the literal's start and the flag, so the match cannot run on out of one
     # compared literal into a call that merely passes the flag.
     re.compile(r"""[=!]=\s*[\[(][^\[\]()]*["']--self[-_]?test["']"""),
+    # membership in a literal collection holding the flag, one level of nesting
+    # allowed: args in (["--selftest"], ["--self-test"]) / arg in ("--selftest",
+    # "--self-test") / not in {...}. Missed until B109: check-ci-template.py
+    # dispatched `args in (["--selftest"], ["--self-test"])`, passed 18 of 18,
+    # and read `carries no self-test`. A line holding `for ... in` is excluded
+    # whole, because iterating over a list of flags builds argv - a mention.
+    re.compile(r"""^(?!.*\bfor\b.*\bin\b).*\bin\s*[\[({](?:[^\[\](){}]|[\[(][^\[\](){}]*[\])])*?"""
+               r"""[\[(]?\s*["']--self[-_]?test["']"""),
 )
 FLAG_RE = re.compile(r"--self[-_]?test\b")
 REJECTED_RE = re.compile(r"unknown (option|argument|flag)", re.I)

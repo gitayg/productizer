@@ -644,7 +644,9 @@ jobs:
           # smaller change than really landed, so it is a fallback and not the
           # default; when even that does not resolve, git exits non-zero under
           # `set -e` and the job fails rather than gating on an unknown set.
-          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+          # git's own `fatal: Not a valid object name` for an unusable base is
+          # left on stderr, above the warning it explains (B97).
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}"; then
             echo "::warning::no usable base from the event payload; falling back to HEAD^"
             base="$(git rev-parse --verify HEAD^)"
           fi

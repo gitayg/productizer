@@ -362,8 +362,19 @@ outside the lifecycle's own bookkeeping (exit 1), a move to a stage at or
 before the current one (exit 5), and a change touching a path the target stage
 does not permit (exit 3): workflows, hooks, settings, `checks.yaml`,
 `calibration.yaml` and `constitution.md` always, the spec in build mode, and
-anything but `plan.md` in plan mode. `design` needs a requirement id added,
-refined, superseded or withdrawn; a whitespace-only spec edit is not one.
+anything but `plan.md` in plan mode. Those names are matched on a folded key
+(case, Unicode normalisation, format characters), so `.GitHub`, an NFD
+spelling or a long-s variant of a rule file is refused too. A symbolic link
+created or retargeted, and a gitlink (submodule entry) added, repointed or
+removed, is exit 3 at any path: the script judges names, and a link makes a
+name stand for something else. Erasing a lifecycle record (a classification,
+a stage snapshot, the checks result) is exit 3, and so is rewriting a
+classification or a snapshot, which their writers never do. The backlog is
+never evidence, and in build mode a backlog item may be added but not changed.
+`design` needs a requirement id added, refined, superseded or withdrawn; a
+whitespace-only spec edit is not one.
+With `--mode build`, every target needs a changed path outside
+`artifacts.path`: a change to `plan.md` alone does not move `build -> test`.
 `deploy` and `done` are exit 4, cannot determine: they move on a merge, and a
 merge is not visible to the script, so the merge itself is the evidence. The
 forward-only, nothing-produced-moves-nothing rule is adapted from the AI

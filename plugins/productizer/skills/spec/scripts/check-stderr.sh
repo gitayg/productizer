@@ -23,6 +23,22 @@
 # spelling with no spaces too. These lines are comments, and a comment cannot
 # redirect anything, so they are skipped either way.
 #
+# WHERE THE SHELL IS (B97). A file is shell end to end unless its name ends in
+#   .yml / .yaml   only `run:` values are shell: an inline `run: cmd`, or a
+#                  block scalar (`run: |`, `run: >-`) through its last line
+#                  indented deeper than the `run` key
+#   .md            only the bodies of fences whose info string is bash, sh,
+#                  shell or zsh, and `!` blocks - a line opening with `!` and a
+#                  backtick, which a skill or command runs, through the line
+#                  that closes the backtick
+# Everything else in those files is prose, and prose that NAMES a suppression
+# is not one: measured over this repo's 702 tracked .md/.yml/.yaml files, a
+# whole-file scan reported 29 findings in 12 files, and this one reports 7, each
+# a line a shell really runs (two of them then removed under B97, leaving 5).
+# A line number reported is the file's own. Such a
+# file also prints how many lines of shell it read, so "nothing found" in a
+# file with no shell in it does not read like a clean scan of real code.
+#
 # WHAT "A VARIABLE HOLDING /dev/null" MEANS HERE, EXACTLY. A name counts when a
 # non-comment line of the SAME file assigns it the literal /dev/null - bare,
 # double- or single-quoted - as a whole word: `x=`, `local x=`, `export x=`,
@@ -112,7 +128,7 @@
 # (0), at least one did not (1), and the corpus could not be driven at all (2).
 set -euo pipefail
 
-VERSION="check-stderr 1.1"
+VERSION="check-stderr 1.2"
 MIN_REASON=12
 MODE="scan"
 
@@ -205,6 +221,21 @@ if [ "$MODE" = "selftest" ]; then
   printf '#!/usr/bin/env bash\nsink=%s\n' "$NUL" > "$SB/split-a.sh"
   printf '#!/usr/bin/env bash\nls /nowhere 2>"$sink" || true\n' > "$SB/split-b.sh"
 
+  # B97: shell inside files that are not shell scripts. A workflow's `run:`
+  # values, and a Markdown file's shell-fenced and `!` blocks, are scanned; the
+  # rest of such a file is not, so prose naming a suppression is not one. The
+  # line numbers asserted are the file's own: the extraction must not shift them.
+  BT='`'
+  FN='```'
+  printf 'name: x\non: push\njobs:\n  a:\n    steps:\n      - name: one\n        run: |\n          set -e\n          git cat-file -e HEAD 2>%s\n' "$NUL" > "$SB/wf-block.yml"
+  printf 'jobs:\n  a:\n    steps:\n      - run: make deliver 2>%s\n' "$NUL" > "$SB/wf-inline.yml"
+  printf 'jobs:\n  a:\n    steps:\n      - name: never write 2>%s in a step\n        run: |\n          echo fine\n        env:\n          NOTE: "a value, not shell: 2>%s"\n      - uses: x/y@v1\n        with:\n          args: 2>%s\n' "$NUL" "$NUL" "$NUL" > "$SB/wf-prose.yml"
+  printf '# Title\n\n%sset -e; git diff HEAD~1 2>%s || echo none%s\n' "!$BT" "$NUL" "$BT" > "$SB/bang.md"
+  printf '# Title\n\n%sset -e; python3 - <<PY\nprint(1)\nPY\nls /nowhere 2>%s%s\n' "!$BT" "$NUL" "$BT" > "$SB/bang-multi.md"
+  printf '# Title\n\nSome prose.\n\n%sbash\nls /nowhere 2>%s\n%s\n' "$FN" "$NUL" "$FN" > "$SB/fence.md"
+  printf '# Never write %s2>%s%s\n\nProse: 2>%s is refused.\n\n%stext\nls 2>%s\n%s\n\n%s\nls 2>%s\n%s\n\n%sbash\necho after the prose\n%s\n' \
+    "$BT" "$NUL" "$BT" "$NUL" "$FN" "$NUL" "$FN" "$FN" "$NUL" "$FN" "$FN" "$FN" > "$SB/prose.md"
+
   ALLOW_GOOD="suppressed.sh::${DROP}${NUL}::a sandbox line this corpus owns, with a reason long enough to count"
   ALLOW_NO_REASON="suppressed.sh::${DROP}${NUL}"
   ALLOW_SHORT_REASON="suppressed.sh::${DROP}${NUL}::short"
@@ -289,6 +320,14 @@ if [ "$MODE" = "selftest" ]; then
   drive allow-var        0 'var-sink.sh'                            --allow "$ALLOW_VAR" "$SB/var-sink.sh"
   drive allow-python     0 'py-heredoc.sh'                          --allow "$ALLOW_PY" "$SB/py-heredoc.sh"
 
+  drive yaml-run-block   1 'wf-block.yml:9: stderr suppressed'     "$SB/wf-block.yml"
+  drive yaml-run-inline  1 'wf-inline.yml:4: stderr suppressed'    "$SB/wf-inline.yml"
+  drive yaml-not-run     0 'wf-prose.yml: 1 line(s) of shell read' "$SB/wf-prose.yml"
+  drive md-bang-block    1 'bang.md:3: stderr suppressed'          "$SB/bang.md"
+  drive md-bang-multi    1 'bang-multi.md:6: stderr suppressed'    "$SB/bang-multi.md"
+  drive md-shell-fence   1 'fence.md:6: stderr suppressed'         "$SB/fence.md"
+  drive md-prose-only    0 'prose.md: 1 line(s) of shell read'     "$SB/prose.md"
+
   drive short-marker     2 'Refused, not exempted'                  "$SB/short-marker.sh"
   drive allow-no-reason  2 'carries no reason'                      --allow "$ALLOW_NO_REASON" "$SB/suppressed.sh"
   drive allow-short      2 'a reason must be at least'              --allow "$ALLOW_SHORT_REASON" "$SB/suppressed.sh"
@@ -318,6 +357,7 @@ if [ "$MODE" = "selftest" ]; then
   fi
   printf '  R39 for this tool: the self-test exists, reaches 0, 1 and 2, and every case asserts which sentence it produced as well as which code.\n'
   printf '  NOT ASSERTED: the allowlist is driven through this script argv, so an entry that reaches the awk by another route is outside the corpus.\n'
+  printf '  NOT ASSERTED: shell in a YAML key other than `run:` (a `script:` handed to an action, a composite action input), a `!` block that does not open its line, a fence with no info string or an indented code block, and YAML flow or quoted multi-line `run:` values beyond one line.\n'
   exit 0
 fi
 
@@ -381,8 +421,73 @@ function var_sink(s, re,   m) {
   }
   return ""
 }
+# WHAT COUNTS AS SHELL IN A FILE THAT IS NOT A SHELL SCRIPT. Every line that
+# is not shell is held as a bare `#`, so it is skipped like a comment and the
+# line numbers reported stay those of the file.
+#
+# YAML: a `run:` value. Inline (`run: cmd`), or a block scalar (`run: |`,
+# `run: >-`, ...) whose lines are indented deeper than the `run` key - the
+# first non-blank line at or left of that column ends it.
+function yaml_line(s,   col, rest) {
+  if (YIN) {
+    if (s ~ /^[ \t]*$/) return "#"
+    match(s, /^ */)
+    if (RLENGTH > YCOL) { NSH++; return s }
+    YIN = 0
+  }
+  if (s !~ /^ *(- +)?run:([ \t]|$)/) return "#"
+  match(s, /^ *(- +)?/)
+  col = RLENGTH
+  rest = trim(substr(s, index(s, "run:") + 4))
+  if (rest == "" || rest ~ /^[|>][-+0-9]*([ \t]+#.*)?$/) {
+    YIN = 1; YCOL = col
+    return "#"
+  }
+  NSH++
+  return rest
+}
+# Markdown: the body of a fenced block whose info string names a shell (bash,
+# sh, shell, zsh), and a `!` block - a line opening with an exclamation mark
+# and a backtick, which a skill or command runs - through the line that closes
+# its backtick. Prose, inline code and every other fence are not shell.
+function md_line(s,   t, u) {
+  if (BANG) {
+    if (s ~ /`[ \t]*$/) { BANG = 0; sub(/`[ \t]*$/, "", s) }
+    NSH++
+    return s
+  }
+  if (FIN) {
+    t = s; sub(/^ */, "", t); sub(/[ \t]+$/, "", t)
+    if (index(t, FENCE) == 1) {
+      u = t; gsub("[" substr(FENCE, 1, 1) "]", "", u)
+      if (u == "") { FIN = 0; return "#" }
+    }
+    if (FSH) { NSH++; return s }
+    return "#"
+  }
+  if (match(s, /^ *(```+|~~~+)/)) {
+    t = substr(s, RSTART, RLENGTH); sub(/^ */, "", t)
+    FENCE = t; FIN = 1
+    u = tolower(trim(substr(s, RSTART + RLENGTH)))
+    sub(/[ \t{].*/, "", u)
+    FSH = (u == "bash" || u == "sh" || u == "shell" || u == "zsh")
+    return "#"
+  }
+  if (substr(s, 1, 2) == "!`") {
+    s = substr(s, 3)
+    if (s ~ /`[ \t]*$/) sub(/`[ \t]*$/, "", s)
+    else BANG = 1
+    NSH++
+    return s
+  }
+  return "#"
+}
 # Judge one whole file, held in BUF, once NULLS knows every name it assigns.
 function judge(file, n,   k, line, reason, i, nm, why) {
+  if (FT == "yaml")
+    printf("    %s: %d line(s) of shell read from `run:` values\n", file, NSH)
+  else if (FT == "md")
+    printf("    %s: %d line(s) of shell read from shell-fenced and `!` blocks\n", file, NSH)
   for (k = 1; k <= n; k++) {
     line = BUF[k]
     if (line ~ /^[ \t]*#/) continue    # a comment cannot redirect
@@ -480,11 +585,18 @@ FNR == 1 {
   if (cur != "") judge(cur, nb)
   cur = FILENAME; nb = 0
   split("", NULLS)
+  FT = "sh"
+  if (tolower(FILENAME) ~ /\.ya?ml$/) FT = "yaml"
+  else if (tolower(FILENAME) ~ /\.(md|markdown)$/) FT = "md"
+  NSH = 0; YIN = 0; FIN = 0; FSH = 0; BANG = 0
   print FILENAME                     # one line per file examined
 }
 {
-  BUF[++nb] = $0
-  if ($0 !~ /^[ \t]*#/) collect($0)
+  if (FT == "yaml") L = yaml_line($0)
+  else if (FT == "md") L = md_line($0)
+  else L = $0
+  BUF[++nb] = L
+  if (L !~ /^[ \t]*#/) collect(L)
 }
 END {
   if (bad) exit 2

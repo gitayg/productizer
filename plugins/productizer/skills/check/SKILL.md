@@ -8,7 +8,7 @@ allowed-tools: Bash Read
 
 # Stage 5 — the declared checks
 
-!`set -e; R="$(git rev-parse --show-toplevel)"; R2="${CLAUDE_PLUGIN_ROOT}/skills/spec/scripts/run-checks.sh"; [ -r "$R2" ] || R2="$R/plugins/productizer/skills/spec/scripts/run-checks.sh"; if [ ! -r "$R2" ]; then echo "run-checks.sh not found. Nothing was run - which is not the same as nothing failing."; exit 0; fi; L="${TMPDIR:-/tmp}/productizer-changed-$$.txt"; git -C "$R" status --porcelain | awk '{print $NF}' | while IFS= read -r p; do if [ -f "$R/$p" ]; then echo "$p"; elif [ -d "$R/$p" ]; then (cd "$R" && find "$p" -type f); fi; done > "$L"; if [ ! -s "$L" ]; then git -C "$R" diff --name-only HEAD~1 HEAD > "$L" 2>/dev/null || true; echo "(nothing uncommitted; checking the last commit instead)"; fi; bash "$R2" --changed "$L" 2>&1; echo "RC=$?"; rm -f "$L"`
+!`set -e; R="$(git rev-parse --show-toplevel)"; R2="${CLAUDE_PLUGIN_ROOT}/skills/spec/scripts/run-checks.sh"; [ -r "$R2" ] || R2="$R/plugins/productizer/skills/spec/scripts/run-checks.sh"; if [ ! -r "$R2" ]; then echo "run-checks.sh not found. Nothing was run - which is not the same as nothing failing."; exit 0; fi; L="${TMPDIR:-/tmp}/productizer-changed-$$.txt"; git -C "$R" status --porcelain | awk '{print $NF}' | while IFS= read -r p; do if [ -f "$R/$p" ]; then echo "$p"; elif [ -d "$R/$p" ]; then (cd "$R" && find "$p" -type f); fi; done > "$L"; if [ ! -s "$L" ]; then git -C "$R" diff --name-only HEAD~1 HEAD 2>&1 > "$L" || echo "(git could not diff the last commit - its message is above - so the change set is empty)"; echo "(nothing uncommitted; checking the last commit instead)"; fi; rc=0; bash "$R2" --changed "$L" 2>&1 || rc=$?; echo "RC=$rc"; rm -f "$L"`
 
 ## Reading that
 

@@ -30,12 +30,25 @@
 #      These records are an audit trail the governance checks read, and a run
 #      that erases one can flip a check from a finding to clean, so a stage run
 #      - the wrong actor to edit the rules it is judged by - may not delete
-#      one either.
+#      one either. A snapshot or a classification MODIFIED (git status M, or T
+#      for a change of type) is refusal 3 too: stage-snapshot.sh and
+#      record-classification.sh both refuse to overwrite one (their exit 1),
+#      and in this repository's history neither store was ever modified, only
+#      added to, so a rewrite is never their writer's. The checks result is
+#      rewritten by every run of run-checks.sh, so its modification is
+#      "nothing", like an addition.
+#      `.claude/productizer/backlog.md` is never evidence either: it is the
+#      queue in front of intake, and a row is a wish, not a result.
 #   5  NOT A FORWARD MOVE. --to is at or before --from in the stage order.
 #   3  FORBIDDEN PATH. The change touches a path the target stage may not.
 #      THE FORBIDDEN SET lives in one function, forbidden_any_mode(), and is
-#      matched on the path LOWER-CASED, so a case variant that a
-#      case-insensitive checkout would fold onto a rule file is refused too:
+#      matched on a FOLDED KEY of the path - format characters removed, NFKC,
+#      Unicode case folding - so a variant that a case- or normalisation-
+#      insensitive checkout would fold onto a rule file is refused too (case,
+#      NFD, the long s, the Kelvin sign; and a fullwidth letter, which only a
+#      reader folds). Every exception below is granted on the exact bytes, so
+#      a variant spelling never inherits one. A name is matched with its
+#      subtree, so `.github` itself, as a file or a link, is in `.github/**`:
 #        any mode   .github/**             every workflow, composite action,
 #                                          CODEOWNERS, dependabot: all of it
 #                   .claude/**             DEFAULT-DENY: settings, hooks,
@@ -54,9 +67,18 @@
 #                   lefthook.yml  .lefthook.yml  lefthook-local.yml
 #                   .lefthook-local.yml  CODEOWNERS  docs/CODEOWNERS
 #                   REVIEW.md  .productizer-run/**  .productizer-tools/**
-#        build mode also the spec (config.json spec.path)
+#        build mode also the spec (config.json spec.path), and any line of
+#                   .claude/productizer/backlog.md removed or rewritten: a
+#                   build run may ADD a backlog item, never change one (checks
+#                   read its lines; a row's status is what was agreed)
 #        plan mode  anything but the plan file, <artifacts.path>/plan.md
 #                   (bookkeeping stays allowed; it is nothing, not a change)
+#        LINKS, any mode and any path: a symbolic link created or retargeted
+#                   (mode 120000), and a gitlink - a submodule entry, mode
+#                   160000 - added, repointed or removed. A link makes a name
+#                   stand for another path or for code outside the change, and
+#                   this decider judges names. Deleting a symlink, or turning
+#                   one into a file, is judged by its path like any other.
 #      These are the files that decide what CI runs, what an agent is told and
 #      allowed, how git treats a path, and what the run is judged by. A stage
 #      run is the wrong actor to edit any of them. An artifacts.path under
@@ -78,25 +100,30 @@
 #           whitespace-only edit changes no record and is not evidence.
 #   build   plan mode: a plan.md under artifacts.path in the change, not
 #           deleted. build mode: a non-bookkeeping path outside
-#           artifacts.path. --mode is required for --to build.
+#           artifacts.path (on the folded key) that is not the backlog.
+#           --mode is required for --to build.
 #   deploy  NOT DECIDABLE HERE - exit 4. Deploy and done move on a MERGE, and a
 #   done    merge is not visible in a patch or a diff between two refs.
-#   other   (test, or a stage a config adds) any non-bookkeeping path.
+#   other   (test, or a stage a config adds) with --mode build: the build-mode
+#           evidence above, so a patch that edits only the plan does not move
+#           build -> test (build-dispatch.sh asks exactly that). Otherwise:
+#           any non-bookkeeping path that is not the backlog.
 #
 # INPUT. The patch text is never parsed here. --patch FILE is APPLIED BY GIT
 # ITSELF, `git apply --cached --binary`, to a scratch index read from HEAD's
 # tree, forward if it applies, else in reverse if it is already applied, else
 # exit 4. New objects go to a temporary object directory, so the repository is
 # not written. The changed paths are then git's own
-# `git diff-tree -r -z --name-status --no-renames` between the two trees: the
+# `git diff-tree -r -z --raw --no-renames` between the two trees: the
 # paths judged are the paths `git apply --index` writes, with a rename's old
 # side as a deletion, and a section git applies but a header reader would skip
 # (a traditional `---`/`+++` section, a CRLF or tab-suffixed name, hunk
 # headers naming another file than `diff --git`) is judged like any other.
-# --base REF reads `git diff --name-status --no-renames -z BASE...HEAD`. In
-# both, deletions are marked, so a deleted plan.md is not evidence, and a path
-# holding a control character (newline, tab, carriage return) is exit 4, never
-# a guess. --patch needs a repository with a HEAD commit to apply against.
+# --base REF reads `git diff --raw --no-renames -z BASE...HEAD`. In both,
+# git's status (A M D T) and both modes are kept, so a deleted plan.md is not
+# evidence, a modified record is told from an added one, and a link is seen. A
+# path holding a control character (newline, tab, carriage return) is exit 4,
+# never a guess. --patch needs a repository with a HEAD commit to apply against.
 # For design with --patch, the spec's base and head are read from the two
 # trees the patch was applied between.
 #
@@ -115,7 +142,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.1"
+VERSION="stage-advance 1.2"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -422,9 +449,145 @@ JSON
   drive rule-config-json-modified 3 "forbidden for test: .claude/productizer/config.json" \
     "$R" --from build --to test --mode build --patch "$WORK/config.patch"
   # The two exceptions under .claude, so the rule is not refusing everything.
-  printf 'diff --git a/.claude/productizer/backlog.md b/.claude/productizer/backlog.md\nnew file mode 100644\n--- /dev/null\n+++ b/.claude/productizer/backlog.md\n@@ -0,0 +1 @@\n+- B1\n' > "$WORK/backlog.patch"
-  drive backlog-allowed 0 ".claude/productizer/backlog.md" \
+  # The backlog is allowed beside real work, and is not itself evidence (B120).
+  local bl_add='diff --git a/.claude/productizer/backlog.md b/.claude/productizer/backlog.md\nnew file mode 100644\n--- /dev/null\n+++ b/.claude/productizer/backlog.md\n@@ -0,0 +1 @@\n+- B1\n'
+  local app_mod='diff --git a/src/app.sh b/src/app.sh\n--- a/src/app.sh\n+++ b/src/app.sh\n@@ -1 +1 @@\n-echo hi\n+echo bye\n'
+  # shellcheck disable=SC2059  # the format strings are the patch fixtures
+  {
+    printf "$bl_add$app_mod" > "$WORK/backlog.patch"
+    printf "$bl_add" > "$WORK/backlog-only.patch"
+  }
+  drive backlog-allowed 0 "advance allowed: build -> test in build mode" \
     "$R" --from build --to test --mode build --patch "$WORK/backlog.patch"
+  drive backlog-only-not-evidence 1 "a plan or a backlog row is not a build" \
+    "$R" --from build --to test --mode build --patch "$WORK/backlog-only.patch"
+  drive backlog-only-no-mode 1 "the backlog is the queue in front of intake, not a result" \
+    "$R" --from build --to test --patch "$WORK/backlog-only.patch"
+
+  # --- B114. A FOLDED VARIANT of a forbidden name. Each was allowed by 1.1,
+  # which matched on ASCII lower case only. The long s (U+017F) and the Kelvin
+  # sign (U+212A) open the ASCII file on a case-insensitive APFS volume
+  # (measured); the fullwidth g (U+FF47) and the zero-width non-joiner
+  # (U+200C) fold for a reader; an exception is granted on exact bytes only,
+  # so a case variant of the backlog is not the backlog.
+  local u
+  for u in '.hu\305\277ky/pre-commit' '.hus\342\204\252y/pre-commit' 'AGENT\305\277.md' \
+           'src/.gitattribute\305\277' '.\357\275\207ithub/workflows/x.yml' \
+           '.git\342\200\214hub/workflows/x.yml' '.githooks' '.claude/productizer/BACKLOG.md'; do
+    p="$(printf '%b' "$u")"; n=$((n + 1))
+    printf 'diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+x\n' \
+      "$p" "$p" "$p" > "$WORK/rule-$n.patch"
+    drive "fold-variant-$n" 3 "forbidden for test: $p" \
+      "$R" --from build --to test --mode build --patch "$WORK/rule-$n.patch"
+  done
+  # A non-ASCII name and a name that is not UTF-8 are judged, not refused.
+  for u in 'src/caf\303\251.sh' 'src/\377.sh'; do
+    p="$(printf '%b' "$u")"; n=$((n + 1))
+    printf 'diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+x\n' \
+      "$p" "$p" "$p" > "$WORK/rule-$n.patch"
+    drive "fold-allowed-$n" 0 "$p" \
+      "$R" --from build --to test --mode build --patch "$WORK/rule-$n.patch"
+  done
+  # A case variant of the artifacts directory is not "outside artifacts.path"
+  # in build mode, so it is not evidence either (B106 meets B114).
+  printf 'diff --git a/Docs/SDLC/greet/notes.md b/Docs/SDLC/greet/notes.md\nnew file mode 100644\n--- /dev/null\n+++ b/Docs/SDLC/greet/notes.md\n@@ -0,0 +1 @@\n+x\n' > "$WORK/art-variant.patch"
+  drive build-mode-artifacts-variant-not-evidence 1 "a plan or a backlog row is not a build" \
+    "$R" --from build --to test --mode build --patch "$WORK/art-variant.patch"
+
+  # --- B114. LINKS. 1.1 allowed every one of these with exit 0.
+  # shellcheck disable=SC2059  # the format strings are the patch fixtures
+  {
+    printf 'diff --git a/src/wf b/src/wf\nnew file mode 120000\n--- /dev/null\n+++ b/src/wf\n@@ -0,0 +1 @@\n+../.github/workflows\n\\ No newline at end of file\n' > "$WORK/l-sym.patch"
+    printf 'diff --git a/sub/.claude b/sub/.claude\nnew file mode 120000\n--- /dev/null\n+++ b/sub/.claude\n@@ -0,0 +1 @@\n+../docs\n\\ No newline at end of file\n' > "$WORK/l-nested-claude.patch"
+    printf 'diff --git a/.github b/.github\nnew file mode 120000\n--- /dev/null\n+++ b/.github\n@@ -0,0 +1 @@\n+docs/ci\n\\ No newline at end of file\n' > "$WORK/l-github.patch"
+    printf 'diff --git a/vendor/lib b/vendor/lib\nnew file mode 160000\nindex 0000000..%s\n--- /dev/null\n+++ b/vendor/lib\n@@ -0,0 +1 @@\n+Subproject commit %s\n' \
+      "$(G "$R" rev-parse --short=7 HEAD)" "$(G "$R" rev-parse HEAD)" > "$WORK/l-gitlink.patch"
+  }
+  drive link-symlink-at-allowed-path 3 "src/wf (symbolic link)" \
+    "$R" --from build --to test --mode build --patch "$WORK/l-sym.patch"
+  drive link-nested-claude-symlink 3 "sub/.claude (symbolic link)" \
+    "$R" --from build --to test --mode build --patch "$WORK/l-nested-claude.patch"
+  drive link-github-symlink 3 ".github (symbolic link)" \
+    "$R" --from build --to test --patch "$WORK/l-github.patch"
+  drive link-gitlink-added 3 "vendor/lib (gitlink)" \
+    "$R" --from build --to test --mode build --patch "$WORK/l-gitlink.patch"
+  newrepo links; R="$WORK/links"
+  ln -s app.sh "$R/src/l"; commit "$R"; G "$R" tag with-link
+  G "$R" update-index --add --cacheinfo "160000,$(G "$R" rev-parse HEAD),vendor/lib"
+  G "$R" commit --quiet -m gitlink
+  drive link-gitlink-base-mode 3 "vendor/lib (gitlink)" \
+    "$R" --from build --to test --mode build --base with-link
+  G "$R" rm --quiet --cached vendor/lib; G "$R" commit --quiet -m no-gitlink
+  G "$R" rm --quiet src/l; G "$R" diff --cached > "$WORK/l-delete.patch"
+  G "$R" commit --quiet -m no-link
+  drive link-symlink-deleted-judged-by-path 0 "src/l" \
+    "$R" --from build --to test --mode build --patch "$WORK/l-delete.patch"
+
+  # --- B114. An NFD spelling of a non-ASCII spec path, in build mode. git
+  # stores the bytes, so it is a new file in the index; a normalisation-
+  # insensitive checkout (APFS) writes it onto the spec. 1.1 exited 0.
+  newrepo nfd; R="$WORK/nfd"
+  mkdir -p "$R/docs"
+  printf '{ "spec": { "path": "docs/sp\303\251c.md" } }\n' > "$R/.claude/productizer/config.json"
+  printf -- '- **R1** \342\200\224 The tool shall greet.\n' > "$R/docs/sp"$'\303\251'"c.md"
+  commit "$R"
+  p="$(printf 'docs/spe\314\201c.md')"
+  printf 'diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+x\n' \
+    "$p" "$p" "$p" > "$WORK/nfd.patch"
+  drive nfd-variant-of-spec-forbidden 3 "forbidden for test: $p" \
+    "$R" --from build --to test --mode build --patch "$WORK/nfd.patch"
+
+  # --- B117. A write-once record MODIFIED. Their writers refuse to overwrite
+  # one, so a rewrite is never theirs; 1.1 let it pass beside a real plan.
+  newrepo bk-rewrite; R="$WORK/bk-rewrite"
+  mkdir -p "$R/.claude/productizer/classifications" "$R/.claude/productizer/snapshots/stage-3"
+  printf 'Intent: 9\nClassification: contradict\n' > "$R/.claude/productizer/classifications/9.md"
+  printf 'x\n' > "$R/.claude/productizer/snapshots/stage-3/a.snap"
+  printf '{"pass": false}\n' > "$R/.claude/productizer/checks-result.json"
+  commit "$R"; G "$R" tag records
+  mkdir -p "$R/docs/sdlc/greet"; printf '# Plan\n' > "$R/docs/sdlc/greet/plan.md"
+  printf 'Intent: 9\nClassification: extend\n' > "$R/.claude/productizer/classifications/9.md"
+  G "$R" add -A; G "$R" diff --cached > "$WORK/bk-rewrite.patch"; G "$R" reset --quiet --hard
+  drive bk-classification-rewritten 3 "a stage run may not alter an audit record" \
+    "$R" --from design --to build --mode plan --patch "$WORK/bk-rewrite.patch"
+  printf 'y\n' > "$R/.claude/productizer/snapshots/stage-3/a.snap"
+  printf 'echo bye\n' > "$R/src/app.sh"
+  commit "$R"
+  drive bk-snapshot-rewritten 3 "Rewritten: .claude/productizer/snapshots/stage-3/a.snap" \
+    "$R" --from build --to test --mode build --base records
+  G "$R" tag snap-rewritten
+  printf '{"pass": true}\n' > "$R/.claude/productizer/checks-result.json"
+  commit "$R"
+  drive bk-checks-result-rewritten-inert 1 "produced nothing outside the lifecycle's own bookkeeping" \
+    "$R" --from build --to test --mode build --base snap-rewritten
+
+  # --- B120. The backlog in build mode: an item may be added, none changed.
+  newrepo bl; R="$WORK/bl"
+  printf '| B1 | a wish | todo |\n' > "$R/.claude/productizer/backlog.md"
+  commit "$R"
+  printf '| B1 | a wish | done |\n' > "$R/.claude/productizer/backlog.md"
+  printf 'echo bye\n' > "$R/src/app.sh"
+  G "$R" diff > "$WORK/bl-rewrite.patch"; G "$R" restore -- .claude/productizer/backlog.md src/app.sh
+  drive backlog-row-rewritten-build-mode 3 "a build run may add an item to the backlog but not change one" \
+    "$R" --from build --to test --mode build --patch "$WORK/bl-rewrite.patch"
+  drive backlog-row-rewritten-no-mode 0 "src/app.sh" \
+    "$R" --from build --to test --patch "$WORK/bl-rewrite.patch"
+  printf '| B2 | another wish | todo |\n' >> "$R/.claude/productizer/backlog.md"
+  printf 'echo bye\n' > "$R/src/app.sh"
+  commit "$R"
+  drive backlog-row-added-build-mode 0 "src/app.sh" \
+    "$R" --from build --to test --mode build --base base
+
+  # --- B106. build mode asks build -> test, and a plan alone is not a build.
+  R="$WORK/plan-ok"
+  drive build-mode-test-only-plan 1 "a plan or a backlog row is not a build" \
+    "$R" --from build --to test --mode build --base base
+  drive no-mode-test-plan-counts 0 "docs/sdlc/greet/plan.md" \
+    "$R" --from build --to test --base base
+  R="$WORK/plan-src"
+  drive build-mode-test-code 0 "src/app.sh" \
+    "$R" --from build --to test --mode build --base base
+  R="$WORK/rules"
 
   drive deploy-not-visible 4 "a merge is not visible to this script" \
     "$R" --from test --to deploy --base base
@@ -458,7 +621,7 @@ JSON
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the two fixtures checked for it; a Unicode-normalisation variant of a forbidden path; a gitlink (submodule entry) or a symlink at an allowed path, both allowed; a bookkeeping record MODIFIED rather than added or deleted (git reports an add and a modify alike, so this decider cannot tell them apart; a forged classification is caught by its spec-hash in check-classification-provenance, not here); that the forbidden set is every file that steers CI or an agent.\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; a homoglyph from another script (a Cyrillic letter for a Latin one), which is not folded; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED, which stays inert because run-checks.sh rewrites it every run, so a forged one is not caught here; a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -586,16 +749,21 @@ case "$TO_KEY" in
     finish 4 "cannot determine whether $TO_KEY may be entered: it moves on a MERGE, and a merge is not visible to this script, which reads a patch or a diff between two refs. The merge itself is the evidence; check it where it happened." ;;
 esac
 
-# --- the changed paths: one "STATUS<TAB>path" per line, STATUS M or D ---------
-# read_name_status: git's NUL-separated `--name-status -z` stream on stdin ->
-# one "M|D<TAB>path" line per path. The list below is newline-separated, so a
-# path holding a control character is printed as "?<TAB><quoted path>" and
-# refused: a name is never split, joined or guessed at.
-read_name_status() {
-  local st p
-  while IFS= read -r -d '' st && IFS= read -r -d '' p; do
+# --- the changed paths: one "STATUS<TAB>OLDMODE<TAB>NEWMODE<TAB>path" per line
+# read_raw: git's NUL-separated `--raw -z` stream on stdin -> one line per
+# path, STATUS one of A M D T, the modes as git reports them (000000 for "no
+# such side"). The list below is newline-separated, so a path holding a
+# control character is printed as "?<TAB><quoted path>" and refused: a name is
+# never split, joined or guessed at. The modes are kept because a symbolic
+# link (120000) and a gitlink (160000) are judged by what they are, not only by
+# their name; the status is kept because a bookkeeping record ADDED and one
+# MODIFIED are different acts, and git reports them differently (A and M).
+read_raw() {
+  local meta p om nm st
+  while IFS= read -r -d '' meta && IFS= read -r -d '' p; do
     if [[ "$p" == *[[:cntrl:]]* ]]; then printf '?\t%q\n' "$p"; continue; fi
-    if [ "$st" = D ]; then printf 'D\t%s\n' "$p"; else printf 'M\t%s\n' "$p"; fi
+    read -r om nm _ _ st <<< "${meta#:}"
+    printf '%s\t%s\t%s\t%s\n' "${st:0:1}" "$om" "$nm" "$p"
   done
 }
 
@@ -627,7 +795,7 @@ if [ -n "$PATCH" ]; then
         finish 4 "cannot determine the changed paths: git apply applies the patch to HEAD neither forward nor in reverse, so what it would write is unknown ($(head -1 "$TMP/apply.err"))"
       fi
     fi
-    CHANGES="$(SG diff-tree -r -z --name-status --no-renames "$PT_BASE" "$PT_HEAD" | read_name_status)" \
+    CHANGES="$(SG diff-tree -r -z --raw --no-renames "$PT_BASE" "$PT_HEAD" | read_raw)" \
       || finish 4 "cannot determine the changed paths: git diff-tree between the patch's trees failed"
   fi
 else
@@ -639,7 +807,7 @@ else
     || finish 4 "cannot determine the changed paths: --head $HEAD_REF does not resolve to a commit"
   MB="$(git -C "$ROOT" merge-base "$BASE" "$HEAD_REF")" \
     || finish 4 "cannot determine the changed paths: $BASE and $HEAD_REF share no merge base"
-  CHANGES="$(git -C "$ROOT" diff --name-status --no-renames -z "$BASE...$HEAD_REF" | read_name_status)" \
+  CHANGES="$(git -C "$ROOT" diff --raw --no-renames -z "$BASE...$HEAD_REF" | read_raw)" \
     || finish 4 "cannot determine the changed paths: git diff $BASE...$HEAD_REF failed"
 fi
 if printf '%s\n' "$CHANGES" | grep -q '^?'; then
@@ -647,12 +815,45 @@ if printf '%s\n' "$CHANGES" | grep -q '^?'; then
 fi
 CHANGES="$(printf '%s\n' "$CHANGES" | awk 'NF' | sort -u)"
 
+# --- the folded key ---------------------------------------------------------
+# A forbidden name is matched on a FOLDED KEY of the path, not on its bytes:
+# format characters (Unicode category Cf: zero-width joiners, direction marks,
+# the byte-order mark) removed, then NFKC, then full Unicode case folding, then
+# NFKC again. That folds what a file system folds onto the same file - case,
+# NFD against NFC, the long s and the Kelvin sign onto `s` and `k` (measured on
+# a case-insensitive APFS volume: `.hu<U+017F>ky/pre-commit` and
+# `.hus<U+212A>y/pre-commit` both opened `.husky/pre-commit`) - and also a
+# compatibility form such as a fullwidth letter, which no file system folds but
+# a reader does. The key only ever REFUSES: an exception (bookkeeping, the
+# backlog, the spec outside build mode, the plan in plan mode) is granted on
+# the exact bytes, never on the key, so a variant spelling never inherits one.
+# A bytes-invalid name is folded through surrogate escapes and judged, not
+# guessed at. A homoglyph from another script (a Cyrillic letter for a Latin
+# one) is NOT folded: no file system or git folds it either.
+FOLDED="$(printf '%s\n' "$CHANGES" | python3 -I -c '
+import sys, unicodedata
+def key(s):
+    s = "".join(c for c in s if unicodedata.category(c) != "Cf")
+    return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", s).casefold())
+def b2s(b): return b.decode("utf-8", "surrogateescape")
+out = sys.stdout.buffer
+for a in sys.argv[1:]:
+    out.write(key(b2s(a.encode("utf-8", "surrogateescape"))).encode("utf-8", "surrogateescape") + b"\n")
+for line in sys.stdin.buffer.read().split(b"\n"):
+    if not line: continue
+    f = line.split(b"\t", 3)
+    out.write(line + b"\t" + key(b2s(f[3])).encode("utf-8", "surrogateescape") + b"\n")
+' "$SPEC" "$ART")" || finish 4 "cannot fold the changed paths to their comparison key (python3 failed)"
+SPEC_KEY="$(printf '%s\n' "$FOLDED" | sed -n 1p)"
+ART_KEY="$(printf '%s\n' "$FOLDED" | sed -n 2p)"
+CHANGES="$(printf '%s\n' "$FOLDED" | sed 1,2d)"
+
 # --- classify ---------------------------------------------------------------
 ere_escape() { printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g'; }
 ART_RE="^$(ere_escape "$ART" | sed 's/<[^>]*>/[^\/]+/g')/"
+ART_KEY_RE="^$(ere_escape "$ART_KEY" | sed 's/<[^>]*>/[^\/]+/g')/"
 PLAN_RE="${ART_RE}plan\\.md\$"
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-SPEC_LC="$(lower "$SPEC")"
+BACKLOG=".claude/productizer/backlog.md"
 
 is_bookkeeping() {
   case "$1" in
@@ -661,20 +862,30 @@ is_bookkeeping() {
   esac
   return 1
 }
+# Written once by their writers and never updated: stage-snapshot.sh and
+# record-classification.sh both refuse to overwrite (exit 1).
+is_write_once() {
+  case "$1" in
+    .claude/productizer/snapshots/*|.claude/productizer/classifications/*) return 0 ;;
+  esac
+  return 1
+}
 # THE FORBIDDEN SET, every mode. The one place it is written; the header's
 # FORBIDDEN PATH list and references/ci-build.md describe this function.
+# forbidden_any_mode <path> <folded key>
 forbidden_any_mode() {
-  local lc base
-  lc="$(lower "$1")"; base="${lc##*/}"
-  case "$lc" in
-    .github/*) return 0 ;;
-    .claude/*)
-      is_bookkeeping "$1" && return 1
-      [ "$lc" = ".claude/productizer/backlog.md" ] && return 1
-      [ "$MODE" != "build" ] && [ "$lc" = "$SPEC_LC" ] && return 1
+  local raw="$1" k="$2" base
+  base="${k##*/}"
+  case "$k" in
+    .github|.github/*) return 0 ;;
+    .claude|.claude/*)
+      is_bookkeeping "$raw" && return 1
+      [ "$raw" = "$BACKLOG" ] && return 1
+      [ "$MODE" != "build" ] && [ "$raw" = "$SPEC" ] && return 1
       return 0 ;;
-    */.claude/*|.git/*|*/.git/*) return 0 ;;
-    .husky/*|.githooks/*|.productizer-run/*|.productizer-tools/*) return 0 ;;
+    */.claude|*/.claude/*|.git|.git/*|*/.git|*/.git/*) return 0 ;;
+    .husky|.husky/*|.githooks|.githooks/*) return 0 ;;
+    .productizer-run|.productizer-run/*|.productizer-tools|.productizer-tools/*) return 0 ;;
     .pre-commit-config.yaml|lefthook.yml|.lefthook.yml|lefthook-local.yml|.lefthook-local.yml) return 0 ;;
     codeowners|docs/codeowners|review.md) return 0 ;;
   esac
@@ -683,33 +894,59 @@ forbidden_any_mode() {
   esac
   return 1
 }
+# is_forbidden <path> <folded key>
 is_forbidden() {
-  forbidden_any_mode "$1" && return 0
-  [ "$MODE" = "build" ] && [ "$(lower "$1")" = "$SPEC_LC" ] && return 0
+  forbidden_any_mode "$1" "$2" && return 0
+  [ "$MODE" = "build" ] && [ "$2" = "$SPEC_KEY" ] && return 0
   [ "$MODE" = "plan" ] && ! [[ "$1" =~ $PLAN_RE ]] && ! is_bookkeeping "$1" && return 0
   return 1
 }
 
-REAL=""; BK_DELETED=""
-while IFS=$'\t' read -r st p; do
+REAL=""; BK_DELETED=""; BK_REWRITTEN=""; LINKS=""; BACKLOG_ST=""
+while IFS=$'\t' read -r st om nm p k; do
   [ -n "$p" ] || continue
+  # A LINK, any path, any mode. A symbolic link makes one name stand for
+  # another path, and a gitlink makes one name stand for a commit of code that
+  # is not in this change. This decider judges names, so it cannot judge what
+  # either points at: a symlink `sub/.claude` -> an allowed directory the run
+  # also wrote would hand an agent started in sub/ the run's own settings.
+  # Refused when a symlink is created or retargeted, and when a gitlink is
+  # added, repointed or removed. Deleting a symlink, or replacing one by a
+  # file, is judged like any other path.
+  if [ "$nm" = 120000 ] && [ "$st" != D ]; then LINKS="$LINKS$p (symbolic link)"$'\n'; continue; fi
+  if [ "$nm" = 160000 ] || [ "$om" = 160000 ]; then LINKS="$LINKS$p (gitlink)"$'\n'; continue; fi
   if is_bookkeeping "$p"; then
     # Bookkeeping ADDED is inert - the "produced nothing" case. Bookkeeping
     # DELETED is not: a classification, a snapshot or the checks result is an
     # audit record a later stage and the governance checks read, and erasing
     # one lets a run flip a check from a finding to clean. A stage run is the
     # wrong actor to erase the record it is judged by, so a deletion here is
-    # forbidden in every mode, exactly as editing a rule file is.
-    [ "$st" = D ] && BK_DELETED="$BK_DELETED$p"$'\n'
+    # forbidden in every mode, exactly as editing a rule file is. A snapshot
+    # or a classification MODIFIED (or retyped) is refused the same way: their
+    # writers never update one, so a rewrite is never theirs. The checks
+    # result is rewritten by every run of run-checks.sh, so its modification
+    # stays inert, like an addition.
+    if [ "$st" = D ]; then BK_DELETED="$BK_DELETED$p"$'\n'
+    elif [ "$st" != A ] && is_write_once "$p"; then BK_REWRITTEN="$BK_REWRITTEN$p"$'\n'
+    fi
     continue
   fi
-  REAL="$REAL$st"$'\t'"$p"$'\n'
-  if is_forbidden "$p"; then FORBIDDEN="$FORBIDDEN$p"$'\n'; fi
+  [ "$p" = "$BACKLOG" ] && BACKLOG_ST="$st"
+  REAL="$REAL$st"$'\t'"$p"$'\t'"$k"$'\n'
+  if is_forbidden "$p" "$k"; then FORBIDDEN="$FORBIDDEN$p"$'\n'; fi
 done <<< "$CHANGES"
 
 if [ -n "$BK_DELETED" ]; then
   FORBIDDEN="$BK_DELETED"
   finish 3 "the change deletes lifecycle bookkeeping that a later stage and the governance checks read; a stage run may not erase an audit record (a classification, a snapshot or the checks result). Deleted: $(printf '%s' "$BK_DELETED" | tr '\n' ' ' | sed 's/ $//')"
+fi
+if [ -n "$BK_REWRITTEN" ]; then
+  FORBIDDEN="$BK_REWRITTEN"
+  finish 3 "the change rewrites lifecycle bookkeeping that is written once and never updated; a stage run may not alter an audit record (a stage snapshot or a classification), and its writer never would. Rewritten: $(printf '%s' "$BK_REWRITTEN" | tr '\n' ' ' | sed 's/ $//')"
+fi
+if [ -n "$LINKS" ]; then
+  FORBIDDEN="$LINKS"
+  finish 3 "the change creates or retargets a symbolic link, or adds, repoints or removes a gitlink (submodule entry); a link makes a name stand for another path or for code outside the change, which a decider that judges names cannot judge, so a stage run may not make one. Links: $(printf '%s' "$LINKS" | tr '\n' ' ' | sed 's/ $//')"
 fi
 
 [ -n "$REAL" ] \
@@ -718,10 +955,44 @@ if [ -n "$FORBIDDEN" ]; then
   finish 3 "the change touches a path the target stage does not permit${MODE:+ in $MODE mode}; forbidden for $TO_KEY: $(printf '%s' "$FORBIDDEN" | tr '\n' ' ' | sed 's/ $//')"
 fi
 
+# THE BACKLOG IN BUILD MODE: an item may be ADDED, none removed or rewritten.
+# Checks read its lines - a `classified` line demands a classification record
+# (check-classification-provenance.sh), so deleting one silences that demand -
+# and a row's status is the record of what was agreed. A build run has no
+# reason to change either. Plan mode already forbids the file.
+if [ "$MODE" = "build" ] && [ -n "$BACKLOG_ST" ]; then
+  if [ "$BACKLOG_ST" = D ]; then
+    BL_DEL="all"
+  elif [ -n "$PATCH" ]; then
+    BL_DEL="$(SG diff-tree -r --numstat "$PT_BASE" "$PT_HEAD" -- "$BACKLOG" | cut -f2)" \
+      || finish 4 "cannot count the lines the change removes from $BACKLOG"
+  else
+    BL_DEL="$(git -C "$ROOT" diff --numstat "$BASE...$HEAD_REF" -- "$BACKLOG" | cut -f2)" \
+      || finish 4 "cannot count the lines the change removes from $BACKLOG"
+  fi
+  if [ "$BL_DEL" != 0 ]; then
+    FORBIDDEN="$BACKLOG"
+    finish 3 "the change removes or rewrites existing lines of $BACKLOG in build mode ($BL_DEL line(s) removed); a build run may add an item to the backlog but not change one, because checks read its lines and a row's status is the record of what was agreed"
+  fi
+fi
+
 # --- evidence per target stage ----------------------------------------------
 spec_records() {
   # spec_records <file> -> "id<TAB>status<TAB>target<TAB>text", line dropped
   bash "$SCRIPT_DIR/spec-requirements.sh" "$1" | cut -f1,3,4,5 | sort
+}
+
+# BUILD-MODE EVIDENCE, for EVERY target --mode build is asked about, not only
+# `build`: build-dispatch.sh asks build -> test in build mode, and a patch that
+# edits only the plan is not a build. Evidence is a changed path outside
+# artifacts.path, compared on the folded key so a variant spelling of the
+# artifacts directory does not count as outside it, and never the backlog.
+build_mode_evidence() {
+  printf '%s' "$REAL" | RE="$ART_KEY_RE" BL="$BACKLOG" \
+    awk -F'\t' '$3 !~ ENVIRON["RE"] && $2 != ENVIRON["BL"] { print $2 }'
+}
+build_mode_nothing() {
+  printf "produced nothing for %s in build mode: no path outside the lifecycle's artifacts (%s) and the backlog changed; a plan or a backlog row is not a build" "$1" "$ART"
 }
 
 case "$TO_KEY" in
@@ -767,14 +1038,20 @@ case "$TO_KEY" in
       [ -n "$EVIDENCE" ] \
         || finish 1 "produced nothing for build in plan mode: no plan.md under $ART is in this change"
     else
-      EVIDENCE="$(printf '%s' "$REAL" | RE="$ART_RE" awk -F'\t' '$2 !~ ENVIRON["RE"] { print $2 }')"
-      [ -n "$EVIDENCE" ] \
-        || finish 1 "produced nothing for build in build mode: no path outside the lifecycle's artifacts ($ART) changed"
+      EVIDENCE="$(build_mode_evidence)"
+      [ -n "$EVIDENCE" ] || finish 1 "$(build_mode_nothing build)"
     fi
     finish 0 "advance allowed: $FROM_KEY -> build in $MODE mode"
     ;;
   *)
-    EVIDENCE="$(printf '%s' "$REAL" | cut -f2)"
-    finish 0 "advance allowed: $FROM_KEY -> $TO_KEY"
+    if [ "$MODE" = "build" ]; then
+      EVIDENCE="$(build_mode_evidence)"
+      [ -n "$EVIDENCE" ] || finish 1 "$(build_mode_nothing "$TO_KEY")"
+    else
+      EVIDENCE="$(printf '%s' "$REAL" | BL="$BACKLOG" awk -F'\t' '$2 != ENVIRON["BL"] { print $2 }')"
+      [ -n "$EVIDENCE" ] \
+        || finish 1 "produced nothing for $TO_KEY: the only change outside the lifecycle's bookkeeping is $BACKLOG, and the backlog is the queue in front of intake, not a result"
+    fi
+    finish 0 "advance allowed: $FROM_KEY -> $TO_KEY${MODE:+ in $MODE mode}"
     ;;
 esac

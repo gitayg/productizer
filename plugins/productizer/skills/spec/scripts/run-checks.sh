@@ -358,6 +358,10 @@ done
 #   adv-hollow-voids
 #                 the advisory check made `hollow`: measured nothing,
 #                 so its claim is voided at any severity               -> 3
+#   refused-says-why
+#                 B89: a blocking check that refuses with a reason of
+#                 its own; the summary prints that reason under its
+#                 row, not only the status word                        -> 3
 #
 # IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
 # writes over `policy.output`, so a self-test that did it would be slower than
@@ -521,6 +525,41 @@ checks:
       min_covered: 1
 SELFTEST_CFG_FAIL
 
+  # B89: a blocking check that REFUSES and says why. grep is pointed at an
+  # input that is not there, so it exits 2 - `refused` - and its own reason,
+  # `No such file or directory`, is on its stderr, which the executor folds
+  # into the check's output. The run must print that reason, not only the
+  # status word.
+  cat > "$SB/checks-reason.yaml" <<'SELFTEST_CFG_REASON'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  mode: batch
+  severity: block
+checks:
+  - id: refuses-with-reason
+    why: grep is handed an input that does not exist, so it refuses with a reason of its own that the run must print
+    when:
+      always: true
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: batch
+    command: [grep, -e, RUN-CHECKS-SELFTEST-NEEDLE, fixture/B89-no-such-input.txt]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: stdout_paths
+      pattern: '^(fixture/[^:]+):'
+      must_cover: none
+      min_covered: 1
+SELFTEST_CFG_REASON
+
   cat > "$SB/checks-off.yaml" <<'SELFTEST_CFG_OFF'
 version: 1
 policy:
@@ -680,6 +719,7 @@ SELFTEST_CFG_GONE_NO_TOOL
     self_unmeasured "the fixture repository does not hold gone.txt at the base and lack it at HEAD, so nothing was deleted in the range. Unmeasured, not a pass"
   fi
 
+  # <!-- EXAMPLE:BEGIN -->
   # A SECOND GIT REPOSITORY, holding the deletion the one above was built to
   # AVOID. Commit 1 holds `renamed-away.txt`; commit 2 removes it and adds
   # `renamed-to.txt` with byte-identical content, which is what a rename, a file
@@ -689,6 +729,7 @@ SELFTEST_CFG_GONE_NO_TOOL
   # `--diff-filter=D` listed nothing, and the old path was neither examined nor
   # dropped nor labelled. The runner passes `--no-renames` now, and the
   # assertions under the case below are what says so.
+  # <!-- EXAMPLE:END -->
   fixture_rename_git() {
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
       git -C "$SB/repo-rename" -c user.name=selftest -c user.email=selftest@example.invalid \
@@ -1146,6 +1187,7 @@ SELFTEST_ASSERT_AT
   self_assert_change "$SB/git-deleted.json" base_ref "\"$GIT_BASE_REF\"" \
     "change.base_ref is the ref exactly as typed"
 
+  # <!-- EXAMPLE:BEGIN -->
   # A DELETION GIT REPORTS AS A RENAME, DRIVEN. The line below the case list used
   # to say this was NOT ASSERTED, and the defect it named was the worst shape an
   # absence can take here: the old path reached no tool, was not dropped, was not
@@ -1156,6 +1198,7 @@ SELFTEST_ASSERT_AT
   # the drop list is empty and this case passes for the wrong reason - which is
   # why `files_in_scope` and `files_dropped_deleted` are both asserted and not
   # only the exit code.
+  # <!-- EXAMPLE:END -->
   self_drive renamed-away 0 \
     "a path git reports as RENAMED away rather than deleted, run under --base: still named in the scope, still dropped before argv, and still labelled deleted - not silently missing from the accounting" \
     --config "$SB/checks-scope.yaml" --root "$SB/repo-rename" \
@@ -1286,6 +1329,28 @@ SELFTEST_ASSERT_AT
   self_assert_at "$SB/adv-hollow.json" spec_coverage.satisfied 'false' \
     "and require refuses"
 
+  # B89 - a refused check's own reason reaches the terminal summary, not only
+  # the result file nobody reads in CI.
+  self_drive refused-says-why 3 \
+    "a blocking check that refuses with a reason of its own: still 3, and the summary prints that reason" \
+    --config "$SB/checks-reason.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --out "$SB/reason.json"
+  self_assert "$SB/reason.json" status '"refused"' \
+    "the check really refused - the reason printed is a refusal's, not a finding's"
+  self_assert_err "$SB/refused-says-why.err" "-> its own output, last " \
+    "the summary heads the check's own output under its row"
+  self_assert_err "$SB/refused-says-why.err" "| grep: fixture/B89-no-such-input.txt: No such file or directory" \
+    "and prints the tool's own reason, which before B89 reached only the result file"
+  self_assert_err "$SB/clean.err" "PASS: every blocking check ran" \
+    "the control: the clean run reached its pass line"
+  if grep -qF -- "-> its own output" "$SB/clean.err"; then
+    printf '  FINDING: assert %-20s %s\n' "stderr" "a PASSING check's output was printed too - the tail is for checks that did not pass"
+    SELF_FAILED=$((SELF_FAILED + 1))
+  else
+    printf '  held:    assert %-20s %s\n' "stderr" "a passing check prints no output tail"
+  fi
+  SELF_ASSERTS=$((SELF_ASSERTS + 1))
+
   printf '  self-test cases driven: %d, result-file assertions: %d. Cases and assertions that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_ASSERTS" "$SELF_FAILED"
 
@@ -1300,9 +1365,12 @@ SELFTEST_ASSERT_AT
   printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The five cases from `deleted-in-scope` to `all-gone-and-no-tool` are the exception - twenty-four assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope`, `deleted-under-base` and `renamed-away` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` case alone proves only that an absent path was ACCEPTED, because the path it names falls outside the one check scope and no tool was asked to open it. `deleted-in-scope` puts an absent path INSIDE a per_file check scope, where the executor would have substituted it into argv, and five assertions read off the result file: the check ran, the scope is still 2, one path was handed over, the dropped one is named, and it is labelled absent and not deleted.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` LABEL, and the git query that produces it. `deleted-under-base` builds a two-commit git repository, deletes an in-scope path in the second commit and runs under --base HEAD~1; assertions read off the result file that git named both paths, one was handed over, the drop is labelled deleted and not absent, dropped_source names git and the ref, and change.base / change.base_ref record the commit and the ref. The --changed case asserts both are null.\n'
+  # <!-- EXAMPLE:BEGIN -->
   printf '  NOW ASSERTED, and this line used to say it was not: a deletion git reports as a RENAME. Both diffs this runner takes pass --no-renames, so the old path can no longer vanish from the accounting - the shape where --name-only lists only the new path, --diff-filter=D lists nothing, and the old one is neither handed over nor dropped nor labelled nor present in change.files. `renamed-away` builds a second git repository whose two commits git calls R100 - measured, with detection explicitly on, before the case runs - and six assertions read off the result file that the scope is still 2, one path was handed over, the drop is labelled deleted and not absent, and dropped_source names the query including the flag.\n'
+  # <!-- EXAMPLE:END -->
   printf '  NOW ASSERTED, and this line used to say it was not: a --base whose ref is NOT an ancestor of HEAD, where change.base (the merge base) and `git rev-parse <ref>` differ. `base-substituted` builds that repository, measures that the two commits differ before it runs, and asserts that change.base and the argv a `{base}` check received are both the merge base. `base-in-argv0`, `base-in-version-command` and `base-without-base` assert the refusals and the `no_base` row, reading stderr and the result file rather than the exit code alone.\n'
   printf '  NOW ASSERTED (B80, warn means warn): an advisory check that FAILS keeps its spec_units claim. `adv-fail-covers`, `adv-block-voids` and `adv-hollow-voids` differ in one config line each, and their result files are read: the advisory failure leaves the claim unvoided and annotated advisory_failing, R1 Covered and held_by_failing_advisory, coverage satisfied, and the printed line saying so; the same check as block voids it and coverage refuses on its own account; an advisory hollow check voids it too. NOT ASSERTED: an advisory fail that ALSO failed its coverage assertion, which is voided by its own branch and is not driven here; nor a requirement covered both by a passing check and by a failing advisory one.\n'
+  printf '  NOW ASSERTED (B89): a refused blocking check prints the tail of its own output under its row; `refused-says-why` reads the tool reason off stderr, and the clean case asserts a passing check prints none. NOT ASSERTED: the 20-line and 300-character bounds, which no case here exceeds.\n'
   printf '  NOT ASSERTED: `{base}` in an interpreter program operand (refused by the same rule as argv[0], not driven here), and a base that resolved but is not 40 hex digits - a SHA-256 repository - whose row is `no_base` with a different sentence and is not driven here. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
@@ -1435,12 +1503,14 @@ elif [ -n "$BASE" ]; then
   BASE_REF="$BASE"
   # `--no-renames` ON BOTH DIFFS, AND IT IS NOT A PREFERENCE.
   #
+  # <!-- EXAMPLE:BEGIN -->
   # With git's default rename detection a deletion can DISAPPEAR FROM THE
   # ACCOUNTING ALTOGETHER. Reproduced 2026-09-26 on git 2.54.0 in a scratch
   # repository: commit 1 holds `gone.txt`, commit 2 removes it and adds a file
   # with the same content, and `git diff --name-status` reports one line,
   # `R100 gone.txt -> newthing.txt`. A rename has no D side, so
   # `--diff-filter=D` lists NOTHING, and `--name-only` lists only the new path.
+  # <!-- EXAMPLE:END -->
   # The old path was therefore not handed to a tool, not dropped, and not
   # labelled - it was never in `change.files` at all, so no reader of the result
   # or of the dashboard could see that it had been left out. Every other absence
@@ -3468,6 +3538,7 @@ else:
         fh.write(payload + "\n")
 
 e = sys.stderr
+OUTPUT_TAIL_LINES = 20
 e.write("checks stage: %d declared, %d triggered by %d changed files%s\n"
         % (len(plan["checks"]), triggered, len(plan["files"]),
            " and tags [%s]" % ", ".join(plan["tags"]) if plan["tags"] else ""))
@@ -3524,6 +3595,18 @@ for r in results:
                    "; ".join(_parts), r.get("dropped_source")))
     if r.get("detail"):
         e.write("             -> %s\n" % r["detail"])
+    # B89 - A CHECK THAT DID NOT PASS SAYS WHY IN ITS OWN WORDS, HERE. Its
+    # output was kept only in the result file, and in CI that file sits under
+    # $RUNNER_TEMP where nobody reads it: the v4.65.0 tag run refused on
+    # `selftest-coverage (refused)` and the probe that timed out had to be
+    # reconstructed from the code. The tail is bounded - OUTPUT_TAIL_LINES lines
+    # of the last 2000 characters `output_tail` already holds, each cut to 300 -
+    # so a scanner that prints a megabyte cannot bury the verdict under it.
+    if r["status"] != "pass" and r.get("output_tail"):
+        _lines = r["output_tail"].rstrip("\n").split("\n")[-OUTPUT_TAIL_LINES:]
+        e.write("             -> its own output, last %d line(s):\n" % len(_lines))
+        for _l in _lines:
+            e.write("             | %s\n" % _l[:300])
 
 if sc["status"] == "measured":
     e.write("spec coverage: %d active requirement(s) derived from %s - %d Covered, %d Partial, "

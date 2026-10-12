@@ -1,5 +1,5 @@
 # cases.tsv - three TAB-separated fields: fixture file, expected exit, a sentence the
-# output must contain. Each violation fixture is good.yml with ONE change, so a
+# output must contain. Each other fixture is good.yml with ONE change, so a
 # finding here can only come from that change.
 good.yml	0	every assertion held
 push-trigger.yml	1	the only trigger must be workflow_dispatch; found push, workflow_dispatch
@@ -10,8 +10,12 @@ agent-job-write.yml	1	the agent job holds write on id-token
 agent-checkout-credentials.yml	1	checkout in the agent job must set persist-credentials: false
 agent-no-bash-deny.yml	1	the agent action step must deny the agent a shell with a standalone --disallowedTools Bash
 unpinned-uses.yml	1	not pinned to a full commit id: actions/checkout@v4
-event-in-run.yml	1	an expression is interpolated into the script: ${{ github.event.
-inputs-in-run.yml	1	an expression is interpolated into the script: ${{ inputs.
+event-in-run.yml	1	an expression is interpolated into the script: ${{ github.event.inputs.issue }}
+inputs-in-run.yml	1	an expression is interpolated into the script: ${{ inputs.issue }}
+steps-in-run.yml	1	an expression is interpolated into the script: ${{ steps.args.outputs.claude_args }}
+needs-in-run.yml	1	an expression is interpolated into the script: ${{ needs.prepare.outputs.spec_base }}
+env-in-run.yml	1	an expression is interpolated into the script: ${{ env.TOOLS }}
+head-ref-in-run.yml	1	an expression is interpolated into the script: ${{github.head_ref}}
 continue-on-error.yml	1	continue-on-error turns a failed step green
 or-true.yml	1	|| true hides a failure
 devnull.yml	1	2>/dev/null hides a failure
@@ -22,3 +26,13 @@ permissions-default-widened.yml	1	default must be repo-settings; found 'anything
 post-agent-env-missing.yml	1	a run: step after the agent action must pin BASH_ENV to the empty string
 write-job-runs-python.yml	1	names python3 in a run:; it must execute no code from the repository it writes to
 write-job-runs-repo-script.yml	1	runs a shell script that is not staged under $RUNNER_TEMP: scripts/render-body.sh
+tools-pin-tag.yml	1	env.PRODUCTIZER_SHA: must be a quoted string of 40 lower-case hex digits
+tools-pin-unquoted.yml	1	found 1234567890123456789012345678901234567890
+tools-ref-moving.yml	1	the productizer tools checkout must use ref: ${{ env.PRODUCTIZER_SHA }}; found 'main'
+good-pinned.yml	0	every assertion held
+guard-pin-refusal.yml	1	the refusal step is missing the line: if [ "$PRODUCTIZER_SHA" = "0000000000000000000000000000000000000000" ]; then
+guard-args-step.yml	1	the args step is missing the line: bash "$TOOLS/build-dispatch.sh" agent-args . --out "$GITHUB_OUTPUT"
+guard-claude-args-wiring.yml	1	the agent's claude_args must read ${{ steps.args.outputs.claude_args }}
+guard-stash-missing.yml	1	no stash-git (between the args step and the agent) step
+guard-capture-from-checkout.yml	1	the capture (after the agent) step is missing the line: bash --noprofile --norc "$RUNNER_TEMP/build-dispatch.sh" capture
+guard-tools-verify.yml	1	the tools-verification step is missing the line: dirty="$(git

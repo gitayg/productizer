@@ -8,8 +8,12 @@ withdrawn requirement keeps its original sentence in place**. So the current
 text of the spec cannot tell you that anything was dropped. Read on its own it
 is a document the existing code already satisfies:
 
+<!-- EXAMPLE:BEGIN -->
+
 > `R14` — While a session is idle for 30 minutes, the service shall end it.
-> `Superseded by R58.` The 30-minute cut-off was replaced by sign-out.
+> `Superseded by R0.` The 30-minute cut-off was replaced by sign-out.
+
+<!-- EXAMPLE:END -->
 
 Build reads that, finds the idle-timeout code present and correct against the
 sentence in front of it, and changes nothing. The 30-minute timeout ships

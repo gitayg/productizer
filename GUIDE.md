@@ -772,7 +772,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Sixty-four requirements are active**, and they are the whole of what has
+**Seventy-five requirements are active**, and they are the whole of what has
 been agreed.
 
 Seven more are superseded and none withdrawn, and neither kind is listed here.
@@ -781,7 +781,7 @@ years ago still leads somewhere — but a guide is read by someone deciding what
 to do next, and a superseded sentence gives them no sign it stopped being
 true.
 
-**Always, with no trigger.** Twelve requirements hold whatever else is
+**Always, with no trigger.** Fifteen requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -806,8 +806,15 @@ happening:
   what the repository's committed agent settings grant.
 - **R67** — Every unattended agent step shall run without a tool that executes
   commands.
+- **R73** — The lifecycle shall not count a change to the backlog as evidence
+  for a stage advance.
+- **R74** — The lifecycle shall match a stage run's changed path against the
+  paths it refuses after folding case, Unicode normalisation and format
+  characters, granting an exception to those paths on the exact path alone.
+- **R80** — The CI build template shall interpolate no `${{ }}` expression
+  into a `run:` script.
 
-**When something arrives.** Seventeen things happen on a discrete trigger:
+**When something arrives.** Nineteen things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -846,8 +853,14 @@ happening:
   agent's own job, the lifecycle shall give that shell no environment setting,
   from the agent or alterable by it, that names a file for the shell to
   source.
+- **R78** — When the agent's job reads the flags prepared for an unattended
+  run, the CI build template shall pass the agent only lines it has matched
+  against the fixed shapes `build-dispatch.sh prepare` writes, a last line
+  with no newline included.
+- **R82** — When the stderr-suppression check scans a YAML file, the check
+  shall examine only `run:` values.
 
-**For as long as a state lasts.** Five requirements are true for the duration
+**For as long as a state lasts.** Six requirements are true for the duration
 of a state, not at a moment inside it:
 
 - **R12** — While a contradiction is unruled, the lifecycle shall merge no
@@ -861,8 +874,11 @@ of a state, not at a moment inside it:
 - **R71** — While an unattended run holds a token that can write to the
   repository, the lifecycle shall execute no code from the repository it is
   writing to.
+- **R81** — While PRODUCTIZER_SHA is the all-zero placeholder, the CI build
+  template shall refuse to run before checking anything out, naming the
+  command that prints a release's commit id.
 
-**When something goes wrong.** Twenty-six defences, written as `If … then`
+**When something goes wrong.** Thirty-one defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -925,6 +941,19 @@ because a designed path and a defended one are not the same thing:
   git reading the repository's committed configuration, then the lifecycle
   shall run it with its working directory outside every tree the agent or its
   delivered patch could have written.
+- **R72** — If a build-mode stage run changed no path outside the lifecycle's
+  artifacts directory, then the lifecycle shall not advance that work's stage.
+- **R75** — If a stage run's change creates or retargets a symbolic link, or
+  adds, repoints or removes a submodule entry, then the lifecycle shall refuse
+  to deliver that change.
+- **R76** — If a stage run's change would modify a stage snapshot or a
+  classification record, then the lifecycle shall refuse to deliver that
+  change.
+- **R77** — If a build-mode stage run's change removes or rewrites an existing
+  line of the backlog, then the lifecycle shall refuse to deliver that change.
+- **R79** — If a flag line prepared for an unattended run is outside the fixed
+  shapes `build-dispatch.sh prepare` writes, repeats a flag, or the prepared
+  flags lack the Bash deny, then the CI build template shall refuse the run.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

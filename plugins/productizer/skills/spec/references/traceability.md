@@ -200,13 +200,13 @@ added here is the split on the counter, the diff scope and the supersede note.
 
 | Output | Meaning | Changes the exit code |
 |---|---|---|
-| `FINDING CITATION_NEVER_ALLOCATED <path>:<line> <id>` | the id is at or above `Next requirement id`. It was never handed out: a typo, an invention, another product's id, or an example | yes |
+| `FINDING CITATION_NEVER_ALLOCATED <path>:<line> <id>` | the id is at or above `Next requirement id`, or is written with a leading zero, which no spec allocates. It was never handed out: a typo, an invention, another product's id, or an example | yes |
 | `FINDING CITATION_ALLOCATED_MISSING <path>:<line> <id>` | the id is below the counter and the spec has no row for it. It was handed out and its row is gone, or it lives in a spec file this check does not read | yes |
 | `FINDING TRAILER_UNKNOWN_ID <sha> <id>` | a commit in `BASE..HEAD` carries a `Productizer-Req:` id the spec does not hold, as `req-trailer.sh --validate --rev <sha>` reports it | yes |
 | `FINDING TRAILER_MALFORMED_ID <sha> <token>` | the same trailer carries a token that is not an id at all | yes |
 | `NOTE CITATION_SUPERSEDED <path>:<line> <id> -> <id>` | the id resolves, but to a superseded requirement. The note follows the `Superseded by` chain to the requirement that stands now | no |
 | `NOTE CITATION_WITHDRAWN <path>:<line> <id>` | the id resolves to a withdrawn requirement | no |
-| `EXAMPLE <path>:<line> <id>` | the id sits inside an EXAMPLE block and was not resolved | no |
+| `EXAMPLE <path>:<line> <id>` | the id sits inside an EXAMPLE block, or is `R0`, the reserved example id, and was not resolved | no |
 
 The two findings are split on the counter because they have different repairs,
 the same line `drift-reverse.sh` draws between its signals B and D. Exit `0`
@@ -284,6 +284,32 @@ In a script, the same marker after a `#` or `//` works, and so does building
 the id rather than writing it - the self-tests of this check and of
 `req-trailer.sh` write `R$((4 + 3))`, for the reason section 2 gives for
 coverage ids.
+
+`R0` needs no marker. Ids start at `R1`, so no spec allocates it, and the
+plugin's own templates and guide write their status-marker example as
+`Superseded by R0.` for exactly that reason. Since 1.1 the check prints it as an
+`EXAMPLE` line unless the spec defines it; 1.0 read it as 0, below every
+counter, and so as allocated but missing. An id written with a leading zero is
+never allocated either, and 1.1 says so rather than sending the writer to look
+for a deleted row.
+
+**Re-measured on 2026-10-12, at v4.67.4.** The same replay over 139 commits: 22
+refused for no spec, 1 with no parent, 116 measured. Version 1.0 fired on 27 of
+them with 94 findings; 1.1 fires on 26 with 91. The 8 allocated-but-missing
+findings 1.0 reported were all `R0` or a leading-zero id: 1.1 drops the 3 `R0`s
+and reports the 5 leading-zero ids as never allocated. Read one by one, none of
+the 91 is a citation anybody meant, so the precision of a finding over history
+is still zero. It cannot move: history's lines are committed, and a marker
+written today does not reach them.
+
+What the markers change is the next change. Every example in the reference
+docs, `templates/spec.md`, `templates/import.md` and `build-guide.sh` that fired
+in that replay, or would fire today, now sits inside an EXAMPLE block or reads
+`R0`. A simulated change that adds every line of those files reports 4 findings
+under 1.0 with the files as they stood at v4.67.4, and 0 under 1.1 with the files
+as they stand now. The 20 findings left in a simulated change that adds every
+tracked file are in self-test corpora, script comments and
+`KNOWN_LIMITATIONS.md`, none of them files this pass edited.
 
 ### What it cannot see
 

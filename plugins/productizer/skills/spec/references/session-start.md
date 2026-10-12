@@ -13,7 +13,7 @@ line before the first prompt.
 ## What it shows
 
 ```
-acme-billing · 2 open intents · 1 CONTRADICTION waiting on your ruling · spec R1–R58, 3 superseded
+acme-billing · 2 open intents · 1 CONTRADICTION waiting on your ruling · spec R1–R<n>, 3 superseded
 Open in Areas of concern: C1. Nothing merges into the spec until it is ruled on.
 ```
 

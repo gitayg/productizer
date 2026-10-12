@@ -74,8 +74,11 @@ Anything else is `KIND_UNKNOWN` at exit 4 — never "clean".
 - **R<n>** — <EARS sentence>
 ```
 
+<!-- EXAMPLE:BEGIN -->
+
 - `R` followed by a decimal integer with **no leading zero**. `R7`, never `R07`
   — a citation naming `R7` does not resolve to `R07`, and nothing errors.
+  <!-- EXAMPLE:END -->
 - The separator is an **em dash** (`—`). A hyphen or en dash parses but is
   non-canonical.
 - The id lives in `**bold**`, in a top-level list item, inside the
@@ -88,10 +91,12 @@ Anything else is `KIND_UNKNOWN` at exit 4 — never "clean".
 
 The counter is declared in the header:
 
+<!-- EXAMPLE:BEGIN -->
 ```
 Next requirement id
 : `R23` — allocate from here, then increment.
 ```
+<!-- EXAMPLE:END -->
 
 - It is the **highest id the spec has ever used**, not a count of rows on
   screen. Removing behaviour does not free its id.
@@ -162,6 +167,7 @@ A status marker sits on the line **directly beneath** the requirement, indented
 as a continuation of the list item. The id is not repeated — the line above
 already carries it.
 
+<!-- EXAMPLE:BEGIN -->
 ```
 - **R7** — When an intent arrives, the lifecycle shall classify it.
   Superseded by R41. The classification became four-valued.
@@ -169,6 +175,7 @@ already carries it.
 - **R9** — The lifecycle shall mirror the spec to the wiki.
   Withdrawn. The wiki was retired; nothing consumed the mirror.
 ```
+<!-- EXAMPLE:END -->
 
 | Status | Marker | Rule |
 |---|---|---|
@@ -281,7 +288,7 @@ a document that is correct:
   it was given.
 - **Citations are only resolved in five sections** — *Acceptance criteria*,
   *Change log*, *Areas of concern*, *Decision record* and *Design*. *How to read
-  this file* quotes `R58` as an illustration and the *Requirement index* is
+  this file* quotes `R0` as an illustration and the *Requirement index* is
   documented as optional and frequently stale; resolving ids there produces
   noise, not findings.
 
@@ -294,22 +301,25 @@ disagree, and picking a winner here would be inventing a rule.
 
 - **One `shall` per requirement.** `ears.md` rule 1 is unambiguous: an `and` in
   the response is two requirements wearing one id. The repo's own
-  `.claude/productizer/spec.md` breaks it three times — **R14**, **R16** and
-  **R21** each carry two `shall` clauses. Because reality disagrees with the
-  rule, the validator reports `EARS_MULTIPLE_SHALL` at **WARN**, not ERROR: the
-  real spec stays green by default and fails `--strict` until either the three
-  requirements are split or the rule is amended. Reporting it as clean would
-  make the rule decorative.
+  `.claude/productizer/spec.md` broke it three times — **R14**, **R16** and
+  **R21** each carried two `shall` clauses — and on 2026-08-29 each was split
+  into two new ids and superseded, its sentence kept in place (the spec's
+  decision record). They no longer disagree with the rule: the validator reads
+  `EARS_MULTIPLE_SHALL` only on an active requirement, at **WARN**, not ERROR,
+  so a spec carrying one stays green by default and fails `--strict`. This
+  repository's spec now passes `--strict`, and its CI spec step runs strict.
 - **Naming the system the same way every time.** `ears.md` rule 2 asks for one
   system noun. The real spec uses four — *the lifecycle*, *every published
   view*, *every check*, *the gate*. Some of those are genuinely sub-components
   and some may be drift, and no grammar can tell the two apart. **Not
   enforced.**
+  <!-- EXAMPLE:BEGIN -->
 - **The requirement index.** `templates/spec.md` ships an index whose example
   rows (`R1`, `R2 superseded by R41`, `R3 withdrawn`) contradict the real
   requirements carrying those ids. The index is documented as optional until
   the spec passes thirty requirements. **Not enforced, and not cross-checked
   against the requirements.**
+  <!-- EXAMPLE:END -->
 - **The amendment record.** The shipped `constitution.md` names `P5` in its
   amendment record while `P5` is also the next unallocated principle id. The
   amendment record is prose about history, not a principle definition, so it is
@@ -332,8 +342,10 @@ than no checker: it converts "nobody looked" into "it passed".
 - **Whether a requirement is correct.** EARS makes a requirement unambiguous,
   not right. A precisely worded requirement can still be the wrong thing to
   build.
+  <!-- EXAMPLE:BEGIN -->
 - **Whether the reason line is true.** `Superseded by R41. Because.` satisfies
   the grammar completely.
+  <!-- EXAMPLE:END -->
 - **Whether `Checked by` names something that exists, beyond a script
   filename under `--repo`.** `PRINCIPLE_CHECK_ABSENT` reads only backticked
   `*.sh`/`*.py`/`*.js` names, matches them by basename anywhere in the work

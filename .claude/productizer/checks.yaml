@@ -181,10 +181,19 @@ checks:
 
   - id: stderr-suppression
     why: an error and a genuine no-match look identical once stderr is discarded, and this repo has already shipped three defects that hid in exactly that gap
+    # Widened in v4.68.0 (B97) from shell scripts to every workflow, skill,
+    # command and Markdown or YAML file: the scanner reads a YAML file's `run:`
+    # values and a Markdown file's shell-fenced and `!` blocks as shell, and
+    # nothing else in them. Measured before widening: 29 findings over every
+    # tracked .md/.yml/.yaml file, 7 once only those values were read, 5 after
+    # the fixes, 0 with the fixture's allow entry below.
     when:
       paths:
         - "**/*.sh"
         - "**/*.bash"
+        - "**/*.yml"
+        - "**/*.yaml"
+        - "**/*.md"
     severity: block
     requires: [./plugins/productizer/skills/spec/scripts/check-stderr.sh]
     version_command: [./plugins/productizer/skills/spec/scripts/check-stderr.sh, --version]
@@ -199,6 +208,8 @@ checks:
       - 'plugins/productizer/skills/spec/scripts/run-checks.sh::$pid" 2>/dev/null::kill and wait address a pid this script started and owns; the only stderr is ESRCH from a child that already exited, which is the ordinary case this loop is written around'
       - --allow
       - 'plugins/productizer/skills/spec/scripts/run-checks.sh::git merge-base "$BASE" HEAD 2>/dev/null::the very next line refuses the whole run and names the base that could not be resolved, so the failure is reported rather than lost - the cost is that git own wording goes with it'
+      - --allow
+      - 'plugins/productizer/skills/spec/fixtures/ci-template/devnull.yml::2>/dev/null::a fixture that must contain the suppression check-ci-template.py exists to refuse'
       - "{file}"
     timeout_seconds: 60
     exit_codes:
@@ -213,6 +224,22 @@ checks:
       examined_when_exit_in: [0, 1]
       must_cover: all_triggering
       min_covered: 1
+      spec_units:
+        - id: R82
+          verdict: Partial
+          reason: >-
+            The obligation is the scanner's, and this check runs the scanner over the change's
+            files; that it reads a YAML file's `run:` values and nothing else is asserted by
+            check-stderr.sh's own self-test, which the workflow runs, not by this check's verdict
+            on this repository. Not asserted: shell in a YAML key other than `run:` (a `script:`
+            handed to an action, a composite action input), and a flow or quoted multi-line
+            `run:` value beyond one line.
+          evidence: >-
+            `yaml-run-block` (a `run: |` block, line 9) and `yaml-run-inline` (`run: cmd`, line 4)
+            exit 1 and name the line; `yaml-not-run` exits 0 on a workflow carrying the same
+            redirection in a step name and an env value, and says it read 1 line of shell.
+            Falsified 2026-10-12 on a copy that read every YAML line as shell: `yaml-not-run`
+            went 0 -> 1, 36 of 37.
 
   # --- one living spec per product ----------------------------------------
   #
@@ -230,7 +257,8 @@ checks:
   # and is never counted as "no spec there". Counting it as absent is how a
   # two-spec product reports as a one-spec product.
     limitations:
-      - Fourteen suppressions remain, exempted by allowlist entries with written reasons. Three rest on a measured SIGPIPE from a deliberate cap, and they exempt the whole line - a genuine error on it would still be hidden.
+      - Fourteen suppressions remain in shell, exempted by allowlist entries with written reasons, and one in a YAML fixture that exists to carry one (`fixtures/ci-template/devnull.yml`). Three rest on a measured SIGPIPE from a deliberate cap, and they exempt the whole line - a genuine error on it would still be hidden.
+      - In a YAML file only `run:` values are read, and in Markdown only shell-fenced and `!` blocks. Shell handed to an action under another key, a `!` block that does not open its line, an unfenced or indented code block, and a YAML flow or quoted multi-line `run:` value are not.
 
   - id: spec-home
     why: two repos both holding a living spec means two allocators both handing out R42, and nothing in this lifecycle noticed until now
@@ -496,7 +524,10 @@ checks:
             `window["ev"+"al"]("window.cla"+"ude.u"+"se('artifact')")` exits 0 under 2.0 and 1
             under 3.0, naming `artifact`. Seven assertions over 35 cases, each falsified alone
             against a patched classifier, and each case asserts the resolved NAME or `none` so a
-            folded request is told from an unreadable one.
+            folded request is told from an unreadable one. 3.1 drives a real build over a fixture
+            backlog row naming a home-directory config path (`prose-path`, must exit 0) and the
+            same row quoting the call syntax (`quoted-call`, must exit 1), so data the page embeds
+            is told from code it runs (B115).
       # One bare path per repository file hashed. `must_cover: none` and NOT
       # all_triggering, deliberately: this examines the whole tree rather than
       # the change, so a commit that DELETES a file would name a path that no
@@ -1829,9 +1860,13 @@ checks:
   # repository against its parent on 2026-10-10: 132 in history, 109 measurable,
   # 25 fired with 92 findings, and none of the 92 was a citation anybody meant,
   # by a by-hand reading recorded in references/traceability.md. Finding
-  # precision on this history is zero. The remedy is the EXAMPLE marker, and
-  # nothing here is marked yet (B101). Blocking on that rate would block one
-  # change in four for an example id.
+  # precision on this history is zero. Replayed again 2026-10-12: 139 in
+  # history, 116 measurable; 1.0 fired on 27 with 94 findings, 1.1 on 26 with
+  # 91. That figure cannot change - the commits are made. The remedy is the
+  # EXAMPLE marker, and since v4.68.0 every example id in the tree is inside
+  # one or is R0: a change adding every tracked file reads 0 findings, where it
+  # read 20 (B101). Blocking stays unearned until changes made after that give
+  # the check a precision of its own.
   - id: dangling-citations
     why: a citation of an id the spec does not hold reads exactly like provenance, and nothing checked that a new one resolves at the moment it is written
     when:
@@ -1857,16 +1892,23 @@ checks:
           reason: >-
             It reads only ADDED lines, so a citation already in the tree at the base is not
             examined. A citation is a TOKEN - `R` and digits - so an example id outside an
-            EXAMPLE block is indistinguishable from a real one: replayed over 109 measurable
-            commits of this repository's history it fired on 25 with 92 findings, and a by-hand
-            reading found none of them was a citation anybody meant. Fixture and eval trees, the
-            spec, the constitution, the backlog and the generated requirement index are not read.
+            EXAMPLE block is indistinguishable from a real one: replayed over 116 measurable
+            commits of this repository's history 1.1 fired on 26 with 91 findings, and a by-hand
+            reading found none of them was a citation anybody meant. Since v4.68.0 every example
+            id in the tree is marked or is R0, so a change adding every tracked file reads 0
+            findings; what the precision is on changes made after that is not yet measured.
+            Fixture and eval trees, the spec, the constitution, the backlog and the generated
+            requirement index are not read.
           evidence: >-
             Every requirement id on an added line is resolved against the spec at HEAD through
             spec-requirements.sh. An id at or above `Next requirement id` is
             CITATION_NEVER_ALLOCATED and one below it with no row is CITATION_ALLOCATED_MISSING;
-            every commit trailer in the range goes through `req-trailer.sh --validate`. 25
-            self-test cases over exit codes 0 1 2, each asserting a sentence.
+            every commit trailer in the range goes through `req-trailer.sh --validate`. 28
+            self-test cases over exit codes 0 1 2, each asserting a sentence. `R0`, the reserved
+            example id, prints as an EXAMPLE line; an id with a leading zero is
+            CITATION_NEVER_ALLOCATED; an id beside a multibyte character, read under a UTF-8
+            locale, is read and not refused (`utf8-neighbour`, exit 2 on the BSD awk before every
+            awk here read bytes).
         - id: R53
           verdict: Partial
           reason: >-
@@ -1881,13 +1923,13 @@ checks:
       pattern: 'requirements resolved against:\s*([0-9]+)'
       min_covered: 1
     limitations:
-      - On this repository's history the precision of a finding is zero - 92 findings over 25 of 109 measurable commits, none a citation anybody meant. The EXAMPLE marker is the remedy, and nothing is marked yet.
+      - On this repository's history the precision of a finding is zero - 91 findings over 26 of 116 measurable commits under 1.1, none a citation anybody meant - and it cannot change. Since v4.68.0 every example id in the tree is marked or is R0 (0 findings on a change adding every tracked file); a precision on changes made after that is not yet measured.
       - req-trailer.sh reads the spec through its own id pattern, not spec-requirements.sh, so the two halves of this check can disagree about an id that is bold outside the `## Requirements` section.
       - One spec path. A spec split across files reads as missing requirements.
 
   # --- a stage that moves on nothing, backwards, or over its own rules --------
   #
-  # B91, R54, R55 and R63 (which superseded R56 in v4.67.0, B110); B116, R66 (v4.67.1). Adapted from the forward-only, rank-gated status advance in the
+  # B91, R54, R55 and R63 (which superseded R56 in v4.67.0, B110); B116, R66 (v4.67.1); B106, B114, B117 and B120, R72-R77 (v4.68.0). Adapted from the forward-only, rank-gated status advance in the
   # AI Unified Process (Apache-2.0, by Simon Martinelli); no code is copied. The
   # forbidden-path rule is this repository's own.
   #
@@ -1952,20 +1994,73 @@ checks:
             variants such as `.GitHub/workflows`; `workflow-forbidden`,
             `build-mode-spec-forbidden` and `plan-mode-code-forbidden` still exit 3, and
             `backlog-allowed` and `build-mode-code-allowed` exit 0, so the rule is not refusing
-            everything. 70 cases.
+            everything. 99 cases.
         - id: R66
           verdict: Covered
           evidence: >-
             Exit 3, a DELETION of the lifecycle's own bookkeeping refused: the
             `bk-delete-record-refused` case removes a committed classification and adds a real
             `plan.md`, and exits 3 so the real evidence cannot launder the deletion past.
-            Bookkeeping ADDED stays R54's PRODUCED NOTHING case; a record MODIFIED in place is not
-            caught here (git reports an add and a modify alike) and is caught by its spec-hash in
-            check-classification-provenance instead. Falsified 2026-10-11 by making the decider
-            stop tracking a deletion: `bk-delete-record-refused` went from exit 3 to exit 0.
+            Bookkeeping ADDED stays R54's PRODUCED NOTHING case; a snapshot or classification
+            MODIFIED is R76's. Falsified 2026-10-11 by making the decider stop tracking a
+            deletion: `bk-delete-record-refused` went from exit 3 to exit 0.
+        - id: R72
+          verdict: Covered
+          evidence: >-
+            Exit 1 in build mode when nothing changed outside `artifacts.path`:
+            `build-mode-test-only-plan` and `build-mode-artifacts-variant-not-evidence` (a case
+            variant of the artifacts directory is not outside it) exit 1; `build-mode-test-code`
+            exits 0, and `no-mode-test-plan-counts` exits 0, so the rule is build mode's and not
+            every move's. Falsified 2026-10-12 with `if false` on the build-mode branch: 96 of 99,
+            3 cases red.
+        - id: R73
+          verdict: Covered
+          evidence: >-
+            Exit 1 when the backlog is the only change: `backlog-only-not-evidence` (build mode)
+            and `backlog-only-no-mode` exit 1, and `backlog-allowed` exits 0 when the same backlog
+            row comes beside code, so the backlog is allowed and only not counted. Falsified
+            2026-10-12 by dropping the backlog filter from both evidence readers: 97 of 99, the
+            two backlog-only cases red.
+        - id: R74
+          verdict: Covered
+          evidence: >-
+            Exit 3 on a folded variant of a forbidden name, each allowed by 1.1:
+            `fold-variant-25` to `fold-variant-32` - a long s and a Kelvin sign (both measured to
+            open the ASCII file on a case-insensitive APFS volume), a fullwidth letter, a
+            zero-width non-joiner, a bare `.githooks`, and `.claude/productizer/BACKLOG.md`, a
+            case variant that does not get the backlog's exact-path exception;
+            `nfd-variant-of-spec-forbidden` exits 3; `fold-allowed-33` and `fold-allowed-34` exit
+            0, so a non-ASCII or non-UTF-8 name is judged and not refused. Falsified 2026-10-12
+            by reducing the fold to Python's lower-casing: 93 of 99, five fold-variant cases and
+            the NFD case red; the building agent's no-op fold turned 15 red.
+        - id: R75
+          verdict: Covered
+          evidence: >-
+            Exit 3 on a link at any path: `link-symlink-at-allowed-path` (src/wf),
+            `link-nested-claude-symlink` (sub/.claude), `link-github-symlink` (.github),
+            `link-gitlink-added` under --patch and `link-gitlink-base-mode` under --base;
+            `link-symlink-deleted-judged-by-path` exits 0, so a removed link is judged by its path
+            like any deletion. Falsified 2026-10-12 with the link refusal made never to fire: 94 of
+            99, those five red.
+        - id: R76
+          verdict: Covered
+          evidence: >-
+            Exit 3 when a write-once record is modified: `bk-classification-rewritten` and
+            `bk-snapshot-rewritten`; `bk-checks-result-rewritten-inert` exits 1, because the
+            checks result is rewritten by every run-checks.sh run and is not write-once.
+            Falsified 2026-10-12 with the rewrite refusal made never to fire: 97 of 99, those two
+            red.
+        - id: R77
+          verdict: Covered
+          evidence: >-
+            Exit 3 when a build-mode change removes or rewrites a backlog line:
+            `backlog-row-rewritten-build-mode`; `backlog-row-rewritten-no-mode` and
+            `backlog-row-added-build-mode` exit 0, so only build mode is held to it and an added
+            row stays allowed. Falsified 2026-10-12 with the refusal made never to fire: 98 of 99,
+            that case red.
     limitations:
       - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
-      - The forbidden set is a list, not a proof. A Unicode-normalisation variant of a forbidden path, and a gitlink or a symlink at an allowed path, are allowed (B114).
+      - The forbidden set is a list, not a proof; a cross-script homoglyph is not folded, and a modified checks-result.json is inert (ruling pending).
       - Default-deny over `.claude/**` also refuses a design move that touches `.claude/productizer/` files such as requirement-index.md, as this repository's own design commits do. Which of those a design stage may write is undecided (B112).
       - A stage other than design or build with evidence of its own is driven by no case.
 
@@ -2008,8 +2103,8 @@ checks:
           reason: >-
             Asserted for the UNATTENDED path only - the copyable template. A Build stage a person
             starts in a session is handed the diff by spec-diff.sh when the skill tells the agent
-            to run it, and nothing asserts that it was run. Nor that the workflow calls this script
-            the way the cases do.
+            to run it, and nothing asserts that it was run. Nor that GitHub runs the template's
+            calls of this script as written.
           evidence: >-
             `prepare-plan` and `plan-data-has-fenced-diff` - prepare writes the spec's diff
             against the base as a fenced PRODUCTIZER-SPEC-DIFF block in the data file the agent
@@ -2117,9 +2212,32 @@ checks:
             `deliver-body-for-another-head` and `deliver-body-over-cap` (exit 7). Falsified
             2026-10-11 three ways, each 75 of 76: deliver re-rendering through
             pr-spec-comment.sh, the HEAD comparison neutered, the size cap neutered.
+        - id: R78
+          verdict: Partial
+          reason: >-
+            `agent-args` is the subcommand the template's "Read the flags" step calls, and the
+            cases drive the subcommand, not the YAML step: that GitHub runs it as written and
+            parses the heredoc it appends to the step output is not measured.
+          evidence: >-
+            `agent-args-accepts-every-prepare-output` - all 8 claude-args files prepare wrote are
+            accepted; `agent-args-output-is-the-checked-lines` - the step output is exactly
+            prepare's four lines inside the heredoc; `agent-args-reads-an-unterminated-last-line`
+            - a last line with no newline is read and judged. Falsified 2026-10-12 by removing
+            `|| [ -n "$line" ]` from the read loop: 85 of 87, that case and
+            `agent-args-refusal-wrote-no-output` red. That was a real bypass in the template's
+            shell before B118: an unterminated last line was never validated.
+        - id: R79
+          verdict: Partial
+          reason: >-
+            Same as R78: the subcommand is driven, the YAML step that calls it is not.
+          evidence: >-
+            Exit 3, nothing appended to the step output (`agent-args-refusal-wrote-no-output`):
+            `agent-args-refuses-a-shape`, `agent-args-refuses-a-crlf-line`,
+            `agent-args-reads-an-unterminated-last-line`, `agent-args-refuses-a-repeat`,
+            `agent-args-refuses-no-bash-deny` and `agent-args-refuses-no-file`.
     limitations:
       - The real gh, a real GitHub and the action itself are never exercised. gh is a stub and origin is a local bare repository.
-      - That the workflow template calls this script the way the cases do is not asserted.
+      - That GitHub runs the template's calls of this script as written is not measured; check-ci-template.py's guards assert the call text (agent-args, stash-git, capture) and the agent-args cases drive the subcommand, but no case runs the YAML.
       - A config-driven filter.*.clean, diff.*.textconv, fsmonitor or hooksPath EXECUTING during capture is not driven by any case: add -N and diff do not invoke a clean filter, and the relocation puts any agent-written config out of git's reach, so R68 rests on the relocation plus the exit-8 refusal, not on a measured driver execution.
       - That the action tolerates its .git being moved out before the agent runs is not measured on a real runner.
 
@@ -2135,11 +2253,11 @@ checks:
     timeout_seconds: 60
     exit_codes:
       pass: [0]
-      fail: [1]        # at least one of the twelve assertions does not hold on the template
+      fail: [1]        # at least one of the fourteen assertions does not hold on the template
       refused: [2]     # usage, or a template that could not be read or parsed
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 12 assertions held'
+      pattern: '([0-9]+) of 14 assertions held'
       min_covered: 1
       spec_units:
         - id: R62
@@ -2152,9 +2270,9 @@ checks:
             The `agent-job` assertion: the job running anthropics/claude-code-action grants no
             write permission on any scope, id-token included, and every checkout in it sets
             persist-credentials false. Fixtures agent-job-write.yml and
-            agent-checkout-credentials.yml; 26 self-test cases over exit codes 0 1 2. Falsified
+            agent-checkout-credentials.yml; 40 self-test cases over exit codes 0 1 2. Falsified
             2026-10-10 on a copy with the agent job's contents read turned to write: rc 1, 5 of 7
-            (the checker had seven assertions then; twelve since v4.67.3).
+            (the checker had seven assertions then; fourteen since v4.68.0).
         - id: R65
           verdict: Partial
           reason: >-
@@ -2215,6 +2333,54 @@ checks:
             under it. Falsified 2026-10-11 by neutering the interpreter rule
             (write-job-runs-python.yml went 1 -> 0) and by restoring the in-workspace
             invocation in the shipped template (11 of 12).
+        - id: R78
+          verdict: Partial
+          reason: >-
+            Static only: the `guards` assertion matches the template's lines in order, not its
+            control flow, so a guard line after an earlier `exit 0` still counts, and that GitHub
+            runs the step as written is not measured. What the subcommand does with the lines is
+            build-dispatch's, asserted there.
+          evidence: >-
+            `guards` - a run: step with id `args` before the agent action calls
+            `build-dispatch.sh agent-args`, and the agent step's claude_args reads that step's
+            output. Fixtures guard-args-step.yml and guard-claude-args-wiring.yml exit 1, among
+            the 6 guard-* fixtures. Falsified 2026-10-12 with the guards never checked: 34 of 40,
+            the six guard-* fixtures red.
+        - id: R79
+          verdict: Partial
+          reason: >-
+            Same as R78: the refusal itself is build-dispatch's; this asserts only that the
+            template calls it before the agent and passes nothing it did not check.
+          evidence: >-
+            `guards`, as for R78, with guard-args-step.yml (the call removed) exiting 1.
+        - id: R80
+          verdict: Partial
+          reason: >-
+            Static only, and over `run:` scripts: an expression interpolated into a script that is
+            not a `run:` - an actions/github-script `script:`, say - is not read, nor one smuggled
+            through an env value that is itself untrusted.
+          evidence: >-
+            `run-injection` - no `${{` expression of any context inside a `run:`. Fixtures
+            event-in-run.yml, inputs-in-run.yml, steps-in-run.yml, needs-in-run.yml,
+            env-in-run.yml and head-ref-in-run.yml each exit 1; the template's own
+            `${{ steps.args.outputs.claude_args }}`, which reaches `claude_args:` and no `run:`, is
+            not caught. Falsified 2026-10-12 with the expression search made never to match: 34
+            of 40, those six fixtures red.
+        - id: R81
+          verdict: Partial
+          reason: >-
+            Static only: `tools-pin` checks the pin's shape and `guards` the refusal's lines and
+            place, not that a pinned commit is a productizer release, and the refusal has never
+            run on GitHub (B121). The error text naming `git ls-remote ... 'refs/tags/vX.Y.Z^{}'`
+            is the template's and is not among the guard's lines; the checker prints the same
+            command itself when it reads the placeholder.
+          evidence: >-
+            `tools-pin` - PRODUCTIZER_SHA in the top-level env is a quoted string of 40 lower-case
+            hex; `guards` - prepare's first step, before any checkout, tests PRODUCTIZER_SHA
+            against the forty-zero placeholder and exits 1. Fixtures tools-pin-tag.yml,
+            tools-pin-unquoted.yml, tools-ref-moving.yml and guard-pin-refusal.yml exit 1.
+            Falsified 2026-10-12 with tools-pin never checked: 37 of 40, its three fixtures red;
+            guard-pin-refusal.yml went red with the guards never checked.
     limitations:
       - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
       - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.

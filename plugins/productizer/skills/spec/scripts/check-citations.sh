@@ -41,6 +41,19 @@
 #   Two different repairs, so two different codes. drift-reverse.sh draws the
 #   same line (its signals B and D) for the same reason.
 #
+#   The counter alone cannot place two ids, because ids start at R1 and carry
+#   no leading zero, so neither is ever handed out whatever the counter says:
+#     - `R0` is the reserved example id. The plugin's own templates and guide
+#       write `Superseded by R0.` precisely because no spec can allocate it.
+#       Unless the spec defines it, it is printed as an EXAMPLE line, like an
+#       id inside an EXAMPLE block and counted with them in the summary, and
+#       is not a finding. 1.0 read it as 0, below every counter, and so as
+#       CITATION_ALLOCATED_MISSING.
+#     - `R0` followed by more digits - a leading zero - is
+#       CITATION_NEVER_ALLOCATED. 1.0 read the digits as a number below the
+#       counter and called it allocated-but-missing, which sends the writer
+#       looking for a deleted row that never existed.
+#
 #   CITATION_SUPERSEDED is a NOTE, not a finding. The id resolves - a
 #   superseded requirement keeps its sentence forever - but a NEW citation of
 #   it is usually a citation of the wrong agreement. The note follows the
@@ -133,7 +146,7 @@
 # did not (1), and the corpus could not be built (2).
 set -euo pipefail
 
-VERSION="check-citations 1.0"
+VERSION="check-citations 1.1"
 ROOT=""
 BASE=""
 HEAD_REF="HEAD"
@@ -203,6 +216,7 @@ if [ "$MODE" = "selftest" ]; then
 
   NEVER="R$((4 + 3))"     # at or above the fixture counter R5
   UNKNOWN="R$((4 + 5))"   # in a trailer, and in no spec
+  LEADING="R0$((1 + 2))"  # a leading zero: the digits read 3, an allocated id
 
   g() { git -c user.email=selftest@example.invalid -c user.name=selftest \
           -c commit.gpgsign=false -c init.defaultBranch=main "$@"; }
@@ -274,6 +288,20 @@ if [ "$MODE" = "selftest" ]; then
 
   base_repo missing
   add_line missing 'cites R3' "cite an allocated id with no row"
+
+  # reserved-r0: the reserved example id, below every counter and never
+  # allocated. leading-zero: an id whose digits read as allocated R3, which no
+  # spec can allocate in that spelling.
+  base_repo reserved-r0
+  add_line reserved-r0 'cites R0, the example id' "cite the reserved example id"
+
+  base_repo leading-zero
+  add_line leading-zero "cites $LEADING" "cite an id with a leading zero"
+
+  # utf8-neighbour: an id followed by a multibyte character, read under a UTF-8
+  # locale. The BSD awk refused it (exit 2) before every awk here read bytes.
+  base_repo utf8-neighbour
+  add_line utf8-neighbour 'spans R4–R4 · done' "cite an id beside an en dash"
 
   base_repo superseded
   add_line superseded 'cites R1' "cite the start of a supersede chain"
@@ -354,11 +382,14 @@ if [ "$MODE" = "selftest" ]; then
   drive clean              0 'summary: lines read 1, citations 1, findings 0, notes 0'
   drive superseded         0 'NOTE CITATION_SUPERSEDED notes.md:3 R1 -> R4'
   drive excluded           0 '0 file(s) with added lines read, 4 excluded'
+  drive reserved-r0        0 'EXAMPLE notes.md:3 R0 (the reserved example id: ids start at R1'
   drive example            0 "EXAMPLE notes.md:4 $NEVER (inside an EXAMPLE block"
   drive added-then-removed 0 'summary: lines read 0, citations 0'
   drive empty-range        0 '^range: 0 commit(s)' --root "$SB/clean" --base HEAD
   drive never              1 "FINDING CITATION_NEVER_ALLOCATED notes.md:3 $NEVER\$"
   drive missing            1 'FINDING CITATION_ALLOCATED_MISSING notes.md:3 R3$'
+  drive leading-zero       1 "FINDING CITATION_NEVER_ALLOCATED notes.md:3 $LEADING\$"
+  LC_ALL=C.UTF-8 drive utf8-neighbour 0 'summary: lines read 1, citations 1, findings 0'
   drive plusplus           1 "FINDING CITATION_NEVER_ALLOCATED notes.md:3 $NEVER\$"
   drive trailer-unknown    1 "FINDING TRAILER_UNKNOWN_ID [0-9a-f]\{40\} $UNKNOWN\$"
   drive trailer-malformed  1 'FINDING TRAILER_MALFORMED_ID [0-9a-f]\{40\} nonsense$'
@@ -387,7 +418,7 @@ if [ "$MODE" = "selftest" ]; then
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '    NOT ASSERTED: a withdrawn citation (CITATION_WITHDRAWN) and a supersede chain that ends anywhere but an active requirement; a binary file in the range; a merge commit in the range; the refusal for a base and head with no merge base, which needs two unrelated histories; a shallow clone that holds the base but not the merge base; and whether a citation MEANS the requirement - every case asserts a token resolved, never that the sentence around it is about that requirement.\n'
+  printf '    NOT ASSERTED: a withdrawn citation (CITATION_WITHDRAWN) and a supersede chain that ends anywhere but an active requirement; a spec that itself defines R0, which then resolves like any other id; a binary file in the range; a merge commit in the range; the refusal for a base and head with no merge base, which needs two unrelated histories; a shallow clone that holds the base but not the merge base; and whether a citation MEANS the requirement - every case asserts a token resolved, never that the sentence around it is about that requirement.\n'
   if [ "$FAILED" -ne 0 ]; then
     printf 'FAIL: %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" >&2
     exit 1
@@ -487,7 +518,13 @@ git -C "$TOP" -c core.quotePath=false diff --unified=0 --no-color --no-ext-diff 
     "$MB" "$HEAD_SHA" -- > "$WORK/diff.txt" ||
   die_unmeasured "git diff $MB_SHORT $HEAD_SHORT failed, so the lines this change added are unknown"
 
-awk -v ADDED="$WORK/added.tsv" -v BIN="$WORK/binary.txt" -v FILES="$WORK/files.txt" '
+# BYTES, NOT CHARACTERS, in every awk that reads a changed file's text. Ids are
+# ASCII, and the BSD awk on macOS under a UTF-8 locale (LANG=en_US.UTF-8, the
+# Terminal default, or C.UTF-8) takes a one-character substr after an id and
+# then refuses the byte it got: an added line reading `R1–R5` made the whole run
+# exit 2 with `towc: multibyte conversion failure`. Measured 2026-10-12; case
+# `utf8-neighbour`. gawk and mawk do not fail, so CI on Linux did not see it.
+LC_ALL=C awk -v ADDED="$WORK/added.tsv" -v BIN="$WORK/binary.txt" -v FILES="$WORK/files.txt" '
   BEGIN { inh = 0; f = "" }
   inh && /^-/ { ro--; if (ro <= 0 && rn <= 0) inh = 0; next }
   inh && /^\+/ {
@@ -553,7 +590,7 @@ while IFS= read -r rel; do
   [ -n "$rel" ] || continue
   git -C "$TOP" show "$HEAD_SHA:$rel" > "$WORK/blob" ||
     die_unmeasured "cannot read $rel at $HEAD_SHORT, so whether its added lines sit in an EXAMPLE block is unknown"
-  awk -v F="$rel" '
+  LC_ALL=C awk -v F="$rel" '
     function isb(l) { return l ~ /^[ \t]*((#|\/\/)[ \t]*)?<!-- EXAMPLE:BEGIN/ }
     function ise(l) { return l ~ /^[ \t]*((#|\/\/)[ \t]*)?(<!-- )?EXAMPLE:END/ }
     { line[NR] = $0 }
@@ -569,7 +606,7 @@ while IFS= read -r rel; do
 done < "$WORK/read.txt"
 
 # --- resolve every citation on every added line --------------------------------
-awk -F'\t' -v REQS="$WORK/reqs.tsv" -v EXAMPLES="$WORK/example.tsv" \
+LC_ALL=C awk -F'\t' -v REQS="$WORK/reqs.tsv" -v EXAMPLES="$WORK/example.tsv" \
     -v READ="$WORK/read.txt" -v NEXT="$NEXT_ID" -v COUNTS="$WORK/counts" '
   BEGIN {
     while ((getline r < REQS) > 0) {
@@ -609,6 +646,8 @@ awk -F'\t' -v REQS="$WORK/reqs.tsv" -v EXAMPLES="$WORK/example.tsv" \
         else if (st[id] == "withdrawn") { notes++; printf "NOTE CITATION_WITHDRAWN %s %s\n", where, id }
         continue
       }
+      if (id == "R0") { exs++; printf "EXAMPLE %s %s (the reserved example id: ids start at R1, so it is never allocated and is not resolved)\n", where, id; continue }
+      if (id ~ /^R0/) { finds++; printf "FINDING CITATION_NEVER_ALLOCATED %s %s\n", where, id; continue }
       if (substr(id, 2) + 0 >= NEXT + 0) { finds++; printf "FINDING CITATION_NEVER_ALLOCATED %s %s\n", where, id }
       else { finds++; printf "FINDING CITATION_ALLOCATED_MISSING %s %s\n", where, id }
     }

@@ -54,10 +54,12 @@ constitution; `references/spec-review.md` says what was taken and what was not.
 
 ## Running Part B
 
+<!-- EXAMPLE:BEGIN -->
 1. **Resolve the scope** from the arguments. `R7`, `r7` and `R07` mean `R7`; an
    id that is not in the spec is reported, with the nearest ids, and nothing is
    dispatched. No scope means `all`. State it in one line: `Reviewing all 45
    active requirements and 4 principles.`
+   <!-- EXAMPLE:END -->
 2. **If `--since SHA` was given**, compute the changed text — never recall it:
 
    ```bash

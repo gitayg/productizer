@@ -69,10 +69,10 @@ refused on a question nobody actually ruled on.>
 
 | Change | Applied |
 |---|---|
-| Allocated | R58 |
-| Superseded | R14 → R58 |
+| Allocated | R<new> |
+| Superseded | R<old> → R<new> |
 | Withdrawn | — |
-| Acceptance criteria | R14 row removed, R58 row added |
+| Acceptance criteria | R<old> row removed, R<new> row added |
 | Concern row | C4 → `resolved: D7, <YYYY-MM-DD>` |
 | Decision record | row dated <YYYY-MM-DD> citing D7 |
 | Change log | row dated <YYYY-MM-DD>, issue <#123> |

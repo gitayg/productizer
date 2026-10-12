@@ -114,7 +114,9 @@ done
 [ -n "$INTENT_FILE" ] || die_usage "--intent-file is required"
 
 case "$AGAINST" in
+  # <!-- EXAMPLE:BEGIN -->
   R0|R0[0-9]*) die_usage "--against $AGAINST: ids carry no leading zero; R7 is not R07" ;;
+  # <!-- EXAMPLE:END -->
   R[1-9]*) case "${AGAINST#R}" in *[!0-9]*) die_usage "--against $AGAINST is not R<n>" ;; esac ;;
   *) die_usage "--against $AGAINST is not R<n>" ;;
 esac

@@ -259,6 +259,7 @@ the trailer without checking the ids exist, so the hook keeps working in a repo
 that has not been scaffolded yet. When the spec **is** reachable it refuses an
 unknown id and leaves the message file byte-for-byte unmodified:
 
+<!-- EXAMPLE:BEGIN -->
 ```
 $ req-trailer.sh --add R99 --file msg.txt
 req-trailer: refusing to write a trailer naming an id that
@@ -268,6 +269,7 @@ The commit message was NOT modified.
 $ echo $?
 3
 ```
+<!-- EXAMPLE:END -->
 
 ### 9 · `.git/hooks/` is not cloned
 
@@ -300,21 +302,26 @@ Stated for completeness — these were **not** measured:
 change adds. A citation is a token, `R` and digits, so an example id in a
 self-test, a doc illustrating the id grammar or a `checks.yaml` comment reads
 exactly like a real one. Replayed over every commit in this repository against
-its parent, 2026-10-10:
+its parent, 2026-10-12, with the check as it was (1.0) and as it is (1.1):
 
 ```
-132 commits in history
+139 commits in history
  22 refused (no spec yet), 1 with no parent
-109 measured: 84 exit 0, 25 exit 1
- 92 findings on those 25
+116 measured
+1.0: 27 exit 1, 94 findings
+1.1: 26 exit 1, 91 findings
 ```
 
-Read one by one, none of the 92 was a citation anybody meant
-(`references/traceability.md`). **Finding precision on this history is zero.**
-That is why the check is advisory and why R52 and R53 read `Partial`. The
-remedy is the `<!-- EXAMPLE:BEGIN -->` marker the check already honours, and
-nothing in this repository is wrapped in one yet (B101). The reading of the 92
-is a judgement, not a measurement.
+Read one by one in the 2026-10-10 replay, none was a citation anybody meant
+(`references/traceability.md`), and 1.1 differs only in reading `R0`, the
+reserved example id, as an example. **Finding precision on this history is
+zero, and it cannot change**: a marker added today does not reach a commit
+already made. What changed is the tree those commits built. Every example id in
+it is now `R0` or inside an `<!-- EXAMPLE:BEGIN -->` block, so a change adding
+every tracked file reads 0 findings where it read 20 (B101, v4.68.0). The check
+stays advisory, and R52 and R53 `Partial`, until changes made after that give it
+a precision of its own. The reading of the history is a judgement, not a
+measurement.
 
 ### 12 · `stage-advance.sh` has one caller, and it is not a tracker
 
@@ -341,11 +348,12 @@ reviewer that writes through Bash or an MCP tool passes.
 `templates/build-from-spec.yml` runs a stage unattended in an adopter's
 repository. It has **never run on GitHub**: this repository is public, holds no
 model secrets, and a run costs model spend. What is measured is its static
-properties (`check-ci-template.py`, 12 of 12) and both ends of
+properties (`check-ci-template.py`, 14 of 14) and both ends of
 `build-dispatch.sh` against local repositories, with `gh` stubbed and origin a
-local bare repository (76 of 76). Not measured: the action itself, a real
-`gh`, that a draft stays a draft, and that the workflow calls the script the
-way the self-test does. A pull request it opens with the workflow's
+local bare repository (87 of 87). Not measured: the action itself, a real
+`gh`, that a draft stays a draft, and that GitHub runs the template's calls of
+the script as written (check-ci-template.py asserts the call text since B118,
+not its execution). A pull request it opens with the workflow's
 `GITHUB_TOKEN` does not start the adopter's `pull_request` checks - GitHub's
 rule, quoted in `references/ci-build.md`, not measured here.
 
@@ -354,10 +362,12 @@ rule, quoted in `references/ci-build.md`, not measured here.
 Since 1.1 it judges the paths git applies rather than the patch's text, and
 refuses by default everything under `.github/` and `.claude/` and a named set of
 files that steer CI or an agent - CLAUDE.md, AGENTS.md, `.mcp.json`,
-`.gitattributes`, `.gitmodules`, hook managers and others. Its own self-test
-says what it still allows: a Unicode-normalisation variant of a forbidden path,
-and a gitlink or a symlink at an allowed path. Nothing shows the list is
-complete (B114).
+`.gitattributes`, `.gitmodules`, hook managers and others. Since 1.2 a name is
+matched after folding case, Unicode normalisation and format characters, so a
+variant a checkout folds onto a rule file is refused, and a symbolic link or a
+submodule entry is refused at any path. Still allowed: a homoglyph from another
+script, and a rewritten checks result (its writer rewrites it every run).
+Nothing shows the list is complete (B125).
 
 The same default-deny refuses a design move that writes
 `.claude/productizer/` files such as `requirement-index.md`, which this

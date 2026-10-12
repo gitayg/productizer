@@ -92,6 +92,10 @@ env:
   # The productizer scripts this run executes, checked out at ONE reviewed
   # commit. Set PRODUCTIZER_SHA to the full commit id of the productizer
   # release you installed; the placeholder below is refused by the first step.
+  # A template cannot carry its own commit id. For release vX.Y.Z:
+  #   git ls-remote https://github.com/gitayg/productizer 'refs/tags/vX.Y.Z^{}'
+  # prints it. Keep it quoted: check-ci-template.py (tools-pin) refuses any
+  # value that is not a quoted string of 40 lower-case hex digits.
   PRODUCTIZER_REPO: gitayg/productizer
   PRODUCTIZER_SHA: "0000000000000000000000000000000000000000"
   TOOLS: .productizer-tools/plugins/productizer/skills/spec/scripts
@@ -116,11 +120,11 @@ jobs:
             exit 1
           fi
           if [ "$PRODUCTIZER_SHA" = "0000000000000000000000000000000000000000" ]; then
-            echo "::error::PRODUCTIZER_SHA is still the placeholder. Set it to the full commit id of the productizer release you reviewed (references/ci-build.md)."
+            echo "::error::PRODUCTIZER_SHA is still the placeholder, so nothing was checked out or run. Set it, in this file's top-level env, to the full commit id of the productizer release you reviewed. For release vX.Y.Z, run: git ls-remote https://github.com/$PRODUCTIZER_REPO 'refs/tags/vX.Y.Z^{}' and use the commit id it prints. Keep the ^{}: without it, an annotated release tag gives the id of the tag object, not of the commit it names (references/ci-build.md, Adopting it)."
             exit 1
           fi
           if ! [[ "$PRODUCTIZER_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::PRODUCTIZER_SHA must be a full 40-character commit id, not a tag or a branch."
+            echo "::error::PRODUCTIZER_SHA must be a full 40-character lower-case commit id, not a tag or a branch. For release vX.Y.Z, run: git ls-remote https://github.com/$PRODUCTIZER_REPO 'refs/tags/vX.Y.Z^{}' and use the commit id it prints."
             exit 1
           fi
 
@@ -204,36 +208,18 @@ jobs:
       # --model and --effort from models.build in config.json; acceptEdits
       # only when the committed settings set no defaultMode; and the Bash
       # deny, which is ALWAYS present (maintainer ruling 2026-10-11, never a
-      # shell in CI). Each line is re-checked here against exactly those
-      # shapes, a repeated flag is refused, and the run is refused unless the
-      # Bash deny is present. No other permission mode can pass this step.
+      # shell in CI). build-dispatch.sh agent-args re-checks every line
+      # against exactly those shapes - a last line with no newline included -
+      # refuses a repeated flag, refuses the run unless the Bash deny is
+      # present, and only then appends the lines it checked to the step output
+      # as claude_args. No other permission mode can pass this step. The check
+      # is the script's own code, self-tested, not shell living in this YAML;
+      # check-ci-template.py asserts this step calls it (guards).
       - name: Read the flags prepared for this run
         id: args
         run: |
           set -euo pipefail
-          seen=""
-          while IFS= read -r line; do
-            if ! [[ "$line" =~ ^(--model\ [A-Za-z0-9][A-Za-z0-9._:@-]*|--effort\ (low|medium|high|xhigh|max)|--permission-mode\ acceptEdits|--disallowedTools\ Bash)$ ]]; then
-              echo "::error::.productizer-run/claude-args holds a line that is not a shape build-dispatch.sh writes: $line"
-              exit 1
-            fi
-            flag="${line%% *}"
-            case " $seen " in *" $flag "*) echo "::error::.productizer-run/claude-args repeats $flag"; exit 1 ;; esac
-            seen="$seen $flag"
-          done < .productizer-run/claude-args
-          # Never a shell in CI: the prepared flags MUST deny Bash. If they do
-          # not, build-dispatch.sh did not write what this template requires,
-          # and the run is refused rather than letting the agent keep a shell.
-          if ! grep -qx -- '--disallowedTools Bash' .productizer-run/claude-args; then
-            echo "::error::.productizer-run/claude-args does not deny Bash; the template refuses to run the agent with a shell"
-            exit 1
-          fi
-          {
-            echo "claude_args<<PRODUCTIZER-ARGS-$GITHUB_RUN_ID"
-            cat .productizer-run/claude-args
-            echo "PRODUCTIZER-ARGS-$GITHUB_RUN_ID"
-          } >> "$GITHUB_OUTPUT"
-          echo "permissions: $(cat .productizer-run/permissions); flags: $(tr '\n' ' ' < .productizer-run/claude-args)"
+          bash "$TOOLS/build-dispatch.sh" agent-args . --out "$GITHUB_OUTPUT"
 
       # Move the real .git - and the pinned tools' own checkout - OUT of the
       # agent's working directory BEFORE the agent runs. build-dispatch.sh is

@@ -171,6 +171,20 @@
 # - the tokenizer covers all 63KB of its JavaScript with no gap, and the one
 # `setTimeout` in it takes a function, so the evaluator net stays silent.
 #
+#   NET ONE READS CODE, NOT DATA (3.1, B115). The receiver's name followed by
+#   a dot is also how a home-directory path to the user config file is
+#   spelled, and the page embeds backlog prose in its text and in string
+#   literals. 3.0 read one such row as the page reaching `json` on the
+#   capability object and failed the real page. So net one now skips a
+#   receiver that sits in HTML outside every region, or inside a quoted string
+#   literal or a comment of a region that tokenized end to end. A region that
+#   did not tokenize, and a template literal, are still code. Net two still
+#   reads every byte, so quoted CALL SYNTAX on `use` stays a finding, below.
+#   What this gives up: a reach other than a `use` call, written inside a
+#   string that something later executes without an evaluator this check
+#   follows - `document.write` of a script, an iframe `srcdoc` - is no longer
+#   named by net one.
+#
 #   THE PRICE OF NET TWO, WRITTEN DOWN. A page that embeds unrelated
 #   JavaScript spelling `.use(` - middleware, a plug-in registry, an object of
 #   its own with a `use` member - is a false positive, and it is a loud one
@@ -313,7 +327,7 @@
 # file here is python3 through a quoted here-doc. Nothing suppresses stderr.
 set -euo pipefail
 
-VERSION="check-view-readonly 3.0"
+VERSION="check-view-readonly 3.1"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -394,10 +408,9 @@ _badrow="$(awk -F'\t' '/^#/ || NF == 0 { next }
 # ---------------------------------------------------------------------------
 # --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
 #
-# Four cases, one per way the contract above can be reached, each driven
-# through THIS script so the argument handling and the premise guards are on
-# the path too. No case is asserted by reading source: the exit code is read
-# off a real run.
+# Six cases, each driven through THIS script so the argument handling and the
+# premise guards are on the path too. No case is asserted by reading source:
+# the exit code is read off a real run.
 #
 #   clean          the committed corpus and the committed builder       -> 0
 #   wrong-name     one corpus row's expected capability NAME changed to
@@ -405,6 +418,9 @@ _badrow="$(awk -F'\t' '/^#/ || NF == 0 { next }
 #                  and the corpus disagree                              -> 1
 #   no-corpus      a fixture directory holding no cases.tsv             -> 2
 #   bad-usage      an option the parser does not take                   -> 2
+#   prose-path     a fixture repository whose backlog row names a
+#                  home-directory path, built by the real builder (B115) -> 0
+#   quoted-call    the same row quoting the request's call syntax        -> 1
 #
 # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If the committed corpus does not
 # exit 0, every case below would be red for that reason rather than its own -
@@ -470,8 +486,10 @@ if [ "$MODE" = "selftest" ]; then
     CODES="$CODES$_rc
 "
     if [ "$_rc" = "$_want" ]; then
+      _held=1
       printf '  held:    case %-12s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
     else
+      _held=0
       printf '  FINDING: case %-12s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
       SELF_FAILED=$((SELF_FAILED + 1))
     fi
@@ -500,6 +518,47 @@ if [ "$MODE" = "selftest" ]; then
     "an option this parser does not take: bad usage is refused rather than ignored" \
     --root "$ROOT" --no-such-option
 
+  # B115, reproduced the way it was found: a backlog row whose PROSE names the
+  # user config file by its home-directory path. The real builder embeds that
+  # row in the page's text and in two string literals, and 3.0 read each copy
+  # as the page reaching `json` on the capability object. The second repository
+  # QUOTES the call syntax in the same place, which this header's price list
+  # keeps a finding: the exemption is for data, not for a request written out.
+  # Both trees live under the self-test's own directory; neither is this repo.
+  self_text() { # self_text <case> <sentence its stdout must carry>
+    if grep -qF -- "$2" "$SB/$1.out"; then
+      printf '  held:    case %-12s carries: %s\n' "$1" "$2"
+    else
+      printf '  FINDING: case %-12s does not carry: %s\n' "$1" "$2"
+      # One case, one count: a case whose exit code already failed is not
+      # counted twice for its wording.
+      [ "$_held" = 0 ] || SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+  backlog_repo() { # backlog_repo <dir> <notes cell>
+    mkdir -p "$1/.claude/productizer" \
+      || die_unmeasured "the fixture backlog repository could not be created; nothing was driven"
+    # shellcheck disable=SC2016  # the backticks are literal markdown in the fixture row
+    printf '# Backlog\n\n| Id | What is wanted | Status | Jira | Raised | Notes |\n|---|---|---|---|---|---|\n| B1 | A row of prose | `todo` | — | fixture | %s |\n' \
+      "$2" > "$1/.claude/productizer/backlog.md"
+    if ! { git -C "$1" init -q \
+           && git -C "$1" add -A \
+           && git -C "$1" -c user.email=selftest@example.invalid -c user.name=selftest \
+                -c commit.gpgsign=false commit -q -m fixture; }; then
+      die_unmeasured "the fixture backlog repository could not be committed; nothing was driven"
+    fi
+  }
+  backlog_repo "$SB/prose-repo" "The user config file lives at ~/.claude.json, and this sentence only names it."
+  self_drive prose-path 0 \
+    "a backlog row naming a home-directory path is prose the page embeds, not the page reaching into the capability object" \
+    --root "$SB/prose-repo" --builder "$BUILDER" --fixture "$FIXTURE"
+  self_text prose-path "A2 the real generated page declares nothing beyond output: cases 1, upheld 1"
+  backlog_repo "$SB/quoted-repo" 'A page that runs window.claude.use("artifact") can publish itself.'
+  self_drive quoted-call 1 \
+    "the same row quoting the call syntax is still a finding: net two reads every byte, as this header's price list says" \
+    --root "$SB/quoted-repo" --builder "$BUILDER" --fixture "$FIXTURE"
+  self_text quoted-call "A2 the real generated page declares nothing beyond output: cases 1, upheld 0"
+
   printf '  self-test cases driven: %d. Cases that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_FAILED"
 
@@ -511,7 +570,7 @@ if [ "$MODE" = "selftest" ]; then
     printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '  NOT ASSERTED: the wording of any finding. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
+  printf '  NOT ASSERTED: the wording of any finding outside prose-path and quoted-call, which also read the A2 line. The other cases read the exit CODE, so one that went red for the wrong reason is invisible here and is read off the case output by hand. Nor: a home-directory path inside a template literal, a srcdoc attribute, or a region that does not tokenize - all still read as code.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'check-view-readonly: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
     exit 1
@@ -647,6 +706,7 @@ Called with PATH DISPLAY pairs; emits one block per file:
 
 or `unreadable<TAB>reason` in place of the counts.
 """
+import bisect
 import re
 import sys
 
@@ -1199,6 +1259,7 @@ def build_env(src, regions, inherited):
     unparsed = []
     jsbytes = 0
     toklists = []
+    parsed = []
     for a, b, label in regions:
         jsbytes += max(0, b - a)
         try:
@@ -1208,6 +1269,7 @@ def build_env(src, regions, inherited):
             continue
         collect_writes(src, T, len(toklists), writes, decls)
         toklists.append((T, label))
+        parsed.append((a, b, T, [t.start for t in T]))
     env = dict(inherited)
     for _ in range(3):
         changed = False
@@ -1224,7 +1286,30 @@ def build_env(src, regions, inherited):
                 changed = True
         if not changed:
             break
-    return env, unparsed, jsbytes, toklists
+    return env, unparsed, jsbytes, toklists, parsed
+
+
+def is_code(off, regions, parsed):
+    """Does the byte at `off` sit where the JavaScript engine runs it as code?
+
+    Not code: HTML outside every region, which the browser never hands to the
+    engine, and - inside a region that tokenized end to end - the body of a
+    quoted string literal or a comment. That is where the page carries DATA:
+    backlog prose, file listings, the evidence it hands over. A region that did
+    not tokenize cannot say where its strings end, so every byte in it is code;
+    so is a template literal, whose substitutions run. Added for B115: a
+    home-directory path in an embedded backlog row read as the receiver
+    followed by a property access, and failed the real page twice.
+    """
+    if not any(a <= off < b for a, b, _l in regions):
+        return False
+    for a, b, T, starts in parsed:
+        if a <= off < b:
+            k = bisect.bisect_right(starts, off) - 1
+            if k >= 0 and T[k].start <= off < T[k].end:
+                return T[k].kind != "str"
+            return False
+    return True
 
 
 # ------------------------------------------------------------------- the nets
@@ -1342,9 +1427,16 @@ def call_verdict(src, T, callidx, env, depth, acc, how, extra_tags):
     return False
 
 
-def scan_reaches(src, regions, env, depth, acc):
+def scan_reaches(src, regions, env, depth, acc, parsed):
     claimed = []
     for m in RECV.finditer(src):
+        # Prose and data, not code: the receiver's name inside a string or in
+        # the page's text is not the page reaching the object. Only at depth 0,
+        # the page itself; evaluated source is all code by construction. Net
+        # two below still reads every byte, so QUOTED call syntax on `use`
+        # remains the loud finding this header's price list says it is.
+        if depth == 0 and not is_code(m.start(), regions, parsed):
+            continue
         stop = stop_for(m.end(), regions, src)
         T = safe_tokens(src, m.end(), stop)
         kind, name, tags, ni = read_access(src, T, 0, env, depth)
@@ -1594,11 +1686,11 @@ def scan_source(src, label, inherited_env, depth, acc):
         regions = js_regions(src)
     else:
         regions = [(0, len(src), label)]
-    env, unparsed, jsbytes, toklists = build_env(src, regions, inherited_env)
+    env, unparsed, jsbytes, toklists, parsed = build_env(src, regions, inherited_env)
     for u in unparsed:
         acc.notes.append("%s. The byte-level nets still read it; only the folding did not run"
                          % u)
-    scan_reaches(src, regions, env, depth, acc)
+    scan_reaches(src, regions, env, depth, acc, parsed)
     scan_bare_receiver(src, toklists, acc)
     scan_computed_receiver(src, toklists, env, depth, acc)
     scan_evaluators(src, toklists, env, depth, acc)

@@ -358,6 +358,7 @@ SPEC
   commit_all "$SB/pointer-self" "supersede R2 by itself"
 
   case_repo pointer-dangling
+  # <!-- EXAMPLE:BEGIN -->
   put_spec "$SB/pointer-dangling" <<'SPEC'
 # Living spec — sandbox
 
@@ -369,6 +370,7 @@ SPEC
 - **R3** — The lifecycle shall record every classification in the change log.
 - **R4** — The lifecycle shall publish every view read-only.
 SPEC
+  # <!-- EXAMPLE:END -->
   commit_all "$SB/pointer-dangling" "supersede R2 by an id nothing defines"
 
   case_repo pointer-chain

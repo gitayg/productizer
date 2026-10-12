@@ -60,7 +60,9 @@
 # Structurally, on the tool's own source: a non-comment line that DISPATCHES on
 # a self-test flag - a shell `case` pattern `--selftest)`, a `[ "$1" = --selftest ]`
 # comparison, a comparison against a list or tuple literal holding the flag
-# (`argv == ["--selftest"]`, `args == ("--self-test",)`), or an argparse
+# (`argv == ["--selftest"]`, `args == ("--self-test",)`), membership in such a
+# literal (`args in (["--selftest"], ["--self-test"])`, `arg in ("--selftest",
+# "--self-test")`) on a line with no `for ... in`, or an argparse
 # `add_argument("--self-test"...)`. A line that only
 # MENTIONS the flag does not count, and that distinction is load-bearing rather
 # than fussy: `check-nothing-merged.sh` names `--selftest` in its header comment
@@ -455,6 +457,45 @@ if tuple(sys.argv[1:]) == ("--self-test",):
 sys.exit(0)
 TOOL
 
+  # --- membership in a literal holding the flag is a dispatch too ---------
+  # B109: check-ci-template.py dispatched `args in (["--selftest"],
+  # ["--self-test"])`, its self-test passed 18 of 18, and R39 read `carries no
+  # self-test`, because only `==` and `!=` were read as comparing to a literal.
+  cat > "$d/tools/member-dispatch.py" <<'TOOL'
+#!/usr/bin/env python3
+import sys
+
+args = sys.argv[1:]
+if args in (["--selftest"], ["--self-test"]):
+    print("  fixture self-test held")
+    sys.exit(0)
+sys.exit(0)
+TOOL
+
+  # the flat form, flags straight in the tuple.
+  cat > "$d/tools/member-flat.py" <<'TOOL'
+#!/usr/bin/env python3
+import sys
+
+for_each = sys.argv[1:2]
+if for_each and for_each[0] in ("--selftest", "--self-test"):
+    print("  fixture self-test held")
+    sys.exit(0)
+sys.exit(0)
+TOOL
+
+  # THE NEGATIVE CONTROL FOR MEMBERSHIP. `in` over a list of flags, but in a
+  # `for`: it iterates to BUILD argv for something else, which is a mention.
+  cat > "$d/tools/loop-mention.py" <<'TOOL'
+#!/usr/bin/env python3
+import subprocess
+import sys
+
+for flag in ["--selftest", "--self-test"]:
+    subprocess.run(["bash", "helper.sh", flag], check=False)
+sys.exit(0)
+TOOL
+
   # THE NEGATIVE CONTROL. Its only mentions of the flag are argv lists it BUILDS
   # to run something else - no `==` in front of them. A recogniser widened to
   # "any line holding ["--selftest"]" reads this as a self-test, and that is
@@ -490,7 +531,9 @@ TOOL
            "$d/tools/codes-complete.sh" "$d/tools/codes-missing.sh" \
            "$d/tools/codes-malformed.sh" \
            "$d/tools/list-dispatch.py" "$d/tools/tuple-dispatch.py" \
-           "$d/tools/list-mention.py" "$d/tools/doc-mention.py"
+           "$d/tools/list-mention.py" "$d/tools/doc-mention.py" \
+           "$d/tools/member-dispatch.py" "$d/tools/member-flat.py" \
+           "$d/tools/loop-mention.py"
   # NOTHING CREATES tools/gone.sh. The `absent` cases name it deliberately.
   printf 'name: fixture\njobs:\n  checks:\n    steps:\n      - run: |\n          echo nothing\n' \
     > "$d/.github/workflows/checks.yml"
@@ -678,6 +721,30 @@ checks:
     command: [./tools/tuple-dispatch.py, --self-test]
 CFG
 
+# membership: two Python tools that dispatch by membership in a literal - B109.
+mk_case membership
+cat > "$SB/membership/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-selftest
+    command: [./tools/with-selftest.sh, --selftest]
+  - id: fixture-member-dispatch
+    command: [./tools/member-dispatch.py, --selftest]
+  - id: fixture-member-flat
+    command: [./tools/member-flat.py, --self-test]
+CFG
+
+# loopmention: the flags iterated over in a `for`, to build argv. R39 finding.
+mk_case loopmention
+cat > "$SB/loopmention/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-selftest
+    command: [./tools/with-selftest.sh, --selftest]
+  - id: fixture-loop-mention
+    command: [./tools/loop-mention.py]
+CFG
+
 # listmention: two tools that hold the flag in a list and dispatch on nothing -
 # once in a subprocess argv, once in a docstring. Each is an R39 finding.
 mk_case listmention
@@ -786,6 +853,11 @@ drive wfswallow   1 "R40 propagation: 0 of those 1 can still set the run's exit 
 drive listcmp     0 "R39: 3 of 3 check tools the suite exercises carry a self-test"
 drive listmention 1 "list-mention.py carries no self-test"
 drive listmention 1 "doc-mention.py carries no self-test"
+
+# B109: membership in a literal holding the flag is a dispatch, and the same
+# `in` inside a `for` that builds argv is not.
+drive membership  0 "R39: 3 of 3 check tools the suite exercises carry a self-test"
+drive loopmention 1 "loop-mention.py carries no self-test"
 
 printf '  cases driven: %d. Cases that did not hold: %d\n' "$CASES" "$FAILED"
 

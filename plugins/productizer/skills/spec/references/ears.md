@@ -73,8 +73,8 @@ discipline the load-bearing part of the spec rather than its housekeeping.
 ### Allocation
 
 Ids are monotonic. The next requirement takes the next number, and the counter
-never rewinds. Removing a requirement does not free its id: if `R14` is gone and
-the highest id ever allocated is `R57`, the next requirement is `R58`. Allocate
+never rewinds. Removing a requirement does not free its id: if one is gone and
+the highest id ever allocated is `R<n>`, the next requirement is `R<n+1>`. Allocate
 from the highest id the spec has ever used, not from the highest one still
 active, and not from a count of the rows on screen.
 
@@ -102,7 +102,7 @@ A requirement never leaves the spec. It changes status.
 | Status | When | Recorded as |
 |---|---|---|
 | Active | Current agreed behaviour | The requirement, plain |
-| Superseded | The behaviour is replaced by another requirement | `Superseded by R58.` plus one line on why |
+| Superseded | The behaviour is replaced by another requirement | `Superseded by R0.` plus one line on why |
 | Withdrawn | The behaviour no longer exists at all | `Withdrawn.` plus one line on why |
 
 The marker goes on the line directly beneath the requirement, which already
@@ -318,8 +318,10 @@ turns "nobody looked" into "it passed". The full list is in
   `200 ms → 500 ms` look identical to a text differ. That is
   `scripts/contradiction-check.py`'s question, and even it answers UNDECIDED
   rather than guessing.
+  <!-- EXAMPLE:BEGIN -->
 - **Whether a reason line is true.** `Superseded by R41. Because.` is
   grammatical.
+  <!-- EXAMPLE:END -->
 - **System-name drift.** `ears.md` rule 2 asks for one system noun; the real
   spec uses four, some of them genuinely sub-components. No grammar separates a
   component from drift, so it is not enforced.

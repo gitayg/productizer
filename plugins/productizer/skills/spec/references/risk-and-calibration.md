@@ -791,6 +791,8 @@ The plant reproduces that division exactly: 0/10 for one, 10/10 for the other.
 
 ### Five plants were wrong first, and the controls or a hand check caught each
 
+<!-- EXAMPLE:BEGIN -->
+
 | First plant | What was wrong | First figure, now withdrawn |
 |---|---|---|
 | `view-publish-refused` given a disarmed `publish-gate.sh` | the check drives `artifact-gate.sh` | 0/10 |
@@ -798,6 +800,8 @@ The plant reproduces that division exactly: 0/10 for one, 10/10 for the other.
 | `retrieval-budget` given a spec grown at its END | cost is candidate lines BEFORE the target; 39696 to 71297 bytes stayed green, correctly | 0/10 |
 | `cannot-run-coverage` given "missing tool recorded as pass" | not its defect: it asserts no-verdict rows carry no coverage | 0/10 |
 | `guide-current` control naming `R999` in prose | the control was itself a defect the check catches | control fired 10/10 |
+
+<!-- EXAMPLE:END -->
 
 Each would have published a recall of zero for a check that was fine. The
 catalogue is the weakest part of this instrument, and that is why.

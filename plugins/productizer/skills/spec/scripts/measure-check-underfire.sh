@@ -385,9 +385,11 @@ END = "<!-- productizer:requirements:end -->"
 P.append(plant("guide-current", "a hand edit inside the generated section",
     ([{"op": "replace", "path": "GUIDE.md", "old": END, "new": END + "\nA planted hand edit."}],
      [{"op": "replace", "path": "GUIDE.md", "old": END, "new": "A planted hand edit.\n" + END}])))
+# <!-- EXAMPLE:BEGIN -->
 P.append(plant("guide-current", "prose outside the section naming a requirement the spec lacks",
     ([{"op": "replace", "path": "GUIDE.md", "old": END, "new": END + "\nA planted note about the spec."}],
      [{"op": "replace", "path": "GUIDE.md", "old": END, "new": END + "\nA planted note about R999."}])))
+# <!-- EXAMPLE:END -->
 
 # installed-copies - a hook that drifted from its template, or lost its bit.
 HOOK, GATE = ".claude/hooks/publish-gate.sh", TPL + "/publish-gate.sh"
@@ -424,6 +426,7 @@ for chk in ("cannot-run-coverage", "no-fabricated-zero"):
     P.append(plant(chk, "a row that reached no verdict keeps its coverage count", KEEPCOV))
 
 # acceptance-rows - a requirement with no row, and a row naming a check that is not there.
+# <!-- EXAMPLE:BEGIN -->
 SPEC = ".claude/productizer/spec.md"
 REQ = [{"op": "replace", "path": SPEC, "old": "\n\n### Event-driven",
         "new": "\n- **R999** — The lifecycle shall keep a planted requirement.\n\n### Event-driven"}]
@@ -432,6 +435,7 @@ ROW_GHOST = {"op": "replace", "path": SPEC, "old": "\n\n## Change log",
              "new": "\n| R999 | `ghost-planted` check over `check-ghost-planted.sh` |\n\n## Change log"}
 P.append(plant("acceptance-rows", "a requirement with no acceptance row", (REQ + [ROW_OK], REQ)))
 P.append(plant("acceptance-rows", "a row naming a check and a script that do not exist", (REQ + [ROW_OK], REQ + [ROW_GHOST])))
+# <!-- EXAMPLE:END -->
 
 # spec-home - the declared home is not the repository holding the spec.
 CONF = ".claude/productizer/config.json"

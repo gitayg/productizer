@@ -48,7 +48,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.67.4"`.
+`plugin.json` sets `"version": "4.68.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -266,10 +266,12 @@ every commit's trailer in the range to `req-trailer.sh --validate`. An id the
 spec never allocated, or one whose row is gone, is a finding and exit `1`; a
 new citation of a superseded id is a note naming the requirement that replaced
 it. It is the advisory `dangling-citations` check here, because on this
-repository's own history a finding has never once been a real citation: 92
-findings over 25 of 109 commits, all example ids. Wrap a worked example in an
-`<!-- EXAMPLE:BEGIN -->` / `<!-- EXAMPLE:END -->` block and its ids are listed,
-not resolved.
+repository's own history a finding has never once been a real citation: 91
+findings over 26 of 116 commits, all example ids. Wrap a worked example in an
+`<!-- EXAMPLE:BEGIN -->` / `<!-- EXAMPLE:END -->` block (a `#` comment leader
+works in shell and Python) and its ids are listed, not resolved; `R0` is the
+reserved example id and is never a finding. Every example id in this tree is
+marked since v4.68.0, so a change adding every file reads 0 findings.
 
 ### Building from the spec in CI (optional)
 

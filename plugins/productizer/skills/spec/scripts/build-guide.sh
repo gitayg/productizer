@@ -36,9 +36,11 @@
 # `.` writes a GUIDE.md into whatever directory the release happened to be run
 # from, and the real one stays stale while a run reports success.
 #
+# <!-- EXAMPLE:BEGIN -->
 # --CHECK REGENERATES INTO MEMORY AND WRITES NOTHING, so a release can be gated
 # on the guide being current. It names the ids that drifted, because "GUIDE.md
 # is stale" is not actionable and "R29 is in the spec and not in the guide" is.
+# <!-- EXAMPLE:END -->
 #
 # ==========================================================================
 # WHAT IS ASSERTED ABOUT THE OTHER 615 LINES, AND WHAT IS NOT.
@@ -68,8 +70,9 @@
 # outside the section with its file line and its status, so a reader who
 # disagrees argues with the LIST rather than with a verdict whose rule is
 # invisible. The vocabulary was measured against the committed GUIDE.md before
-# it was chosen: one sentence matched, `Superseded by R58.`, and R58 names no
-# requirement so it is not examined. A wider net - `never`, `optional`,
+# it was chosen: one sentence matched, the status-marker example - today
+# `Superseded by R0.`, then an id not yet allocated - and that id names no
+# requirement, so it is not examined. A wider net - `never`, `optional`,
 # `only`, `just` - matched ordinary prose in five places and was dropped.
 #
 # WHAT IS DELIBERATELY NOT ASSERTED, because none of it can be decided without
@@ -282,8 +285,10 @@ FIXTURE_GUIDE
   # The R9.c case is built from the guide AFTER the write, so its section is
   # current and the only thing that can go red is the prose outside it.
   cp "$CASE_ROOT/GUIDE.md" "$SELF_TMP/prose-guide.md"
+  # <!-- EXAMPLE:BEGIN -->
   printf '\nThe guide also mentions R99 in running prose outside the section.\n' \
     >> "$SELF_TMP/prose-guide.md"
+  # <!-- EXAMPLE:END -->
   got=0
   bash "$0" --root "$CASE_ROOT" --guide "$SELF_TMP/prose-guide.md" --check \
     > "$SELF_TMP/prose.out" 2> "$SELF_TMP/prose.err" || got=$?
@@ -724,8 +729,8 @@ RE_ID = re.compile(r"\bR[0-9]+\b")
 # one reason: a reader who disagrees should be able to argue with THIS LIST
 # rather than with a verdict whose rule is invisible. Measured against the
 # committed GUIDE.md before it was chosen - one sentence matched, the
-# `Superseded by R58.` example, and R58 names no requirement so it is not
-# examined. A wider net (`never`, `optional`, `only`) matched ordinary prose
+# status-marker example - today `Superseded by R0.`, then an id not yet
+# allocated - and that id names no requirement, so it is not examined. A wider net (`never`, `optional`, `only`) matched ordinary prose
 # and was dropped: a check that reddens on a correct guide gets switched off.
 DENIES = re.compile(
     r"superseded|withdrawn|retired|obsolete|deprecated|no longer"

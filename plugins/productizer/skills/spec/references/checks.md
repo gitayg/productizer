@@ -893,6 +893,15 @@ stderr closed with `2>&-`, both streams binned with `&>/dev/null` or
 bare `>/dev/null`: binning stdout says nothing about errors, and stderr still
 reaches the log and the caller.
 
+A line of shell is a line of a shell script, a `run:` value in a YAML file (an
+inline `run: cmd`, or a `run: |` block through its last line), or a line of a
+shell-fenced or `!` block in Markdown. Nothing else in a YAML or Markdown file
+is read: a step name or an `env:` value that quotes a redirection is prose, not
+a finding. Since v4.68.0 (B97) this repository scans every `.yml`, `.yaml` and
+`.md` file it changes; the shipped template scopes the check to workflows,
+composite actions and Claude Code commands and skills, the files whose shell
+runs, because what a wider scope finds in an adopter's documents is unmeasured.
+
 ### The exemptions are the hard part
 
 There are legitimate uses, and a rule with no way out gets deleted. So there

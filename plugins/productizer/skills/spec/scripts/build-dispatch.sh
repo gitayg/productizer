@@ -3,6 +3,7 @@
 #                           --default-branch NAME --out DIR [--spec-base SHA]
 #                           [--permissions repo-settings|edits-only]
 #                           [--body-out DIR]
+# build-dispatch.sh agent-args [repo-root] --out FILE
 # build-dispatch.sh stash-git [repo-root] --git-dir DIR
 # build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE
 # build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
@@ -24,6 +25,14 @@
 #            also renders the pull request body (pr-spec-comment.sh, which runs
 #            the repository's own solver probe) - HERE, in the job with no write
 #            token, before the agent runs - with the HEAD it describes beside it.
+#   agent-args runs BEFORE the model, in the agent's job. It re-reads the
+#            claude-args prepare wrote (now an artifact the agent's job
+#            fetched) and refuses it unless every line is one of the fixed
+#            shapes prepare writes, no flag repeats, and the Bash deny is
+#            present. Only then does it append exactly the lines it checked to
+#            FILE ($GITHUB_OUTPUT) as `claude_args`, under a random heredoc
+#            delimiter. This was shell inside the template's YAML until B118; a
+#            last line with no newline escaped its check there.
 #   stash-git runs BEFORE the model, after prepare's data is in place. It moves
 #            the workspace's `.git` to a directory OUTSIDE the agent's cwd, so
 #            the agent cannot write a `.git/config`, a `.git/hooks/*` or a
@@ -133,7 +142,9 @@
 #   2  usage
 #   3  the repository cannot be read as needed: not a work tree, a shallow
 #      clone, an unreadable config, HEAD is not the default-branch tip, or
-#      (stash-git/capture) the git-dir could not be moved or read
+#      (stash-git/capture) the git-dir could not be moved or read, or
+#      (agent-args) the prepared claude-args are missing, hold a line that is
+#      not a shape prepare writes or a repeated flag, or lack the Bash deny
 #   4  the spec is unchanged against the base; no model call should follow
 #   5  build mode, and no plan is committed at the plan path
 #   6  refused by stage-advance.sh, on the patch or on the commit made from
@@ -167,13 +178,15 @@ usage() {
   printf 'usage: build-dispatch.sh prepare [repo-root] --mode plan|build --issue N\n'
   printf '                         --default-branch NAME --out DIR [--spec-base SHA]\n'
   printf '                         [--permissions repo-settings|edits-only] [--body-out DIR]\n'
+  printf '       build-dispatch.sh agent-args [repo-root] --out FILE\n'
   printf '       build-dispatch.sh stash-git [repo-root] --git-dir DIR\n'
   printf '       build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE\n'
   printf '       build-dispatch.sh deliver [repo-root] --mode plan|build --issue N\n'
   printf '                         --patch FILE --body DIR --run-id ID --default-branch NAME\n'
   printf '                         [--spec-base SHA] [--dry-run]\n'
   printf '       build-dispatch.sh --selftest | --version | --help\n'
-  printf 'exit: 0 ok, 2 usage, 3 repository not usable or HEAD not the default-branch tip,\n'
+  printf 'exit: 0 ok, 2 usage, 3 repository not usable, HEAD not the default-branch tip,\n'
+  printf '      or (agent-args) the prepared claude-args refused,\n'
   printf '      4 spec unchanged, 5 no committed plan, 6 refused by stage-advance.sh,\n'
   printf '      7 delivery failed (named), 8 capture refused (the change touches .git)\n'
 }
@@ -591,7 +604,60 @@ STUB
   also capture-planted-config-never-ran "the planted fsmonitor command did not run" \
     test ! -e "$ST/CAPTURE_PWN_MARK"
 
-  drive no-subcommand 2 "give a subcommand: prepare, stash-git, capture or deliver" --mode plan
+  # --- agent-args ------------------------------------------------------------
+  # The flags the agent runs with, re-checked in the agent's job (B118). First
+  # the wiring: every claude-args file prepare wrote above must pass, so the
+  # shapes prepare writes and the shapes agent-args accepts cannot drift apart.
+  # aa_ws <name> <claude-args content, written with printf %b>: a workspace
+  # holding .productizer-run/ as the agent's job fetches it.
+  aa_ws() {
+    rm -rf "$ST/aa-$1"; mkdir -p "$ST/aa-$1/.productizer-run"
+    printf '%b' "$2" > "$ST/aa-$1/.productizer-run/claude-args"
+    printf 'repo-settings\n' > "$ST/aa-$1/.productizer-run/permissions"
+  }
+  local d n=0 bad=""
+  for d in "$ST"/out-*/; do
+    [ -f "$d/claude-args" ] || continue
+    rm -rf "$ST/aa-each"; mkdir -p "$ST/aa-each"; cp -R "$d" "$ST/aa-each/.productizer-run"
+    if bash "$SELF" agent-args "$ST/aa-each" --out "$ST/aa-each.out" > /dev/null; then n=$((n + 1)); else bad="$bad $d"; fi
+  done
+  # shellcheck disable=SC2016  # $1/$2 are expanded by the inner sh, on purpose
+  also agent-args-accepts-every-prepare-output "agent-args accepted all $n claude-args files prepare wrote${bad:+; refused:$bad}" \
+    sh -c 'test -z "$1" && test "$2" -ge 5' _ "$bad" "$n"
+  rm -rf "$ST/aa-ok"; mkdir -p "$ST/aa-ok"; cp -R "$ST/out-build" "$ST/aa-ok/.productizer-run"
+  : > "$ST/aa-ok.gho"
+  drive agent-args-ok 0 "permissions repo-settings; flags: --model claude-x-1 --effort high --permission-mode acceptEdits --disallowedTools Bash" \
+    agent-args "$ST/aa-ok" --out "$ST/aa-ok.gho"
+  # shellcheck disable=SC2016  # $1/$2 are expanded by the inner sh, on purpose
+  also agent-args-output-is-the-checked-lines "claude_args<<D, exactly prepare's four lines, then D on its own line" \
+    sh -c 'd="$(head -n 1 "$1" | sed -n "s/^claude_args<<\(PRODUCTIZER-ARGS-[0-9a-f]\{16\}\)$/\1/p")"; test -n "$d" && sed "1d;\$d" "$1" | cmp -s - "$2" && test "$(tail -n 1 "$1")" = "$d"' _ "$ST/aa-ok.gho" "$ST/out-build/claude-args"
+  aa_ws bypass '--disallowedTools Bash\n--permission-mode bypassPermissions\n'
+  drive agent-args-refuses-a-shape 3 "holds a line that is not a shape build-dispatch.sh writes: --permission-mode\\ bypassPermissions" \
+    agent-args "$ST/aa-bypass" --out "$ST/aa-bypass.gho"
+  # The line HEAD's YAML loop never read: `while read` stops before a last
+  # line with no newline, and the step then emitted the whole file.
+  aa_ws unterminated '--disallowedTools Bash\n--permission-mode bypassPermissions'
+  : > "$ST/aa-unterminated.gho"
+  drive agent-args-reads-an-unterminated-last-line 3 "holds a line that is not a shape build-dispatch.sh writes: --permission-mode\\ bypassPermissions" \
+    agent-args "$ST/aa-unterminated" --out "$ST/aa-unterminated.gho"
+  also agent-args-refusal-wrote-no-output "a refused claude-args appends nothing to the step output" \
+    test ! -s "$ST/aa-unterminated.gho"
+  aa_ws repeat '--disallowedTools Bash\n--model claude-x-1\n--model other-1\n'
+  drive agent-args-refuses-a-repeat 3 "repeats --model" \
+    agent-args "$ST/aa-repeat" --out "$ST/aa-repeat.gho"
+  aa_ws nodeny '--permission-mode acceptEdits\n'
+  drive agent-args-refuses-no-bash-deny 3 "does not deny Bash; the template refuses to run the agent with a shell" \
+    agent-args "$ST/aa-nodeny" --out "$ST/aa-nodeny.gho"
+  aa_ws crlf '--disallowedTools Bash\r\n'
+  drive agent-args-refuses-a-crlf-line 3 "holds a line that is not a shape build-dispatch.sh writes: \$'--disallowedTools Bash\\r'" \
+    agent-args "$ST/aa-crlf" --out "$ST/aa-crlf.gho"
+  rm -rf "$ST/aa-missing"; mkdir -p "$ST/aa-missing"
+  drive agent-args-refuses-no-file 3 "no claude-args at" \
+    agent-args "$ST/aa-missing" --out "$ST/aa-missing.gho"
+  drive agent-args-needs-out 2 "agent-args needs --out FILE" \
+    agent-args "$ST/aa-ok"
+
+  drive no-subcommand 2 "give a subcommand: prepare, agent-args, stash-git, capture or deliver" --mode plan
   drive version 0 "build-dispatch 1." --version
 
   # shellcheck disable=SC2016  # $1 is expanded by the inner sh, on purpose
@@ -603,7 +669,7 @@ STUB
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f&&/^#      /{next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: that the template hands deliver the body prepare rendered and not another (that wiring is runtime YAML no self-test runs, B118, and GitHub'"'"'s artifact immutability is not measured here); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the workflow template calls this script the way these cases do; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing.\n'
+  printf '    NOT ASSERTED: that the template hands deliver the body prepare rendered and not another (artifact names and paths are not among check-ci-template.py'"'"'s guards, and GitHub'"'"'s artifact immutability is not measured here); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -613,6 +679,45 @@ if [ "$SELFTEST" -eq 1 ]; then
   ST_RC=0
   selftest || ST_RC=$?
   exit "$ST_RC"
+fi
+
+# ===========================================================================
+# AGENT-ARGS: the last check on the flags the agent runs with, in the agent's
+# own job, before the agent step. prepare wrote them in another job; this
+# re-reads the artifact and passes on only lines it has matched against the
+# fixed shapes prepare writes. Every line is read, including a last one with no
+# newline, and what is emitted is the checked lines, never the file as it is.
+# ===========================================================================
+if [ "$CMD" = agent-args ]; then
+  [ -z "$MODE$ISSUE$SPEC_BASE$PATCH$RUN_ID$DEFAULT$BODY_OUT$BODY_IN$GITDIR" ] && [ "$DRY_RUN" = 0 ] && [ "$PERMS_SET" = 0 ] \
+    || die_usage "agent-args takes only [repo-root] and --out"
+  [ -n "$OUT" ] || die_usage "agent-args needs --out FILE, the step output file (\$GITHUB_OUTPUT) to append claude_args to"
+  [ -n "$ROOT" ] || ROOT="."
+  ARGS_FILE="$ROOT/.productizer-run/claude-args"
+  PERMS_FILE="$ROOT/.productizer-run/permissions"
+  [ -f "$ARGS_FILE" ] && [ ! -L "$ARGS_FILE" ] \
+    || fail 3 "no claude-args at $ARGS_FILE (a regular file prepare writes); refusing to run the agent on flags nobody checked"
+  ARG_SHAPE='^(--model [A-Za-z0-9][A-Za-z0-9._:@-]*|--effort (low|medium|high|xhigh|max)|--permission-mode acceptEdits|--disallowedTools Bash)$'
+  CHECKED=(); SEEN=" "; DENIES_BASH=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ $ARG_SHAPE ]] \
+      || fail 3 "$ARGS_FILE holds a line that is not a shape build-dispatch.sh writes: $(printf '%q' "$line"). Refusing to run the agent."
+    flag="${line%% *}"
+    case "$SEEN" in *" $flag "*) fail 3 "$ARGS_FILE repeats $flag. Refusing to run the agent." ;; esac
+    SEEN="$SEEN$flag "
+    [ "$line" != "--disallowedTools Bash" ] || DENIES_BASH=1
+    CHECKED+=("$line")
+  done < "$ARGS_FILE"
+  [ "$DENIES_BASH" = 1 ] \
+    || fail 3 "$ARGS_FILE does not deny Bash; the template refuses to run the agent with a shell (never a shell in CI)"
+  PERM_WORD="$(head -n 1 "$PERMS_FILE")" || fail 3 "no permissions file at $PERMS_FILE"
+  case "$PERM_WORD" in repo-settings|edits-only) ;; *) fail 3 "$PERMS_FILE names no option prepare writes: $(printf '%q' "$PERM_WORD")" ;; esac
+  DELIM="PRODUCTIZER-ARGS-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  [ "${#DELIM}" -eq 33 ] || fail 3 "could not draw a random heredoc delimiter"
+  { printf 'claude_args<<%s\n' "$DELIM"; printf '%s\n' "${CHECKED[@]}"; printf '%s\n' "$DELIM"; } >> "$OUT" \
+    || fail 3 "could not append claude_args to $OUT"
+  say "build-dispatch: permissions $PERM_WORD; flags: ${CHECKED[*]}"
+  exit 0
 fi
 
 # ===========================================================================
@@ -673,7 +778,12 @@ if [ "$CMD" = stash-git ] || [ "$CMD" = capture ]; then
   hardened_git diff --binary --no-ext-diff --no-textconv > "$OUT_ABS" \
     || fail 3 "could not compute the patch against the stashed git-dir"
   say "build-dispatch: captured the work tree into $OUT_ABS ($(wc -c < "$OUT_ABS") bytes), with the agent's version-control settings out of reach."
-  hardened_git diff --stat --no-ext-diff --no-textconv || true
+  # The summary is informational: the patch is already written, so a summary git
+  # could not print changes no exit code. Its status is printed, never dropped.
+  stat_rc=0
+  hardened_git diff --stat --no-ext-diff --no-textconv || stat_rc=$?
+  [ "$stat_rc" = 0 ] \
+    || say "build-dispatch: git could not print the diff summary (exit $stat_rc); the patch in $OUT_ABS is unaffected."
   exit 0
 fi
 
@@ -682,8 +792,8 @@ fi
 # ===========================================================================
 case "$CMD" in
   prepare|deliver) ;;
-  "") die_usage "give a subcommand: prepare, stash-git, capture or deliver. Run with --help for the contract." ;;
-  *)  die_usage "unknown subcommand: $CMD (prepare, stash-git, capture or deliver)" ;;
+  "") die_usage "give a subcommand: prepare, agent-args, stash-git, capture or deliver. Run with --help for the contract." ;;
+  *)  die_usage "unknown subcommand: $CMD (prepare, agent-args, stash-git, capture or deliver)" ;;
 esac
 case "$MODE" in plan|build) ;; *) die_usage "--mode must be plan or build; got: ${MODE:-nothing}" ;; esac
 [[ "$ISSUE" =~ ^[1-9][0-9]{0,9}$ ]] || die_usage "--issue must be a positive whole number; got: ${ISSUE:-nothing}"

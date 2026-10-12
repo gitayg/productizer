@@ -40,7 +40,7 @@
 # spec-diff.sh, and exits 0 when every case held and 1 when one did not.
 set -euo pipefail
 
-VERSION="pr-spec-comment 1.0"
+VERSION="pr-spec-comment 1.1"
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$HERE/$(basename -- "${BASH_SOURCE[0]}")"
@@ -100,9 +100,10 @@ selftest() {
 
   G() { git -C "$1" -c user.email=selftest@example.invalid -c user.name=selftest \
           -c commit.gpgsign=false "${@:2}"; }
-  # newrepo <name> [bare]: a spec holding R1, tagged `base`. Unless `bare`, also
-  # a classification store, a Stage 5 result and a solver probe, so that every
-  # section of the report is measurable.
+  # newrepo <name> [bare|noconst]: a spec holding R1, tagged `base`. Unless
+  # `bare`, also a classification store, a Stage 5 result and a solver probe, so
+  # that every section of the report is measurable. `noconst` leaves out the
+  # constitution and nothing else.
   newrepo() {
     local R="$ST/$1"
     mkdir -p "$R/.claude/productizer"
@@ -111,7 +112,7 @@ selftest() {
       > "$R/.claude/productizer/spec.md"
     # The constitution too: spec-diff.sh reads both files, and a missing one
     # turns its exit into 5 for the whole run.
-    printf '# Constitution\n\n1. Small steps.\n' > "$R/.claude/productizer/constitution.md"
+    [ "${2:-}" = noconst ] || printf '# Constitution\n\n1. Small steps.\n' > "$R/.claude/productizer/constitution.md"
     if [ "${2:-}" != bare ]; then
       mkdir -p "$R/.claude/productizer/classifications" "$R/evals"
       printf 'Intent: seed\nClassification: extend\n' > "$R/.claude/productizer/classifications/0-seed.md"
@@ -142,6 +143,19 @@ JSON
       sed 's/^/          stdout: /' "$ST/$name.out" | head -n 12
       sed 's/^/          stderr: /' "$ST/$name.err" | head -n 8
     fi
+  }
+
+  lacks() { # lacks <case> <text>: the named case's stdout must NOT carry the text
+    # grep's three answers kept apart: 1 is the absence asserted, and 2 (no
+    # such case output) must not read as one.
+    local g=0
+    CASES=$((CASES + 1))
+    grep -qF -- "$2" "$ST/$1.out" || g=$?
+    case "$g" in
+      1) HELD=$((HELD + 1)); printf '  ok    %-40s does not carry: %s\n' "$1 (lacks)" "$2" ;;
+      0) printf '  FAIL  %-40s carries: %s\n' "$1 (lacks)" "$2" ;;
+      *) printf '  FAIL  %-40s no output to read (grep exit %s)\n' "$1 (lacks)" "$g" ;;
+    esac
   }
 
   printf 'pr-spec-comment self-test\n\n'
@@ -207,12 +221,40 @@ PLANT
   drive not-a-repository 3 "not a git repository" "$ST" "$ST/plain"
   drive version 0 "pr-spec-comment 1." "$ST" --version
 
+  # B103. No constitution and an unchanged spec: spec-diff.sh exits 5 for the
+  # run because of the constitution alone. The spec was measured, and every
+  # other section is too, so the report is whole and names the real cause.
+  newrepo noconst noconst; R="$ST/noconst"
+  printf 'x\n' > "$R/other.txt"
+  commit "$R"
+  drive no-constitution-named-not-spec 0 "it is the constitution's absence, not the spec's" "$R" --base base
+  drive no-constitution-spec-still-measured 0 "**No requirement moved.**" "$R" --base base
+  lacks no-constitution-named-not-spec "does not exist at"
+
+  # B104. The body is rendered in an adopter's repository. Nothing in it may
+  # name this repository's own artifacts; what it says about the probe and the
+  # publish gate is read from the tree it runs in.
+  newrepo adopter; R="$ST/adopter"
+  printf 'x\n' > "$R/other.txt"
+  commit "$R"
+  drive adopter-corpus-size-derived 0 "Over 3 case(s): the sum of the rows above" "$R" --base base
+  lacks adopter-corpus-size-derived "26-case"
+  lacks no-store-is-partial "26-case"
+  lacks adopter-corpus-size-derived "publish-checklist.md"
+  lacks adopter-corpus-size-derived "checks.yml"
+  mkdir -p "$R/.claude/hooks"
+  # shellcheck disable=SC2016  # the hook line is literal shell, read by sed
+  printf '#!/bin/sh\nGATE_CHECKLIST="${GATE_CHECKLIST:-ops/release-list.md}"\n' > "$R/.claude/hooks/publish-gate.sh"
+  commit "$R"
+  # shellcheck disable=SC2016  # the backticks are literal markdown in the expected sentence
+  drive adopter-gate-path-from-hook 0 'write `ops/release-list.md` with `Command: gh pr comment' "$R" --base base
+
   printf '\n%s of %s cases held\n' "$HELD" "$CASES"
   local reached documented
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit:/ { f = 1; sub(/^# Exit:/, "#      ") } f && /^#[[:space:]]+[0-9] / { printf "%s ", $2; next } f { exit }' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: an id that VANISHED; a Superseded or Withdrawn annotation; an unreadable classification record; a malformed checks-result.json; a probe that exits non-zero or prints no counts; the change-set cap of five paths; exit 3 for an unusable spec-diff.sh; a repository with no constitution.md (measured 2026-10-10: spec-diff.sh then exits 5 for the run and this report says spec.md has no baseline, which misattributes the constitution'"'"'s absence to the spec - reported, not fixed here).\n'
+  printf '    NOT ASSERTED: an id that VANISHED; a Superseded or Withdrawn annotation; an unreadable classification record; a malformed checks-result.json; a probe that exits non-zero or prints no counts; the change-set cap of five paths; exit 3 for an unusable spec-diff.sh; a constitution new in the range; a spec absent at both ends; a probe row whose last field is not a count; a workflow under .github/workflows naming the probe; a publish-gate.sh with no readable checklist line.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -268,6 +310,19 @@ BASE_SHA="$(sed -n 's/^Base: .* at \([0-9a-f]\{7,\}\),.*/\1/p' "$SD_OUT" | head 
 BASE_LABEL="$(sed -n 's/^Base: `\([^`]*\)`.*/\1/p' "$SD_OUT" | head -n 1)"
 [ -n "$BASE_LABEL" ] || BASE_LABEL="did not resolve"
 
+# Each file's own outcome, from the heading spec-diff.sh gives it. Its EXIT is
+# the strongest outcome over the spec AND the constitution, so a run whose exit
+# is 5 may be one where only the constitution has no baseline. Reading the exit
+# as the spec's state blamed the spec for a missing constitution (B103).
+file_state() { # file_state <path> -> absent | new, no baseline | unchanged | diff too large | changed against `X`
+  awk -v want="$1" '
+    index($0, "### `" want "` - ") == 1 { print substr($0, length("### `" want "` - ") + 1); exit }
+  ' "$SD_OUT"
+}
+CONST_REL=".claude/productizer/constitution.md"
+SPEC_STATE="$(file_state "$SPEC_REL")"
+CONST_STATE="$(file_state "$CONST_REL")"
+
 # --- requirement ids, out of the fenced diff -------------------------------
 # The spec's section only. spec-diff.sh emits the constitution too, and a
 # principle carries no requirement id.
@@ -279,7 +334,7 @@ spec_section() {
 }
 
 ADDED=""; DROPPED=""; SUPERSEDED=""; WITHDRAWN=""
-if [ "$SD_RC" = 0 ] && [ -s "$SD_OUT" ] && [ -n "$(spec_section)" ]; then
+if [ "${SPEC_STATE#changed against}" != "$SPEC_STATE" ] && [ -n "$(spec_section)" ]; then
   # awk walks the body in order, so a `Superseded by` or `Withdrawn.` line is
   # attributed to the id above it - which is where the spec puts it. The id line
   # may arrive as context, as a removal or as an addition; all three move the
@@ -341,8 +396,10 @@ say ""
 
 say "### Requirements"
 say ""
-case "$SD_RC" in
-  0)
+SPEC_CASE="$SPEC_STATE"
+[ "$SD_RC" != 6 ] || SPEC_CASE="no base"
+case "$SPEC_CASE" in
+  "changed against"*)
     say "| Movement | Ids |"
     say "|---|---|"
     row "Added" "$NEW" "the diff was read end to end and defines no id that was not there before"
@@ -352,36 +409,63 @@ case "$SD_RC" in
     say ""
     if [ -n "$(fmt_ids "$VANISHED")" ]; then
       say "> **An id left the file.** $(fmt_ids "$VANISHED") is defined at the base and not at HEAD."
-      say "> R2 makes ids permanent and R3 keeps a replaced requirement's original text in place, so"
-      say "> this is not a supersession — a superseded requirement keeps its line. Check the diff."
+      say "> Requirement ids in the living spec are permanent, and a replaced requirement keeps its"
+      say "> original text in place, so this is not a supersession — a superseded requirement keeps"
+      say "> its line. Check the diff."
       say ""
     fi
     ;;
-  4)
+  unchanged)
     say "**No requirement moved.** \`$SPEC_REL\` is byte-identical at \`$BASE_LABEL\` and at HEAD."
     say "This is a measured absence of change: both ends were read and compared."
     say ""
     ;;
-  5)
+  "new, no baseline")
     say "**NOT MEASURED — no baseline.** \`$SPEC_REL\` does not exist at \`$BASE_LABEL\`, so it has no"
     say "history to diff against and every line of it is an addition. An empty movement table here"
     say "would read as \"nothing changed\", which is a different and untrue answer."
     say ""
     UNMEASURED=1
     ;;
-  6)
+  absent)
+    say "**NOT MEASURED — there is no spec.** \`$SPEC_REL\` is tracked at neither \`$BASE_LABEL\` nor"
+    say "HEAD, so there is nothing to diff. That is not a spec that did not change."
+    say ""
+    UNMEASURED=1
+    ;;
+  "no base")
     say "**NOT MEASURED — the base ref does not resolve.** \`spec-diff.sh\` refused to fall back to an"
     say "empty diff, and so does this. Pass \`--base REF\` with a ref this clone actually carries;"
     say "a shallow clone is the usual cause."
     say ""
     ;;
-  7)
+  "diff too large")
     say "**NOT MEASURED — the diff is over \`spec-diff.sh\`'s cap and was left out whole.** It was not"
     say "truncated: a cut-off diff reads as a complete one. The movement table cannot be derived"
     say "from a diff that was not emitted, so it is absent rather than empty."
     say ""
     UNMEASURED=1
     ;;
+  *)
+    say "**NOT MEASURED.** \`spec-diff.sh\` exited $SD_RC and its output names no outcome for"
+    say "\`$SPEC_REL\`, so this report cannot say what happened to it."
+    say ""
+    UNMEASURED=1
+    ;;
+esac
+
+# The constitution carries no requirement id, so its outcome never decides the
+# table above. When it has no baseline, say so under its own name: that is the
+# cause of spec-diff.sh's exit 5 in a repository that has no constitution.
+case "$CONST_STATE" in
+  absent)
+    say "\`$CONST_REL\` is tracked at neither end. That is why \`spec-diff.sh\` reports no baseline"
+    say "for this run; it is the constitution's absence, not the spec's, and it moves no requirement."
+    say "" ;;
+  "new, no baseline")
+    say "\`$CONST_REL\` is new in this range and has no baseline at \`$BASE_LABEL\`. It carries no"
+    say "requirement id, so it moves no requirement."
+    say "" ;;
 esac
 
 # --- contradiction ---------------------------------------------------------
@@ -423,8 +507,8 @@ else
     case "$verdict" in
       contradict)
         CONTRADICTS=$((CONTRADICTS + 1))
-        say "- **\`$f\` — \`contradict\`** (intent \`${intent:-unstated}\`). R33 stops the pipeline here," >>"$WORK/class.md"
-        say "  and R12 merges nothing that depends on it until somebody rules. This needs a ruling, not a review." >>"$WORK/class.md" ;;
+        say "- **\`$f\` — \`contradict\`** (intent \`${intent:-unstated}\`). A contradiction stops the pipeline here," >>"$WORK/class.md"
+        say "  and nothing that depends on it merges until somebody rules. This needs a ruling, not a review." >>"$WORK/class.md" ;;
       "")
         UNREADABLE=1
         say "- \`$f\` — **NOT MEASURED**: the record carries no \`Classification:\` line." >>"$WORK/class.md" ;;
@@ -529,10 +613,14 @@ else
 fi
 
 # --- the solver probe ------------------------------------------------------
+# Everything said here is read from the tree the report runs in. This renders
+# the body of a pull request in an adopter's repository too, so a sentence about
+# this repository's own corpus, workflow or publish checklist would be a
+# reference to nothing there (B104). Absent the file, the sentence is omitted.
 say "### Solver probe"
 say ""
 if [ ! -r "$PROBE_REL" ]; then
-  say "**NOT MEASURED.** \`$PROBE_REL\` is not in this tree, so the 26-case corpus was not run."
+  say "**NOT MEASURED.** There is no \`$PROBE_REL\` in this tree, so no solver probe was run."
   say ""
   UNMEASURED=1
 elif ! command -v python3 >/dev/null; then
@@ -540,8 +628,8 @@ elif ! command -v python3 >/dev/null; then
   say ""
   UNMEASURED=1
 elif ! python3 "$PROBE_REL" >"$WORK/probe.txt"; then
-  say "**NOT MEASURED.** \`$PROBE_REL\` did not complete — see the error above. It exits non-zero"
-  say "only when the checker it measures is missing, so this is a broken tree, not a bad score."
+  say "**NOT MEASURED.** \`$PROBE_REL\` did not complete — see the error above. A probe that did not"
+  say "finish has no score, and none is rendered."
   say ""
   UNMEASURED=1
 else
@@ -557,19 +645,49 @@ else
     grep -E '^  (precision|recall)' "$WORK/probe.txt" || true
     say '```'
     say ""
-    say "These are gated in \`.github/workflows/checks.yml\` against a dated baseline. The bounds live"
-    say "there and are deliberately not restated here — two copies of one measurement drift apart."
-    say ""
+    # The corpus size is the probe's own: every case lands in exactly one of
+    # the rows above, so their sum is the number of cases it ran. A row whose
+    # last field is not a count makes the sum unknowable, and then no size is
+    # stated rather than a wrong one.
+    PROBE_N="$(printf '%s\n' "$PROBE_ROWS" | awk '$NF !~ /^[0-9]+$/ { bad = 1 } { n += $NF } END { if (!bad) print n }')"
+    if [ -n "$PROBE_N" ]; then
+      say "Over $PROBE_N case(s): the sum of the rows above, as \`$PROBE_REL\` printed them."
+      say ""
+    fi
+    PROBE_GATES=""
+    for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
+      [ -f "$wf" ] || continue
+      if grep -qF -- "$PROBE_REL" "$wf"; then PROBE_GATES="$PROBE_GATES$wf"$'\n'; fi
+    done
+    if [ -n "$PROBE_GATES" ]; then
+      say "This repository's workflow $(fmt_ids "$PROBE_GATES") runs this probe. Any bounds"
+      say "it holds the probe to live there and are deliberately not restated here — two copies of one"
+      say "measurement drift apart."
+      say ""
+    fi
   fi
 fi
 
 # --- footer ----------------------------------------------------------------
+# The publish gate is named only where it is installed, and its checklist path
+# is read from the hook itself rather than assumed.
+GATE_HOOK=".claude/hooks/publish-gate.sh"
 say "---"
 say ""
 say "Rendered by \`pr-spec-comment.sh\` ($VERSION) to stdout. **It posted nothing.**"
-say "Posting is a publish, and a publish here needs a checklist and a person:"
-say "write \`.claude/productizer/publish-checklist.md\` with \`Command: gh pr comment <n> --body-file -\`"
-say "as its first line, then pipe this output into that command yourself."
+say "Posting it is a separate step for a person to take, for example by piping this output into"
+say "\`gh pr comment <n> --body-file -\`."
+if [ -r "$GATE_HOOK" ]; then
+  # shellcheck disable=SC2016  # the hook's own line is matched literally; nothing here should expand
+  GATE_LIST="$(sed -n 's/^GATE_CHECKLIST="\${GATE_CHECKLIST:-\([^}]*\)}"$/\1/p' "$GATE_HOOK" | head -n 1)"
+  if [ -n "$GATE_LIST" ]; then
+    say "This repository's \`$GATE_HOOK\` holds a publish until a checklist names the command:"
+    say "write \`$GATE_LIST\` with \`Command: gh pr comment <n> --body-file -\` as its first line, then"
+    say "pipe this output into that command yourself."
+  else
+    say "This repository has \`$GATE_HOOK\`, which may hold that command until a person has decided to run it."
+  fi
+fi
 if [ "$UNMEASURED" = 1 ]; then
   say ""
   say "> **This report is partial.** At least one section above is marked NOT MEASURED."

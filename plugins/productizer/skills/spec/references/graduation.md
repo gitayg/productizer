@@ -184,6 +184,7 @@ Say this plainly, because the loop looks more powerful than it is.
   negatives.** Harvesting more corrections makes the lexicon wider, which is a
   precision improvement on the messages that do arrive. It says nothing about
   the ones that do not.
+  <!-- EXAMPLE:BEGIN -->
 - **It is one hand-run iteration, automated.** The precedent is already in this
   repo: `scripts/contradiction-check.py` carries `("reject", "queue")` in
   `EXCLUSIVE_PAIRS` with the note that it was *"added after an end-to-end run
@@ -191,6 +192,7 @@ Say this plainly, because the loop looks more powerful than it is.
   CONSISTENT."* One person ran the thing, saw one miss, added one pair.
   Graduation is that loop with the bookkeeping done for you. It is not a
   different kind of thing, and it will not find the pair nobody tripped over.
+  <!-- EXAMPLE:END -->
 - **Conversation-distinctness is only as good as the transcripts.** A repo whose
   work happens outside Claude Code sessions has no source here, and the correct
   output in that case is "no source", not a small number.

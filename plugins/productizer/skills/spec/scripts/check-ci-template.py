@@ -45,7 +45,11 @@ WHAT IT ASSERTS, each a separate finding:
                  what they run - hooks, filters, extensions - is the scripts'
                  hardening, not this rule's
   pinned         every `uses:` is pinned to a full 40-character commit id
-  run-injection  no `${{ github.event.` and no `${{ inputs.` inside a run:
+  run-injection  no `${{` expression of any context inside a run: - not only
+                 github.event and inputs, but steps, needs, env, matrix,
+                 github.head_ref and the rest, any of which can carry
+                 attacker-influenced text into the shell. Every value reaches a
+                 run: through env:, where it is data, not script text
   swallow        no continue-on-error, and no `|| true` or `2>/dev/null` in a
                  run:
   no-bypass      neither `bypassPermissions` nor `--dangerously-skip-permissions`
@@ -56,6 +60,28 @@ WHAT IT ASSERTS, each a separate finding:
                  default `repo-settings`, whose options are drawn only from
                  repo-settings and edits-only - each of which can only narrow
                  the repository's committed Claude Code settings
+  tools-pin      the top-level env PRODUCTIZER_SHA is a quoted string of 40
+                 lower-case hex digits: the all-zero placeholder the first step
+                 refuses, or a full commit id. An unquoted all-digit value is a
+                 YAML number, so it is refused too. Every checkout of
+                 ${{ env.PRODUCTIZER_REPO }} uses ref: ${{ env.PRODUCTIZER_SHA }}
+  guards         the runtime guards are present, in place, as the exact lines
+                 the template ships (B118). In prepare's first step: the
+                 default-branch refusal and both PRODUCTIZER_SHA refusals. In
+                 the agent's job: a step with id `args`, before the agent, that
+                 calls `build-dispatch.sh agent-args . --out "$GITHUB_OUTPUT"`
+                 (the self-tested check of the agent's flags), and the agent's
+                 claude_args reading `steps.args.outputs.claude_args`; then a
+                 step between them that copies build-dispatch.sh to
+                 $RUNNER_TEMP, stash-gits .git there and removes the tools
+                 checkout; and after the agent a step that removes the run data
+                 and captures from the $RUNNER_TEMP copy with the same git-dir.
+                 In every write job: the step that checks the tools checkout IS
+                 PRODUCTIZER_SHA with nothing changed, then stages it under
+                 $RUNNER_TEMP, before any step that runs the staged copy.
+                 LIMITS: lines are matched in order with whitespace and
+                 comments ignored, not as one block, so a guard line made
+                 unreachable (after an earlier exit 0, say) is not seen
 
 WHAT IT DOES NOT. It reads one file and runs nothing. It cannot tell whether a
 pinned commit is the release its comment names, whether the scripts the
@@ -101,7 +127,31 @@ SHELL_SCRIPT_RX = re.compile(r"(?<![\w./-])(?:bash|sh)((?:\s+-[-\w]+)*)\s+(\S+)"
 SOURCE_RX = re.compile(r"(?:^|[\s;&|(])source\s+\S")
 DOT_SLASH_RX = re.compile(r"(?:^|[\s;&|(])\./\S")
 TEMP_PREFIXES = ('"$RUNNER_TEMP/', "$RUNNER_TEMP/", '"${RUNNER_TEMP}/', "${RUNNER_TEMP}/")
-INJECT_RX = re.compile(r"\$\{\{\s*(github\.event\.|inputs\.)")
+INJECT_RX = re.compile(r"\$\{\{[^\n]*?(?:\}\}|$)", re.M)
+SHA_RX = re.compile(r"[0-9a-f]{40}")
+ZERO_SHA = "0" * 40
+TOOLS_REF = "${{ env.PRODUCTIZER_SHA }}"
+ARGS_REF = "${{ steps.args.outputs.claude_args }}"
+# The runtime guards, as the exact lines the template ships (whitespace
+# collapsed). Each tuple is matched in order inside one step's run:.
+PIN_GUARD = ('if [ "$REF" != "refs/heads/$DEFAULT_BRANCH" ]; then', "exit 1",
+             'if [ "$PRODUCTIZER_SHA" = "%s" ]; then' % ZERO_SHA, "exit 1",
+             'if ! [[ "$PRODUCTIZER_SHA" =~ ^[0-9a-f]{40}$ ]]; then', "exit 1")
+ARGS_GUARD = ('bash "$TOOLS/build-dispatch.sh" agent-args . --out "$GITHUB_OUTPUT"',)
+STASH_GUARD = ('cp "$TOOLS/build-dispatch.sh" "$RUNNER_TEMP/build-dispatch.sh"',
+               'bash "$RUNNER_TEMP/build-dispatch.sh" stash-git . --git-dir "$RUNNER_TEMP/productizer-gitdir"',
+               "rm -rf .productizer-tools")
+CAPTURE_GUARD = ("rm -rf .productizer-run",
+                 'bash --noprofile --norc "$RUNNER_TEMP/build-dispatch.sh" capture . '
+                 '--git-dir "$RUNNER_TEMP/productizer-gitdir" --out "$RUNNER_TEMP/productizer.patch"')
+VERIFY_GIT = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C .productizer-tools"
+VERIFY_GUARD = ('got="$(%s rev-parse HEAD)"' % VERIFY_GIT,
+                'if [ "$got" != "$PRODUCTIZER_SHA" ]; then', "exit 1",
+                'dirty="$(%s status --porcelain --untracked-files=all)"' % VERIFY_GIT,
+                'if [ -n "$dirty" ]; then', "exit 1",
+                'cp -R "$TOOLS" "$RUNNER_TEMP/productizer-tools"',
+                "rm -rf .productizer-tools")
+STAGED_TOOLS = "$RUNNER_TEMP/productizer-tools"
 SWALLOW = (("|| true", re.compile(r"\|\|\s*true\b")),
            ("2>/dev/null", re.compile(r"2>\s*/dev/null")))
 
@@ -192,6 +242,133 @@ def has_key(node, key):
     if isinstance(node, list):
         return any(has_key(v, key) for v in node)
     return False
+
+
+def guard_lines(run):
+    """A run: as guards read it: continuations joined, whitespace collapsed,
+    blank and comment-only lines dropped."""
+    out = []
+    for line in re.sub(r"\\\n\s*", " ", run).splitlines():
+        line = " ".join(line.split())
+        if line and not line.startswith("#"):
+            out.append(line)
+    return out
+
+
+def first_missing(run, required):
+    """The first required line not found, in order, in run; None when all are."""
+    lines, i = guard_lines(run), 0
+    for req in required:
+        while i < len(lines) and lines[i] != req:
+            i += 1
+        if i == len(lines):
+            return req
+        i += 1
+    return None
+
+
+def is_agent(step):
+    return str(step.get("uses", "")).split("@")[0] == AGENT_ACTION
+
+
+def guard_step(steps, lo, hi, marker, required, where, what, find):
+    """The first step in steps[lo:hi] whose run: names marker must hold the
+    required lines; no such step, or a line missing, is a finding."""
+    for i in range(max(lo, 0), min(hi, len(steps))):
+        run = steps[i].get("run")
+        if run is not None and marker in " ".join(str(run).split()):
+            miss = first_missing(str(run), required)
+            if miss:
+                find("guards", "%s.steps[%d]" % (where, i),
+                     "the %s step is missing the line: %s" % (what, miss))
+            return
+    find("guards", where, "no %s step: a run: calling %s must be there" % (what, marker))
+
+
+def check_guards(jobs, find):
+    def steps_of(job):
+        return [s for s in (job.get("steps") or []) if isinstance(s, dict)]
+
+    prep = jobs.get("prepare")
+    psteps = steps_of(prep) if isinstance(prep, dict) else []
+    if not psteps or "run" not in psteps[0]:
+        find("guards", "jobs.prepare.steps[0]", "prepare's first step must be the run: that "
+             "refuses a dispatch off the default branch and an unpinned PRODUCTIZER_SHA, "
+             "before anything is checked out")
+    else:
+        miss = first_missing(str(psteps[0]["run"]), PIN_GUARD)
+        if miss:
+            find("guards", "jobs.prepare.steps[0]",
+                 "the refusal step is missing the line: %s" % miss)
+
+    for jname, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        steps, where = steps_of(job), "jobs.%s" % jname
+        agent_idx = next((i for i, s in enumerate(steps) if is_agent(s)), None)
+        if agent_idx is not None:
+            args_idx = next((i for i, s in enumerate(steps) if s.get("id") == "args"), None)
+            if args_idx is None or args_idx > agent_idx or "run" not in steps[args_idx]:
+                find("guards", where, "no run: step with id args before the agent action: "
+                     "the agent's flags must pass build-dispatch.sh agent-args first")
+                args_idx = -1
+            else:
+                miss = first_missing(str(steps[args_idx]["run"]), ARGS_GUARD)
+                if miss:
+                    find("guards", "%s.steps[%d]" % (where, args_idx),
+                         "the args step is missing the line: %s" % miss)
+            cargs = " ".join(str((steps[agent_idx].get("with") or {}).get("claude_args")
+                                 or "").split())
+            if ARGS_REF not in cargs:
+                find("guards", "%s.steps[%d].with.claude_args" % (where, agent_idx),
+                     "the agent's claude_args must read %s, the flags agent-args checked"
+                     % ARGS_REF)
+            guard_step(steps, args_idx + 1, agent_idx, "stash-git", STASH_GUARD,
+                       where, "stash-git (between the args step and the agent)", find)
+            guard_step(steps, agent_idx + 1, len(steps), " capture ", CAPTURE_GUARD,
+                       where, "capture (after the agent)", find)
+        if write_perms(job.get("permissions")):
+            users = [i for i, s in enumerate(steps) if STAGED_TOOLS in str(s.get("run", ""))]
+            vidx = next((i for i, s in enumerate(steps)
+                         if VERIFY_GIT + " rev-parse HEAD" in " ".join(str(s.get("run", "")).split())),
+                        None)
+            if vidx is None:
+                if users:
+                    find("guards", where, "a write job runs the staged productizer scripts, "
+                         "but no step first checks the tools checkout is PRODUCTIZER_SHA")
+                continue
+            miss = first_missing(str(steps[vidx]["run"]), VERIFY_GUARD)
+            if miss:
+                find("guards", "%s.steps[%d]" % (where, vidx),
+                     "the tools-verification step is missing the line: %s" % miss)
+            early = [i for i in users if i < vidx]
+            if early:
+                find("guards", "%s.steps[%d]" % (where, early[0]), "runs the staged "
+                     "productizer scripts before the step that verifies them")
+
+
+def check_tools_pin(doc, find):
+    env = doc.get("env")
+    env = env if isinstance(env, dict) else {}
+    sha, repo = env.get("PRODUCTIZER_SHA"), env.get("PRODUCTIZER_REPO", "<owner>/productizer")
+    if not isinstance(sha, str) or not SHA_RX.fullmatch(sha):
+        find("tools-pin", "env.PRODUCTIZER_SHA", "must be a quoted string of 40 lower-case "
+             "hex digits - the all-zero placeholder, refused at run time, or the full commit "
+             "id of the productizer release you reviewed (git ls-remote https://github.com/%s "
+             "'refs/tags/vX.Y.Z^{}'); found %r" % (repo, sha))
+    for jname, job in (doc.get("jobs") or {}).items():
+        if not isinstance(job, dict):
+            continue
+        for i, s in enumerate(job.get("steps") or []):
+            if not isinstance(s, dict) or str(s.get("uses", "")).split("@")[0] != "actions/checkout":
+                continue
+            w = s.get("with") or {}
+            if "PRODUCTIZER_REPO" in str(w.get("repository", "")) and \
+                    " ".join(str(w.get("ref", "")).split()) != TOOLS_REF:
+                find("tools-pin", "jobs.%s.steps[%d].with.ref" % (jname, i),
+                     "the productizer tools checkout must use ref: %s; found %r"
+                     % (TOOLS_REF, w.get("ref")))
+    return isinstance(sha, str) and sha == ZERO_SHA
 
 
 def check(path):
@@ -318,6 +495,9 @@ def check(path):
     if has_key(doc, "continue-on-error"):
         find("swallow", "file", "continue-on-error turns a failed step green")
 
+    check_guards(jobs, find)
+    placeholder = check_tools_pin(doc, find)
+
     for word in BYPASS_WORDS:
         if any(word in x for x in strings(doc)):
             find("no-bypass", "file", "%s appears outside a comment; the template never "
@@ -344,16 +524,21 @@ def check(path):
                  "and be drawn only from %s; found %s"
                  % (", ".join(PERMS_OPTIONS), ", ".join(str(o) for o in opts) or "none"))
 
-    return findings
+    return findings, placeholder
 
 
 ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "deny-bash",
               "post-agent-env", "write-job-no-repo-code", "pinned", "run-injection", "swallow", "no-bypass",
-              "perms-input")
+              "perms-input", "tools-pin", "guards")
 
 
 def report(path):
-    findings = check(path)
+    findings, placeholder = check(path)
+    if placeholder:
+        print("check-ci-template: note: PRODUCTIZER_SHA is the all-zero placeholder, which the "
+              "workflow refuses at run time. Pin it before the first dispatch: git ls-remote "
+              "https://github.com/<PRODUCTIZER_REPO> 'refs/tags/vX.Y.Z^{}' prints the commit id "
+              "of release vX.Y.Z.")
     failed = set(f.split()[0] for f in findings)
     held = len(ASSERTIONS) - len(failed)
     if findings:
@@ -437,7 +622,15 @@ def selftest():
           "write job runs no repository code beyond what its run: text names - an "
           "interpreter a staged script starts, or a command spelled through a variable, "
           "is not seen by write-job-no-repo-code; that the $RUNNER_TEMP copy really is "
-          "the pinned commit (the template verifies that at run time, not this checker).")
+          "the pinned commit (the template verifies that at run time, not this checker); "
+          "that PRODUCTIZER_SHA names a productizer release (tools-pin checks its shape, "
+          "not what it points at); that a guard line is reachable - guards match the "
+          "template's lines in order, not its control flow, so a line after an earlier "
+          "exit 0 still counts; that GitHub runs the guards as written or parses the "
+          "claude_args heredoc agent-args appends (build-dispatch.sh self-tests "
+          "agent-args itself); an expression interpolated into a script that is not a "
+          "run: - an actions/github-script `script:`, say - which run-injection does not "
+          "read.")
     if got != doc:
         print("FAIL: reached and documented exit codes differ")
         return 1
@@ -452,7 +645,7 @@ def main(argv):
     if args in (["-h"], ["--help"]):
         print(__doc__.strip())
         return 0
-    if args == ["--selftest"] or args == ["--self-test"]:
+    if args in (["--selftest"], ["--self-test"]):
         return selftest()
     if len(args) > 1 or (args and args[0].startswith("-")):
         die("usage: check-ci-template.py [PATH] | --selftest | --version | --help")

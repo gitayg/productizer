@@ -97,7 +97,7 @@ left, and offer a second pass scoped to a named area.
 ## How to write an inferred requirement
 
 Standard EARS (`references/ears.md`), with a marker line beneath it — the same
-place `Superseded by R58.` and `Withdrawn.` go. The marker carries the status
+place `Superseded by R0.` and `Withdrawn.` go. The marker carries the status
 and the provenance in one line:
 
 ```

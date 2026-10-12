@@ -2207,6 +2207,7 @@ Next requirement id
   Superseded by R3. The classification became four-valued.
 """
 
+# <!-- EXAMPLE:BEGIN -->
 STATUS_SPEC = """# Widget — living spec
 
 Next requirement id
@@ -2246,6 +2247,7 @@ Requirements
 |---|---|
 | R99 | `test_missing` |
 """
+# <!-- EXAMPLE:END -->
 
 NOT_A_SPEC = "# Some other document\n\nJust prose.\n"
 
@@ -2505,9 +2507,11 @@ def self_test():
     constitution = run("c.md", VALID_CONSTITUTION)
     spec = build_document("s.md", VALID_SPEC, "spec")
     check_spec(spec)
+    # <!-- EXAMPLE:BEGIN -->
     enforced = VALID_CONSTITUTION.replace(
         "Checked by\n: `run-checks.sh` fail-closed paths.",
         "Checked by\n: `run-checks.sh`.\n\nEnforced by\n: R99.")
+    # <!-- EXAMPLE:END -->
     doc = run("c2.md", enforced, spec=spec)
     expect("enforced-unknown", doc, ["PRINCIPLE_ENFORCED_UNKNOWN"])
     if constitution.problems:

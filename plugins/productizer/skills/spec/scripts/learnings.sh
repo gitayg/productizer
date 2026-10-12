@@ -354,7 +354,9 @@ validate_l_id() {
 
 validate_r_id() {
   case "$1" in
+    # <!-- EXAMPLE:BEGIN -->
     R0|R0[0-9]*) die_usage "$2 $1: ids carry no leading zero; R7 is not R07" ;;
+    # <!-- EXAMPLE:END -->
     R[1-9]*) case "${1#R}" in *[!0-9]*) die_usage "$2 $1 is not R<n>" ;; esac ;;
     *) die_usage "$2 $1 is not R<n>" ;;
   esac

@@ -7,7 +7,7 @@ allowed-tools: Bash Read
 
 # Productizer — what you can type
 
-!`D="${CLAUDE_PLUGIN_ROOT}"; [ -n "$D" ] && [ -d "$D" ] || D="$(git rev-parse --show-toplevel 2>/dev/null)/plugins/productizer"; S="$D/skills/help/scripts/list-commands.sh"; if [ ! -f "$S" ]; then echo "cannot find list-commands.sh under the plugin - this list would be from memory, and memory is what it exists to avoid."; exit 0; fi; rc=0; bash "$S" --plugin "$D" || rc=$?; [ "$rc" -eq 0 ] || echo "  (list-commands.sh exited $rc - 3: no skills/ or commands/ found, 4: an entry could not be read)"`
+!`D="${CLAUDE_PLUGIN_ROOT}"; [ -n "$D" ] && [ -d "$D" ] || D="$(git rev-parse --show-toplevel)/plugins/productizer"; S="$D/skills/help/scripts/list-commands.sh"; if [ ! -f "$S" ]; then echo "cannot find list-commands.sh under the plugin - this list would be from memory, and memory is what it exists to avoid."; exit 0; fi; rc=0; bash "$S" --plugin "$D" || rc=$?; [ "$rc" -eq 0 ] || echo "  (list-commands.sh exited $rc - 3: no skills/ or commands/ found, 4: an entry could not be read)"`
 
 ## Reading that
 

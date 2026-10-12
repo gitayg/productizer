@@ -117,11 +117,14 @@ The state is a directory of files with a fixed header, so anything can count it
 without parsing the spec: one glob, one fixed-string match, no network.
 
 ```bash
-# how many are waiting
-grep -lxF 'Status: pending' .claude/productizer/rulings/D*.md 2>/dev/null | wc -l
+# how many are waiting - only when the directory exists, since none is not 0
+[ -d .claude/productizer/rulings ] \
+  && find .claude/productizer/rulings -maxdepth 1 -type f -name 'D*.md' \
+       -exec grep -lxF 'Status: pending' {} + | wc -l
 
 # which ones, ids only
-grep -lxF 'Status: pending' .claude/productizer/rulings/D*.md 2>/dev/null \
+find .claude/productizer/rulings -maxdepth 1 -type f -name 'D*.md' \
+    -exec grep -lxF 'Status: pending' {} + \
   | sed -n 's#^.*/\(D[0-9][0-9]*\)[-.].*#\1#p' | head -5 | paste -sd, -
 ```
 
@@ -138,8 +141,9 @@ Contract for anything reading these files — the session-start hook included:
   never raised one; a directory that cannot be read is unknown. Reporting either
   as `0 pending` states "nothing is waiting" as a fact, which is the one wrong
   answer that looks healthy. In `bash`, an unmatched glob reaches `grep` as a
-  literal path and the error is suppressed, so distinguish the cases with a
-  directory test rather than by trusting the count.
+  literal path, and hiding the error that follows hides an unreadable directory
+  with it; so the examples above use `find`, never suppress stderr, and
+  distinguish the cases with a directory test rather than by trusting the count.
 - **Staleness is derived, never stored.** Age comes from the `Raised:` line. A
   stored `stalled` flag has to be updated by someone, and nobody will.
 - **The count is only as good as step 2 above.** A contradiction stopped in
