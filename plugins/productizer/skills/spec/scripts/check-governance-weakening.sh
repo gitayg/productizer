@@ -682,7 +682,7 @@ PY
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: the cases assert an exit code and ONE substring of the output. A case that reached the right code and named the right atom while getting a second atom wrong is invisible here and is read off its captured output by hand. Nor does any case assert the WORDING of the argument for advisory severity - that is prose in this header, and prose is not measured.\n'

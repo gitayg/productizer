@@ -192,9 +192,13 @@ guards against is not drafting from weak evidence — that is the point of the t
 4. **Draft up to thirty inferred requirements**, in the order
    `templates/import.md` sets: test names, then observable surface, then error
    paths, then config-gated behaviour. Every one carries a citation.
-5. **Write the refusals down as gaps**, in the same pass. The list of what could
-   not be inferred is worth more than the draft, because it is the list of
-   questions only a person can answer.
+5. **Write the refusals down as gaps**, in the same pass - the same commit as
+   the draft. The list of what could not be inferred is worth more than the
+   draft, because it is the list of questions only a person can answer. A
+   backlog line naming `Stage 0c` counts as a record of the import only in the
+   commit that drafted the requirements it names (`check-import-marking.sh`
+   1.2): anyone may append a backlog line later, so a later one is not
+   evidence.
 6. **Raise contested behaviour under *Areas of concern***, not as a corrected
    requirement.
 7. **Confirm in batches of about ten**, in the session, by id.

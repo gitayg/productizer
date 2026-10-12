@@ -68,7 +68,7 @@ if [ "$SELFTEST" -eq 1 ]; then
     CODES="$CODES$got"$'\n'
     if [ "$got" -eq "$want" ]; then record "$id" 1 "$what (exit $got)"; else record "$id" 0 "$what (wanted exit $want, got $got)"; fi
   }
-  has_line() { printf '%s\n' "$OUT" | grep -Eq "$1"; }
+  has_line() { grep -Eq "$1" <<<"$OUT"; }
 
   BOTH="$SCRATCH/both"
   mkdir -p "$BOTH/skills/alpha" "$BOTH/commands"
@@ -78,7 +78,7 @@ if [ "$SELFTEST" -eq 1 ]; then
   drive both-sources-listed 0 "a tree with one skill and one command exits 0" --plugin "$BOTH"
   if has_line '^  skill +/productizer:alpha +\[a\]$'; then record skill-row-labelled-skill 1 "the skill's row carries the skill label and its own argument-hint"; else record skill-row-labelled-skill 0 "the skill's row carries the skill label and its own argument-hint"; fi
   if has_line '^  command +/productizer:beta +\[--b\] +\[auto\]$'; then record command-row-labelled-command 1 "the command's row carries the command label, its file name and its own argument-hint"; else record command-row-labelled-command 0 "the command's row carries the command label, its file name and its own argument-hint"; fi
-  if has_line '^      Beta command reports a thing\.$' && ! has_line 'must not be read' && printf '%s\n' "$OUT" | grep -A1 -E '^  command +/productizer:body-only' | grep -q '(no description)'; then record command-description-from-frontmatter 1 "the command's description comes from its frontmatter block, not its body"; else record command-description-from-frontmatter 0 "the command's description comes from its frontmatter block, not its body"; fi
+  if has_line '^      Beta command reports a thing\.$' && ! has_line 'must not be read' && grep -q '(no description)' <<<"$(grep -A1 -E '^  command +/productizer:body-only' <<<"$OUT")"; then record command-description-from-frontmatter 1 "the command's description comes from its frontmatter block, not its body"; else record command-description-from-frontmatter 0 "the command's description comes from its frontmatter block, not its body"; fi
   if has_line 'command +/productizer:alpha' || has_line 'skill +/productizer:beta'; then record no-cross-labelling 0 "neither row carries the other source's label"; else record no-cross-labelling 1 "neither row carries the other source's label"; fi
   if has_line '^  1 skill\(s\) from .*, 2 command\(s\) from '; then record summary-counts-both 1 "the summary counts each source separately"; else record summary-counts-both 0 "the summary counts each source separately"; fi
 
@@ -97,7 +97,7 @@ if [ "$SELFTEST" -eq 1 ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/ *$//')"
   MISSING=""
   for want in 0 2 3 4; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 2 3 4\n' "$REACHED"
   [ -z "$MISSING" ] || echo "list-commands: documented exit code(s) never reached by any case:$MISSING" >&2

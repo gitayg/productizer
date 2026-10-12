@@ -677,7 +677,7 @@ SPEC
     "$((DRIVEN + 1))" "$FAILED"
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   for want in 0 1 2; do
-    printf '%b' "$CODES" | grep -qx "$want" ||
+    grep -qx "$want" <<<"$(printf '%b' "$CODES")" ||
       printf '  R39.b: documented exit code %s was never driven by any case.\n' "$want" >&2
   done
   if [ "$FAILED" -ne 0 ]; then
@@ -776,7 +776,7 @@ esac
   die_unmeasured "the spec file list came back empty at exit 0. Nothing to read is not nothing wrong."
 
 # The declared spec is the anchor of this check's history reading - see above.
-printf '%s\n' "$SPECRELS" | grep -qxF "$SPECREL" ||
+grep -qxF "$SPECREL" <<<"$SPECRELS" ||
   die_unmeasured "the spec file list does not include $SPECREL. A spec moved wholesale to another path takes its history with it, and every requirement older than the move would compare against the move rather than against what was agreed."
 
 SPECLIST="$(printf '%s' "$SPECRELS" | tr '\n' ' ' | sed 's/ $//; s/ /, /g')"

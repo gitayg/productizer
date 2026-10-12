@@ -867,7 +867,7 @@ printf '  cases driven: %d. Cases that did not hold: %d\n' "$CASES" "$FAILED"
 REACHED="$(printf '%s' "$CODES_SEEN" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
 MISSING=""
 for want in 0 1 2; do
-  printf '%s' "$CODES_SEEN" | grep -qx "$want" || MISSING="$MISSING $want"
+  grep -qx "$want" <<<"$CODES_SEEN" || MISSING="$MISSING $want"
 done
 printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
 

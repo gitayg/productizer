@@ -566,7 +566,7 @@ DUP_POLICY
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2 3; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
   printf '    NOT ASSERTED: --calibrate and --base are not driven here, so neither the history aggregation nor the SIZE measurement is covered by a case - only the `size: unmeasured` wording for a change set with no diff is. Both need a real git history, and a self-test that built one would be measuring the fixture it had just written. Their figures in references/risk-and-calibration.md come from runs against this repository, including the verified fact that --no-renames yields BOTH paths of a move.\n'

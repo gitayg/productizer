@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# record-classification.sh [--version] [--help] --intent ID --classification VALUE
+# record-classification.sh [--version] [--help] [--selftest]
+#                          --intent ID --classification VALUE
 #                          [--root DIR] [--spec-path PATH] [--store DIR]
 #
 # Writes the provenance record for one intake classification: the spec commit
@@ -71,7 +72,7 @@ set -euo pipefail
 # and case folding all follow the locale otherwise.
 export LC_ALL=C
 
-VERSION="record-classification 1.0"
+VERSION="record-classification 1.1"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LIB="$HERE/classification-record.py"
@@ -81,18 +82,23 @@ SPEC_REL=".claude/productizer/spec.md"
 STORE_REL=".claude/productizer/classifications"
 INTENT=""
 CLASSIFICATION=""
+SELFTEST=""
 
 usage() {
   printf 'usage: record-classification.sh --intent ID --classification VALUE\n'
   printf '                                [--root DIR] [--spec-path PATH] [--store DIR]\n'
+  printf '       record-classification.sh --selftest\n'
   printf '  --intent ID          the tracker key or identifier of the intent (#123, PROJ-123)\n'
   printf '  --classification V   exactly one of extend, refine, duplicate, contradict\n'
   printf '  --root DIR           the repo work tree. Defaults to the git top level,\n'
   printf '                       never to the working directory.\n'
-  printf '  --spec-path PATH     spec location relative to the root\n'
-  printf '                       (default .claude/productizer/spec.md)\n'
-  printf '  --store DIR          record store relative to the root\n'
-  printf '                       (default .claude/productizer/classifications)\n'
+  printf '  --spec-path PATH     spec location relative to the root, NOT to the working\n'
+  printf '                       directory (default .claude/productizer/spec.md). An\n'
+  printf '                       absolute path must lie inside the root.\n'
+  printf '  --store DIR          record store relative to the root, NOT to the working\n'
+  printf '                       directory (default .claude/productizer/classifications).\n'
+  printf '                       An absolute path is used as given.\n'
+  printf '  --selftest           run the cases in throwaway repositories and exit\n'
 }
 
 die_unmeasured() { printf 'record-classification: %s\n' "$1" >&2; exit 2; }
@@ -101,6 +107,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
+    --selftest|--self-test) SELFTEST=1; shift ;;
     --intent) [ "$#" -ge 2 ] || die_unmeasured "--intent needs an identifier"; INTENT="$2"; shift 2 ;;
     --intent=*) INTENT="${1#--intent=}"; shift ;;
     --classification) [ "$#" -ge 2 ] || die_unmeasured "--classification needs a value"; CLASSIFICATION="$2"; shift 2 ;;
@@ -115,6 +122,176 @@ while [ "$#" -gt 0 ]; do
     *) printf 'record-classification: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# --------------------------------------------------------------- --selftest
+#
+# Every case is a throwaway repository under one temporary directory, removed
+# on every exit path. The writer is run from a working directory OUTSIDE the
+# repository it is pointed at, because that is the layout B132 was measured in:
+# a record printed as the clone's and written into whatever repository the
+# caller stood in. A case run from inside the root cannot tell a path joined to
+# the root from one resolved against the working directory - they are the same
+# directory there.
+if [ -n "$SELFTEST" ]; then
+  command -v git >/dev/null ||
+    die_unmeasured "git is not on PATH, and every case in this self-test is a git repository"
+  SELF="$HERE/$(basename "$0")"
+  T="$(mktemp -d "${TMPDIR:-/tmp}/record-classification-selftest.XXXXXX")" ||
+    die_unmeasured "cannot create a temporary directory to build the self-test corpus in"
+  trap 'rm -rf "$T"' EXIT HUP INT TERM
+  G() { git -c user.email=selftest@example.invalid -c user.name=selftest "$@"; }
+
+  # fixture <dir> - a committed repository with a two-requirement spec.
+  fixture() {
+    mkdir -p "$1/.claude/productizer"
+    printf '# Fixture spec\n\n## Requirements\n\n- **R1** - the lifecycle shall do the first thing.\n- **R2** - the lifecycle shall do the second thing.\n' \
+      > "$1/.claude/productizer/spec.md"
+    G init -q "$1"
+    G -C "$1" add -A
+    G -C "$1" commit -q -m "fixture spec"
+  }
+
+  CASES=0; FAILED=0; CODES=""
+  # check <name> <expected exit> <observed exit> <file holding the sentence> <sentence> <what>
+  check() {
+    CASES=$((CASES + 1))
+    CODES="$CODES$3
+"
+    if [ "$3" = "$2" ] && grep -qF -- "$5" "$4"; then
+      verdict="held"
+    else
+      verdict="NOT HELD"; FAILED=$((FAILED + 1))
+    fi
+    printf '    %-28s expected %s  got %s  %-8s %s\n' "$1" "$2" "$3" "$verdict" "$6"
+  }
+  # absent <name> <path> <what> - a path that must NOT exist after a case.
+  absent() {
+    CASES=$((CASES + 1))
+    if [ -e "$2" ]; then
+      verdict="NOT HELD"; FAILED=$((FAILED + 1))
+    else
+      verdict="held"
+    fi
+    printf '    %-28s %-28s %-8s %s\n' "$1" "absent" "$verdict" "$3"
+  }
+
+  printf '  selftest: %s\n' "$VERSION"
+  REPO="$T/clone"; fixture "$REPO"
+  OUT="$T/elsewhere"; mkdir -p "$OUT"
+  STORE_DEF=".claude/productizer/classifications"
+
+  # 1. B132: run from outside the root. The record lands in the root's store.
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "$REPO" --intent 1 --classification extend ) \
+    > "$T/c1.out" 2> "$T/c1.err" || got=$?
+  : > "$T/c1.where"
+  [ -f "$REPO/$STORE_DEF/1.md" ] && printf 'written under the root\n' >> "$T/c1.where"
+  [ "$(tail -n 1 "$T/c1.out")" = "$STORE_DEF/1.md" ] && printf 'printed exactly the path written\n' >> "$T/c1.where"
+  check outside-root-default-store 0 "$got" "$T/c1.where" "written under the root" \
+    "run from outside --root, the record is written in the root's store"
+  check outside-root-prints-path 0 "$got" "$T/c1.where" "printed exactly the path written" \
+    "and its last line of stdout is that path, repo-relative"
+  absent outside-root-cwd-untouched "$OUT/.claude" \
+    "and nothing is written relative to the working directory"
+
+  # 2. A decoy store in the working directory holds the same intent. The
+  # one-per-intent guard must read the root's store, not the decoy.
+  REPO2="$T/clone2"; fixture "$REPO2"
+  DECOY="$T/decoy"; mkdir -p "$DECOY/$STORE_DEF"
+  printf 'Intent: 1\n' > "$DECOY/$STORE_DEF/1.md"
+  got=0
+  ( cd "$DECOY" && bash "$SELF" --root "$REPO2" --intent 1 --classification refine ) \
+    > "$T/c2.out" 2> "$T/c2.err" || got=$?
+  check guard-reads-root-store 0 "$got" "$REPO2/$STORE_DEF/1.md" "Classification: refine" \
+    "a record of the same intent in the working directory is not this root's record"
+
+  # 3. The same intent again, against the root - exactly one per intent.
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "$REPO" --intent 1 --classification refine ) \
+    > "$T/c3.out" 2> "$T/c3.err" || got=$?
+  check same-intent-refused 1 "$got" "$T/c3.err" "REFUSED: this intent is already classified" \
+    "a second classification of the same intent is refused"
+
+  # 4. A relative --store is joined to the root, not the working directory.
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "$REPO" --store "alt-store" --intent 2 --classification extend ) \
+    > "$T/c4.out" 2> "$T/c4.err" || got=$?
+  [ -f "$REPO/alt-store/2.md" ] && printf 'relative store under the root\n' >> "$T/c4.out"
+  check relative-store-under-root 0 "$got" "$T/c4.out" "relative store under the root" \
+    "--store alt-store from outside the root writes ROOT/alt-store"
+  absent relative-store-cwd-untouched "$OUT/alt-store" \
+    "and not ./alt-store"
+
+  # 5. An absolute --store is used as given, and printed as written.
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "$REPO" --store "$T/abs-store" --intent 3 --classification extend ) \
+    > "$T/c5.out" 2> "$T/c5.err" || got=$?
+  check absolute-store-honoured 0 "$got" "$T/c5.out" "$T/abs-store/3.md" \
+    "an absolute --store is written and printed as that absolute path"
+
+  # 6. A relative --root from a sibling directory.
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "../clone" --intent 4 --classification duplicate ) \
+    > "$T/c6.out" 2> "$T/c6.err" || got=$?
+  check relative-root 0 "$got" "$REPO/$STORE_DEF/4.md" "Classification: duplicate" \
+    "a relative --root resolves against the working directory once, and the store under it"
+
+  # 7. An absolute --spec-path inside the root is the same spec, recorded by
+  # its repo-relative path - the one the check rehashes at the cited commit.
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "$REPO" --spec-path "$REPO/.claude/productizer/spec.md" \
+      --intent 5 --classification extend ) > "$T/c7.out" 2> "$T/c7.err" || got=$?
+  check absolute-spec-inside-root 0 "$got" "$REPO/$STORE_DEF/5.md" "Spec path: .claude/productizer/spec.md" \
+    "an absolute --spec-path inside the root is recorded repo-relative"
+
+  # 8. An absolute --spec-path outside the root has no commit to cite.
+  cp "$REPO/.claude/productizer/spec.md" "$T/loose-spec.md"
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "$REPO" --spec-path "$T/loose-spec.md" \
+      --intent 6 --classification extend ) > "$T/c8.out" 2> "$T/c8.err" || got=$?
+  check absolute-spec-outside-root 2 "$got" "$T/c8.err" "is outside the root" \
+    "a spec outside the repository is refused - no commit of this root can be cited for it"
+
+  # 9. A relative --spec-path that exists only relative to the working
+  # directory is NOT found: it is joined to the root.
+  mkdir -p "$OUT/specs"; cp "$REPO/.claude/productizer/spec.md" "$OUT/specs/spec.md"
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "$REPO" --spec-path "specs/spec.md" \
+      --intent 7 --classification extend ) > "$T/c9.out" 2> "$T/c9.err" || got=$?
+  check relative-spec-under-root 2 "$got" "$T/c9.err" "specs/spec.md does not exist under the given root" \
+    "a relative --spec-path is read under the root, never the working directory"
+
+  # 10. Uncommitted edits to the spec: no hash a check could ever verify.
+  REPO3="$T/clone3"; fixture "$REPO3"
+  printf -- '- **R3** - an uncommitted line.\n' >> "$REPO3/.claude/productizer/spec.md"
+  got=0
+  ( cd "$OUT" && bash "$SELF" --root "$REPO3" --intent 8 --classification extend ) \
+    > "$T/c10.out" 2> "$T/c10.err" || got=$?
+  check spec-differs-from-head 2 "$got" "$T/c10.err" "differs from the spec at HEAD" \
+    "a classification against uncommitted edits is refused"
+  absent spec-differs-wrote-nothing "$REPO3/$STORE_DEF" "and nothing was written"
+
+  # 11. Bad usage.
+  got=0
+  bash "$SELF" --not-a-real-option > "$T/c11.out" 2> "$T/c11.err" || got=$?
+  check unknown-option 2 "$got" "$T/c11.err" "unknown option --not-a-real-option" \
+    "bad usage is refused, never answered"
+
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  DOCUMENTED="$(awk '/^# EXIT CODES/ { on = 1; next } on && /^[^#]/ { exit } on && /^#   [0-9]  / { print $2 }' "$SELF" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  printf '    exit codes reached: %s   documented: %s\n' "$REACHED" "$DOCUMENTED"
+  printf '    NOT ASSERTED: an unreadable spec or store file (needs a non-root user to make a file unreadable), a repository with no HEAD, two intent ids that slug to one filename, python3 absent, and an interrupted run leaving the store untouched.\n'
+  if [ "$FAILED" -ne 0 ]; then
+    printf 'FAIL: %d of %d selftest case(s) did not produce the exit code and the sentence they declare.\n' "$FAILED" "$CASES" >&2
+    exit 1
+  fi
+  if [ "$REACHED" != "$DOCUMENTED" ]; then
+    printf 'FAIL: exit codes reached (%s) differ from those documented in the header (%s).\n' "$REACHED" "$DOCUMENTED" >&2
+    exit 1
+  fi
+  printf '  selftest: %d of %d case(s) held\n' "$CASES" "$CASES"
+  exit 0
+fi
 
 [ -n "$INTENT" ] || die_unmeasured "--intent is required. A record with no intent belongs to nothing."
 [ -n "$CLASSIFICATION" ] || die_unmeasured "--classification is required, and must be one of extend, refine, duplicate, contradict."
@@ -138,6 +315,29 @@ if [ -z "$ROOT" ]; then
   fi
 fi
 [ -d "$ROOT" ] || die_unmeasured "--root $ROOT is not a directory"
+
+# EVERY PATH OPTION IS READ UNDER THE ROOT, never under the working directory.
+# A relative --spec-path is joined to the root below. An absolute one is
+# honoured only if it lies inside the root, and is then rewritten to its
+# repo-relative spelling: the record's `Spec path:` line and `git show
+# COMMIT:PATH` both need that spelling, and a spec outside the repository has
+# no commit of this root that could be cited for it. It used to be joined to
+# the root unconditionally, so a real, readable absolute path was refused as
+# "does not exist" - a refusal whose stated reason was false.
+case "$SPEC_REL" in
+  /*)
+    ROOT_ABS="$(cd "$ROOT" && pwd -P)"
+    spec_dir="$(dirname "$SPEC_REL")"
+    spec_abs="$SPEC_REL"
+    if [ -d "$spec_dir" ]; then
+      spec_abs="$(cd "$spec_dir" && pwd -P)/$(basename "$SPEC_REL")"
+    fi
+    case "$spec_abs" in
+      "$ROOT_ABS"/*) SPEC_REL="${spec_abs#"$ROOT_ABS"/}" ;;
+      *) die_unmeasured "--spec-path $SPEC_REL is outside the root $ROOT. A record cites a commit of the root and the check rehashes the spec at that commit, so a spec outside it could never be verified. Nothing was written." ;;
+    esac
+    ;;
+esac
 
 SPEC="$ROOT/$SPEC_REL"
 # AN ABSOLUTE --store IS HONOURED AS ABSOLUTE, and the path printed is the path
@@ -218,7 +418,17 @@ RECORDED="$(python3 "$LIB" --today)"
 python3 "$LIB" --active-ids "$SPEC" > "$WORK/ids"
 ID_COUNT="$(awk 'END { print NR }' "$WORK/ids")"
 
-DEST="$(show_path "$STORE/$SLUG.md")"
+# THE PATH WRITTEN IS `$STORE/$SLUG.md`, and show_path is used only to PRINT
+# it. B132: this used to be `DEST="$(show_path ...)"`, so a store under the
+# root was shortened to a repo-relative path and then resolved against the
+# WORKING DIRECTORY by the existence test and the `mv` below. Measured: run
+# from one repository with --root a clean clone, it hashed the clone's spec,
+# printed the clone's store path, and wrote the record into the repository the
+# caller stood in - the clone's store stayed empty, and the one-per-intent
+# guard read the wrong store too. Run from a directory with no such store it
+# failed in `mv` with exit 1, the code this contract reserves for "already
+# classified".
+DEST="$STORE/$SLUG.md"
 
 # --- exactly one classification per intent --------------------------------
 if [ -e "$DEST" ]; then

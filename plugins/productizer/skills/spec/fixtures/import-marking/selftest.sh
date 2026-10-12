@@ -43,12 +43,31 @@
 #                              MESSAGE. Marker-free detection with the spec
 #                              itself silent - exit 1, four findings.
 #   5 + the backlog            5 again, with `backlog/with-stage-0c.md` in
-#                              place. The stage is named in the backlog and
-#                              nowhere else, which is the evidence step 5 of
-#                              the import procedure leaves behind - so the
-#                              import is on the record, and the cohort cannot
-#                              be resolved from it. Exit 2, and it prints as
-#                              COHORT UNRESOLVED, not as "no import".
+#                              the work tree and never committed. Under 1.1
+#                              this was exit 2, COHORT UNRESOLVED: a backlog
+#                              line was evidence by itself, so ANY appended
+#                              row could turn this blocking check from 0 into
+#                              2. Since 1.2 the backlog as it stands is not
+#                              evidence (R73's rule) - exit 0.
+#   5 + a later backlog append the same backlog, committed AFTER the spec in a
+#                              commit that drafts nothing. Exit 0.
+#   1 + an append naming R2    a never-imported spec, then a backlog row
+#                              reading `Stage 0c drafted R2`. Under 1.1 that
+#                              made R2 a finding, exit 1. Now exit 0, and the
+#                              note says the line was seen and not counted.
+#   5 + the backlog, one commit the spec and the backlog committed TOGETHER:
+#                              the commit that drafted R1-R4 also wrote a
+#                              backlog line naming the stage, which is step 5
+#                              done in the pass it says. The cohort RESOLVES
+#                              from that commit - exit 1, four findings.
+#                              Under 1.1 this was exit 2.
+#   7-import-stage-in-...md    5 with `Stage 0c` named in the spec's prose on
+#                              a line holding no id. An import on the record
+#                              and no cohort - exit 2, COHORT UNRESOLVED.
+#   1 + backlog, no git        a root that is not a git work tree, with a
+#                              backlog naming the stage. Whether an import
+#                              commit wrote it cannot be read - exit 2,
+#                              BACKLOG UNVERIFIED, never a quiet 0.
 #
 # EXIT CODES ARE THE CONTRACT.
 #
@@ -58,7 +77,7 @@
 #   2  could not run - no git, no check to test, no temporary directory
 set -euo pipefail
 
-VERSION="import-marking-selftest 1.0"
+VERSION="import-marking-selftest 1.1"
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 CHECK="$HERE/../../scripts/check-import-marking.sh"
@@ -96,9 +115,12 @@ CASES=0
 # Builds one throwaway repository and runs the check against it.
 #   $1 case name · $2 spec fixture · $3 commit message · $4 backlog fixture
 #   ("" for none) · $5 expected exit · $6 a line the output must contain
+#   $7 where the backlog goes: `worktree` (default, never committed),
+#   `with-spec` (in the commit that adds the spec), `later` (its own commit
+#   after it), or `no-git` (the root is not a git work tree at all)
 run_case() {
   name="$1"; fixture="$2"; message="$3"; backlog="$4"
-  want_exit="$5"; want_line="$6"
+  want_exit="$5"; want_line="$6"; how="${7:-worktree}"
   CASES=$((CASES + 1))
 
   repo="$WORK/$name"
@@ -106,11 +128,20 @@ run_case() {
   cp "$HERE/spec/$fixture" "$repo/.claude/productizer/spec.md"
   [ -n "$backlog" ] && cp "$HERE/backlog/$backlog" "$repo/.claude/productizer/backlog.md"
 
-  git -c init.defaultBranch=main init -q "$repo"
-  git -C "$repo" add .claude/productizer/spec.md
-  git -C "$repo" \
-    -c user.name=fixture -c user.email=fixture@example.invalid \
-    commit -q -m "$message"
+  if [ "$how" != no-git ]; then
+    git -c init.defaultBranch=main init -q "$repo"
+    git -C "$repo" add .claude/productizer/spec.md
+    [ "$how" = with-spec ] && git -C "$repo" add .claude/productizer/backlog.md
+    git -C "$repo" \
+      -c user.name=fixture -c user.email=fixture@example.invalid \
+      commit -q -m "$message"
+    if [ "$how" = later ]; then
+      git -C "$repo" add .claude/productizer/backlog.md
+      git -C "$repo" \
+        -c user.name=fixture -c user.email=fixture@example.invalid \
+        commit -q -m "append a backlog row"
+    fi
+  fi
 
   got_exit=0
   out="$(bash "$CHECK" --root "$repo" 2>&1)" || got_exit=$?
@@ -120,7 +151,7 @@ run_case() {
   # grep -q exits 1 when the line is absent, which is the answer, not an
   # error - `|| :` keeps `set -e` from killing the script before it can
   # report which case failed.
-  printf '%s\n' "$out" | grep -qF -- "$want_line" || ok=0
+  grep -qF -- "$want_line" <<<"$out" || ok=0
 
   if [ "$ok" = 1 ]; then
     printf 'ok    %-28s exit %s\n' "$name" "$got_exit"
@@ -172,9 +203,33 @@ run_case stage-in-the-commit 5-import-silent-in-the-spec.md \
   "Stage 0c: draft the spec from the existing repository" "" \
   1 "IMPORT MARKED NOTHING."
 
+# The backlog as it stands is not evidence: an appended row, committed or
+# not, cannot put an import on the record or name a requirement into a cohort.
 run_case stage-in-the-backlog 5-import-silent-in-the-spec.md \
   "draft the spec from the existing repository" with-stage-0c.md \
+  0 "NO IMPORT ON THE RECORD."
+
+run_case backlog-appended-later 5-import-silent-in-the-spec.md \
+  "draft the spec from the existing repository" with-stage-0c.md \
+  0 "NO IMPORT ON THE RECORD." later
+
+run_case backlog-append-names-id 1-never-imported.md \
+  "the founding spec, agreed one requirement at a time" append-names-an-id.md \
+  0 "1 line(s) of .claude/productizer/backlog.md name \`Stage 0c\` as it stands. A backlog line is not evidence of an import on its own" later
+
+# The commit that drafted the requirements wrote the backlog line in the same
+# pass: that commit is the evidence, and it names the cohort.
+run_case stage-in-the-import-commit 5-import-silent-in-the-spec.md \
+  "draft the spec from the existing repository" with-stage-0c.md \
+  1 "drafted it and named \`Stage 0c\` in .claude/productizer/backlog.md" with-spec
+
+run_case stage-in-the-spec-prose 7-import-stage-in-the-spec-prose.md \
+  "draft the spec from the existing repository" "" \
   2 "IMPORT ON THE RECORD, COHORT UNRESOLVED."
+
+run_case backlog-without-git 1-never-imported.md \
+  "unused: this root is never committed" with-stage-0c.md \
+  2 "BACKLOG UNVERIFIED." no-git
 
 printf '%d case(s), %d failure(s)\n' "$CASES" "$FAILURES"
 [ "$FAILURES" = 0 ] || exit 1

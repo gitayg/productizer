@@ -1391,7 +1391,7 @@ PLANTS
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 2 3 4; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 2 3 4\n' "$REACHED"
   printf '    NOT ASSERTED: the default catalogue. Every case above runs the fixture catalogue; whether a plant for a real check is the defect that check exists for is a judgement made in the catalogue, and its figures come from real runs. The undeclared-exit bucket is not driven.\n'

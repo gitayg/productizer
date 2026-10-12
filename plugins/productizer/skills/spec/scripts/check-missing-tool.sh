@@ -244,7 +244,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: one regression is driven, not one per assertion, so this says the six assertions can go red together and not that each of them can go red alone\n'

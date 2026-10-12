@@ -394,10 +394,9 @@ _badrow="$(awk -F'\t' '/^#/ || NF == 0 { next }
 # ---------------------------------------------------------------------------
 # --selftest - R39: THIS TOOL REACHES EACH EXIT CODE IT CAN RETURN, ON PURPOSE.
 #
-# Four cases, one per way the contract above can be reached, each driven
-# through THIS script so the argument handling and the premise guards are on
-# the path too. No case is asserted by reading source: the exit code is read
-# off a real run.
+# Six cases, each driven through THIS script so the argument handling and the
+# premise guards are on the path too. No case is asserted by reading source:
+# the exit code is read off a real run.
 #
 #   clean          the committed corpus and the committed builder       -> 0
 #   wrong-name     one corpus row's expected capability NAME changed to
@@ -405,6 +404,16 @@ _badrow="$(awk -F'\t' '/^#/ || NF == 0 { next }
 #                  and the corpus disagree                              -> 1
 #   no-corpus      a fixture directory holding no cases.tsv             -> 2
 #   bad-usage      an option the parser does not take                   -> 2
+#   prose-path     a fixture repository whose backlog row names the
+#                  user config file by its home-directory path, built
+#                  by the committed builder (B115)                      -> 0
+#   quoted-call    the same row quoting the request's call syntax       -> 1
+#
+# The last two add cases and change no detection: every byte of the page is
+# still read. prose-path passes because build-view.sh encodes the capability
+# object's name in the text it embeds (B115, closed at the data layer), so the
+# page never carries that name verbatim; quoted-call stays a finding because
+# the check decodes what the builder encoded.
 #
 # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If the committed corpus does not
 # exit 0, every case below would be red for that reason rather than its own -
@@ -470,8 +479,10 @@ if [ "$MODE" = "selftest" ]; then
     CODES="$CODES$_rc
 "
     if [ "$_rc" = "$_want" ]; then
+      _held=1
       printf '  held:    case %-12s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
     else
+      _held=0
       printf '  FINDING: case %-12s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
       SELF_FAILED=$((SELF_FAILED + 1))
     fi
@@ -500,6 +511,46 @@ if [ "$MODE" = "selftest" ]; then
     "an option this parser does not take: bad usage is refused rather than ignored" \
     --root "$ROOT" --no-such-option
 
+  # B115, reproduced the way it was found: a backlog row whose PROSE names the
+  # user config file by its home-directory path. 3.0 read each embedded copy as
+  # the page reaching `json` on the capability object until build-view.sh began
+  # encoding that name in the text it embeds. The second repository QUOTES the
+  # call syntax in the same place, and that stays a finding. Both trees live
+  # under the self-test's own directory; neither is this repo.
+  self_text() { # self_text <case> <sentence its stdout must carry>
+    if grep -qF -- "$2" "$SB/$1.out"; then
+      printf '  held:    case %-12s carries: %s\n' "$1" "$2"
+    else
+      printf '  FINDING: case %-12s does not carry: %s\n' "$1" "$2"
+      # One case, one count: a case whose exit code already failed is not
+      # counted twice for its wording.
+      [ "$_held" = 0 ] || SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+  backlog_repo() { # backlog_repo <dir> <notes cell>
+    mkdir -p "$1/.claude/productizer" \
+      || die_unmeasured "the fixture backlog repository could not be created; nothing was driven"
+    # shellcheck disable=SC2016  # the backticks are literal markdown in the fixture row
+    printf '# Backlog\n\n| Id | What is wanted | Status | Jira | Raised | Notes |\n|---|---|---|---|---|---|\n| B1 | A row of prose | `todo` | — | fixture | %s |\n' \
+      "$2" > "$1/.claude/productizer/backlog.md"
+    if ! { git -C "$1" init -q \
+           && git -C "$1" add -A \
+           && git -C "$1" -c user.email=selftest@example.invalid -c user.name=selftest \
+                -c commit.gpgsign=false commit -q -m fixture; }; then
+      die_unmeasured "the fixture backlog repository could not be committed; nothing was driven"
+    fi
+  }
+  backlog_repo "$SB/prose-repo" "The user config file lives at ~/.claude.json, and this sentence only names it."
+  self_drive prose-path 0 \
+    "a backlog row naming a home-directory path is prose the page embeds, encoded by the builder, not the page reaching into the capability object" \
+    --root "$SB/prose-repo" --builder "$BUILDER" --fixture "$FIXTURE"
+  self_text prose-path "A2 the real generated page declares nothing beyond output: cases 1, upheld 1"
+  backlog_repo "$SB/quoted-repo" 'A page that runs window.claude.use("artifact") can publish itself.'
+  self_drive quoted-call 1 \
+    "the same row quoting the call syntax is still a finding: every byte is read, and what the builder encoded is decoded" \
+    --root "$SB/quoted-repo" --builder "$BUILDER" --fixture "$FIXTURE"
+  self_text quoted-call "A2 the real generated page declares nothing beyond output: cases 1, upheld 0"
+
   printf '  self-test cases driven: %d. Cases that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_FAILED"
 
@@ -508,10 +559,10 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '  NOT ASSERTED: the wording of any finding. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
+  printf '  NOT ASSERTED: the wording of any finding outside prose-path and quoted-call, which also read the A2 line. The other cases read the exit CODE, so one that went red for the wrong reason is invisible here and is read off the case output by hand. Nor: a home-directory path inside a template literal, a srcdoc attribute, or a region that does not tokenize - all still read as code.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'check-view-readonly: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
     exit 1

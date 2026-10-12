@@ -317,7 +317,7 @@ if [ "$SELFTEST" -eq 1 ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/ *$//')"
   MISSING=""
   for want in 0 2 3 4 5 6; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 2 3 4 5 6\n' "$REACHED"
 

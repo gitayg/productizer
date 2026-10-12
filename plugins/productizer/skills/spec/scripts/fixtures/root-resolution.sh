@@ -105,7 +105,7 @@ case "$wrote" in
   "$RESULT")                             note OK   "result written where the config asked: $wrote" ;;
   *)                                     note FAIL "result written to an unexpected path: ${wrote:-<none>}" ;;
 esac
-if find "$REPO/.claude" -mindepth 1 -type d -name '.claude' -print | grep -q .; then
+if nested="$(find "$REPO/.claude" -mindepth 1 -type d -name '.claude' -print)" && grep -q . <<<"$nested"; then
   note FAIL "a nested .claude tree was created under $REPO/.claude"
 else
   note OK "no nested .claude tree was created"

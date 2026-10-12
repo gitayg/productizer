@@ -416,6 +416,7 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/check-pending-ruling-scope.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-ruling-requested.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/check-sigpipe.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-spec-home-stop.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-spec-home.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-spec-integrity.sh --selftest
@@ -669,24 +670,54 @@ jobs:
   # the repo can see it until someone presses Publish. So CI does the typing and
   # a person owns the decision, which is the split the lifecycle uses everywhere.
   #
-  # WHAT IT WILL NOT DO. It never publishes: after creating the release it reads
-  # the release back and fails the job if `isDraft` is anything but true. It
-  # never edits an existing release - a page someone already published or
-  # rewrote is theirs. And the notes are EVIDENCE from build-release-notes.sh
-  # (spec deltas, PRs, commits, files, the pre-publish checklist), not prose;
-  # the person publishing writes the prose from them.
+  # TWO JOBS, SPLIT AT THE WRITE TOKEN (B128). R71 says an unattended run
+  # holding a token that can write to the repository runs no code from it.
+  # Everything that runs this repository's code - build-release-notes.sh, which
+  # assembles the notes, and check-ci-template.py, which proves the pinned
+  # template - runs in `release-prep`, whose token can only read. It hands its
+  # results over as one artifact of plain files. `release-draft`, the only job
+  # that can write, does not check out the repository at all: it downloads those
+  # files, checks them as text with system tools, and calls `gh`.
   #
-  # PERMISSIONS. The workflow's default stays `contents: read`. Only this job
-  # can write, only on a tag push, and only after `checks` passed on that tag -
-  # so a pull request never gets a token that can create a release, and a tag
-  # that fails the gate never gets a draft. `persist-credentials: false` keeps
-  # the token out of git's config; `gh` reads it from GH_TOKEN for the one call.
-  release-draft:
+  # WHAT release-prep MAKES, each a reason to fail the tag:
+  #   - title.txt, the annotated tag's subject line. A lightweight tag carries
+  #     no title, and release tags here are annotated, so it is refused.
+  #   - release-notes.md, the EVIDENCE from build-release-notes.sh (spec deltas,
+  #     PRs, commits, files, the pre-publish checklist), not prose; the person
+  #     publishing writes the prose from them. If the notes say `gh pr list`
+  #     failed, the job fails: that is how a token too narrow to read pull
+  #     requests shows itself, and notes with no PR section are not evidence.
+  #   - build-from-spec.yml, templates/build-from-spec.yml with PRODUCTIZER_SHA
+  #     set to the tag's commit. Before 4.70 every adopter looked that commit id
+  #     up by hand (B107). The template carries the placeholder line exactly
+  #     once, and the copy must differ from it in that one line only - the same
+  #     forty zeros also sit in the template's own refusal guard, which a looser
+  #     substitution would rewrite. check-ci-template.py must exit 0 on the copy
+  #     AND print no note: on the placeholder it exits 0 too, with a note, so
+  #     the exit code alone would pass an unpinned copy.
+  #   - the tag's commit must be the commit this run checked (GITHUB_SHA).
+  #
+  # WHAT release-draft WILL NOT DO. It never publishes: after creating the
+  # release it reads the release back and fails the job if `isDraft` is anything
+  # but true. It never edits an existing release - a page someone already
+  # published or rewrote is theirs. It creates nothing until every handed-over
+  # file has passed its checks, so a missing, empty, oversized or unpinned file
+  # leaves no draft at all.
+  #
+  # PERMISSIONS. The workflow's default stays `contents: read`. Only
+  # release-draft can write, only on a tag push, and only after `checks` passed
+  # on that tag - so a pull request never gets a token that can create a
+  # release, and a tag that fails the gate never gets a draft. release-prep adds
+  # `pull-requests: read`, the permission GitHub lists for reading pull requests
+  # (`GET /repos/{owner}/{repo}/pulls`: read), because build-release-notes.sh
+  # reads merged PRs with `gh pr list`.
+  release-prep:
     needs: checks
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -695,7 +726,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Draft the release from the evidence, never publish it
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: PyYAML, which check-ci-template.py refuses to work without
+        run: python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+
+      - name: Title, notes and pinned template, made with a read-only token
         env:
           GH_TOKEN: ${{ github.token }}
           # The ref name reaches the shell through env and is quoted at every
@@ -705,18 +743,34 @@ jobs:
           set -euo pipefail
           case "$TAG" in
             v[0-9]*) ;;
-            *) echo "::error::refusing to draft a release for '$TAG': not a version tag"; exit 1 ;;
+            *) echo "::error::refusing to prepare a release for '$TAG': not a version tag"; exit 1 ;;
           esac
-          gh --version | head -1
+          gh --version | sed -n 1p
           git fetch --force --tags origin
-          # Release tags here are annotated, and the annotation's subject line is
-          # the release title. A lightweight tag carries no title to use.
+          out_dir="$RUNNER_TEMP/release-prep"
+          mkdir -p "$out_dir"
+
+          # The tag. Release tags here are annotated, and the annotation's
+          # subject line is the release title.
           if [ "$(git cat-file -t "$TAG")" != "tag" ]; then
             echo "::error::$TAG is a lightweight tag; release tags here are annotated and its message is the title"
             exit 1
           fi
-          # The previous version tag bounds the range. The very first tag has
-          # none, and then the notes cover everything before it.
+          sha="$(git rev-parse --verify "${TAG}^{commit}")"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::$TAG resolved to '$sha', not a full commit id"
+            exit 1
+          fi
+          if [ "$sha" != "$GITHUB_SHA" ]; then
+            echo "::error::$TAG names commit $sha, but this run checked $GITHUB_SHA; refusing to prepare a release for a commit the gate did not check"
+            exit 1
+          fi
+          title="$(git tag -l --format='%(contents:subject)' "$TAG")"
+          [ -n "$title" ] || title="$TAG"
+          printf '%s\n' "$title" > "$out_dir/title.txt"
+
+          # The notes. The previous version tag bounds the range. The very
+          # first tag has none, and then the notes cover everything before it.
           since=()
           prev=""
           if prev="$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^")"; then
@@ -724,14 +778,138 @@ jobs:
           else
             prev=""
           fi
-          notes="$RUNNER_TEMP/release-notes-${TAG}.md"
+          notes="$out_dir/release-notes.md"
           bash plugins/productizer/skills/spec/scripts/build-release-notes.sh . "${since[@]}" --version "${TAG#v}" > "$notes"
           if [ ! -s "$notes" ]; then
             echo "::error::build-release-notes.sh produced no notes for $TAG"
             exit 1
           fi
-          title="$(git tag -l --format='%(contents:subject)' "$TAG")"
-          [ -n "$title" ] || title="$TAG"
+          if grep -q -F -e "\`gh pr list\` failed" -e "\`gh\` is not installed" "$notes"; then
+            echo "::error::the notes for $TAG could not read the merged pull requests; this job's token is meant to be enough, and notes without them are not evidence"
+            exit 1
+          fi
+          echo "notes: range since ${prev:-the first commit}, $(wc -c < "$notes") bytes"
+
+          # The pinned template.
+          src=plugins/productizer/skills/spec/templates/build-from-spec.yml
+          zeros=0000000000000000000000000000000000000000
+          before="  PRODUCTIZER_SHA: \"$zeros\""
+          after="  PRODUCTIZER_SHA: \"$sha\""
+          n="$(awk -v l="$before" '$0 == l { c++ } END { print c + 0 }' "$src")"
+          if [ "$n" != 1 ]; then
+            echo "::error::$src carries the placeholder line $n times, not once; the pin has nothing unambiguous to replace"
+            exit 1
+          fi
+          pinned="$out_dir/build-from-spec.yml"
+          sed "s/^  PRODUCTIZER_SHA: \"$zeros\"\$/  PRODUCTIZER_SHA: \"$sha\"/" "$src" > "$pinned"
+          if ! grep -q -x -F "$after" "$pinned"; then
+            echo "::error::the pinned copy has no line '$after'; the substitution did not happen"
+            exit 1
+          fi
+          if grep -q -x -F "$before" "$pinned"; then
+            echo "::error::the pinned copy still carries the all-zero placeholder"
+            exit 1
+          fi
+          # Every other line is the template's, byte for byte.
+          if ! diff <(grep -v -x -F "$before" "$src") <(grep -v -x -F "$after" "$pinned"); then
+            echo "::error::the pinned copy differs from the template in more than the PRODUCTIZER_SHA line"
+            exit 1
+          fi
+          check_log="$RUNNER_TEMP/check-ci-template.log"
+          if ! python3 -I plugins/productizer/skills/spec/scripts/check-ci-template.py "$pinned" > "$check_log"; then
+            cat "$check_log"
+            echo "::error::check-ci-template.py refused the pinned copy"
+            exit 1
+          fi
+          cat "$check_log"
+          if grep -q '^check-ci-template: note:' "$check_log"; then
+            echo "::error::check-ci-template.py passed the pinned copy with a note; a pinned copy must carry none"
+            exit 1
+          fi
+          echo "prepared $TAG: title, notes, and $src pinned to $sha"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-prep
+          path: ${{ runner.temp }}/release-prep/
+          if-no-files-found: error
+          retention-days: 5
+
+  release-draft:
+    needs: [checks, release-prep]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # No checkout. Nothing from the repository is on this runner except the
+      # files release-prep handed over, and those are read, never run.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-prep
+          path: ${{ runner.temp }}/release-prep
+
+      - name: Draft the release from the evidence, never publish it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # With no checkout there is no git remote for gh to read the
+          # repository from, so it is named.
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "::error::refusing to draft a release for '$TAG': not a version tag"; exit 1 ;;
+          esac
+          gh --version | sed -n 1p
+          in_dir="$RUNNER_TEMP/release-prep"
+          title_file="$in_dir/title.txt"
+          notes="$in_dir/release-notes.md"
+          pinned="$in_dir/build-from-spec.yml"
+
+          # Every handed-over file is checked before anything is created.
+          # Each must be present, non-empty, under its cap, and text: no NUL
+          # byte, and valid UTF-8. The notes cap is far above the largest
+          # measured (13,023 bytes for v4.8.1..HEAD at v4.69.1); a file past it is not
+          # notes this tool produced.
+          check_text() {  # $1 file, $2 cap in bytes
+            if [ ! -f "$1" ]; then
+              echo "::error::release-prep handed over no $(basename "$1")"; exit 1
+            fi
+            size="$(wc -c < "$1")"
+            if [ "$size" -eq 0 ] || [ "$size" -gt "$2" ]; then
+              echo "::error::$(basename "$1") from release-prep is $size bytes; it must be 1 to $2"; exit 1
+            fi
+            if [ "$(tr -d '\000' < "$1" | wc -c)" -ne "$size" ]; then
+              echo "::error::$(basename "$1") from release-prep contains a NUL byte; it is not text"; exit 1
+            fi
+            if ! iconv -f UTF-8 -t UTF-8 "$1" > /dev/null; then
+              echo "::error::$(basename "$1") from release-prep is not valid UTF-8"; exit 1
+            fi
+          }
+          check_text "$title_file" 1024
+          check_text "$notes" 100000
+          check_text "$pinned" 200000
+          if [ "$(wc -l < "$title_file")" -ne 1 ]; then
+            echo "::error::title.txt from release-prep is not exactly one line"; exit 1
+          fi
+          if [ "$(head -1 "$notes")" != "# Release notes — evidence" ]; then
+            echo "::error::release-notes.md from release-prep does not start with build-release-notes.sh's heading"; exit 1
+          fi
+          # The pinned template must name the commit this run is for. For a tag
+          # push GITHUB_SHA is that commit, and release-prep refused to run if
+          # the tag named any other.
+          if ! grep -q -x -F "  PRODUCTIZER_SHA: \"$GITHUB_SHA\"" "$pinned"; then
+            echo "::error::the pinned template from release-prep does not set PRODUCTIZER_SHA to $TAG's commit $GITHUB_SHA"
+            exit 1
+          fi
+          if grep -q -x -F '  PRODUCTIZER_SHA: "0000000000000000000000000000000000000000"' "$pinned"; then
+            echo "::error::the pinned template from release-prep still carries the all-zero placeholder"
+            exit 1
+          fi
+          title="$(cat "$title_file")"
+
           # Never touch a release that already exists. `gh release view` exits
           # non-zero for "not found" and for any other failure alike; an auth
           # failure would then surface at the create call below, loudly.
@@ -745,4 +923,10 @@ jobs:
             echo "::error::the release for $TAG reads isDraft=$is_draft. This job must never publish; a person does."
             exit 1
           fi
-          echo "drafted $TAG (range since ${prev:-the first commit}); it is visible only to people with write access until someone publishes it"
+          gh release upload "$TAG" "$pinned"
+          assets="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          if ! grep -q -x -F build-from-spec.yml <<< "$assets"; then
+            echo "::error::the draft for $TAG does not list build-from-spec.yml after the upload"
+            exit 1
+          fi
+          echo "drafted $TAG with build-from-spec.yml pinned to $GITHUB_SHA; it is visible only to people with write access until someone publishes it"

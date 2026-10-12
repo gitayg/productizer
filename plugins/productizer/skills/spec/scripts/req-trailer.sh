@@ -414,7 +414,7 @@ selftest() {
   local reached missing="" want
   reached="$(printf '%s' "$codes" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   for want in 0 1 2 3 4; do
-    printf '%s' "$codes" | grep -qx "$want" || missing="$missing $want"
+    grep -qx "$want" <<<"$codes" || missing="$missing $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2 3 4\n' "$reached"
   printf '    NOT ASSERTED: a squash-merged or indented trailer; --limit truncation; --include-ignored; --tools with a specialised tool name; a Signed-off-by naming an agent (the Co-authored-by path is driven, the Signed-off-by path is the same word list); a repository with no commits; and whether any commit actually implements the requirement its trailer claims, which nothing in this script can see.\n'

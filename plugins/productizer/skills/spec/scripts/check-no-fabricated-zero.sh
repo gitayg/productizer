@@ -279,7 +279,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: TWO of the seven assertions are falsified - assertion 1, units_total, and assertion 7, a coverage count kept on a row that reached no verdict. The other five are not driven red here, so this says nothing about a fabricated counts object, units list, satisfied flag, spec_units_unsatisfied, or a coverage block on the absent-tool row\n'
@@ -324,7 +324,7 @@ rel() {
 
 # PREMISE ONE. The tool the fixture names must really be absent, or the check
 # ran, examined something, and its coverage was measurable after all.
-DECLARED_TOOL="$(sed -n 's/^ *requires: *\[\([^]]*\)\].*/\1/p' "$FIXTURE/checks.yaml" | head -1 | tr -d ' ')"
+DECLARED_TOOL="$(sed -n 's/^ *requires: *\[\([^]]*\)\].*/\1/p' "$FIXTURE/checks.yaml")"; DECLARED_TOOL="$(head -n 1 <<<"$DECLARED_TOOL" | tr -d ' ')"
 [ -n "$DECLARED_TOOL" ] || die_unmeasured "the fixture declares no tool to be absent"
 if command -v "$DECLARED_TOOL" >/dev/null 2>&1; then
   die_unmeasured "the fixture's declared tool is installed on this machine, so a check that could not run was never tested. The premise failed; this is unmeasured, not a pass"
@@ -332,7 +332,7 @@ fi
 
 # PREMISE TWO. The spec path the fixture names must really be missing from the
 # sandbox, or the denominator was derivable and no unmeasured count existed.
-DECLARED_SPEC="$(sed -n 's/^ *spec: *\([^ #][^#]*\)$/\1/p' "$FIXTURE/checks.yaml" | head -1 | sed 's/[[:space:]]*$//')"
+DECLARED_SPEC="$(sed -n 's/^ *spec: *\([^ #][^#]*\)$/\1/p' "$FIXTURE/checks.yaml")"; DECLARED_SPEC="$(head -n 1 <<<"$DECLARED_SPEC" | sed 's/[[:space:]]*$//')"
 [ -n "$DECLARED_SPEC" ] || die_unmeasured "the fixture names no spec path, so the denominator's premise cannot be established"
 case "$DECLARED_SPEC" in
   /*) die_unmeasured "the fixture's spec path is absolute; it would name a different file on every machine" ;;

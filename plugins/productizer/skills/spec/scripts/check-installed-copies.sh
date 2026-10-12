@@ -184,7 +184,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: the cases compare the exit CODE and never the wording of a finding, so a case that went red for the wrong reason is invisible here and is read off its captured output by hand\n'
@@ -250,7 +250,8 @@ for tpl in "$TEMPLATES"/*.sh; do
     # already in, and `set -o pipefail` turns that into the pipeline's status
     # for `set -e` to kill the script on. Without it this branch died having
     # printed the paths and no finding - right exit code, invisible reason.
-    line="$(cmp "$tpl" "$inst" 2>/dev/null | sed -n 's/.*line \([0-9][0-9]*\).*/\1/p' | head -1 || :)"  # stderr-ok: cmp's stderr names both files by absolute path and this text reaches a committed file; the line number is taken from stdout and the prefix case is reported from sizes below
+    line="$(cmp "$tpl" "$inst" 2>/dev/null | sed -n 's/.*line \([0-9][0-9]*\).*/\1/p' || :)"  # stderr-ok: cmp's stderr names both files by absolute path and this text reaches a committed file; the line number is taken from stdout and the prefix case is reported from sizes below
+    line="$(head -n 1 <<<"$line")"
     _ts="$(wc -c < "$tpl" | tr -d ' ')"
     _is="$(wc -c < "$inst" | tr -d ' ')"
     if [ -n "$line" ]; then

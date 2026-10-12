@@ -526,7 +526,8 @@ checks:
             against a patched classifier, and each case asserts the resolved NAME or `none` so a
             folded request is told from an unreadable one. The 3.1 change that skipped matches in
             text the check read as prose (B115) was reverted in v4.68.1 after a security review
-            found a parser differential in it; every byte is read again, as in 3.0 (B133).
+            found a parser differential in it; every byte is read again, as in 3.0 (B133). B115 is
+            closed at the data layer in build-view.sh (R94); the check reads every byte.
       # One bare path per repository file hashed. `must_cover: none` and NOT
       # all_triggering, deliberately: this examines the whole tree rather than
       # the change, so a commit that DELETES a file would name a path that no
@@ -635,14 +636,28 @@ checks:
           reason: >-
             Asserts every active requirement has a row, and since 1.1 that WHAT A ROW NAMES IS
             REAL: a cited check exists in checks.yaml and is not switched off, at least one check
-            a row cites carries a spec_units claim for that requirement, a cited path resolves,
-            and a cited script exists. Eight committed cases falsify each separately. It found a
+            a row cites carries a spec_units claim for that requirement, a cited path resolves and
+            a cited script exists, both in exact case on every host since 1.2 (B134). Eight
+            committed cases falsify each separately, and three built ones the exact case. It found a
             live defect on its first run - R19's row named `classification-provenance`, which
             claims only R6, while R19 is claimed by `spec-home-stop`; the two artifacts disagreed
             and nothing had noticed. Still Partial, and the residue is narrower than before: it
             asserts a named check CLAIMS the requirement, never that it PROVES it. Rows naming a
             corpus, a config key or a promise are unverifiable prose and are listed by id under
             NOT VERIFIED on every run rather than absorbed into the pass.
+        - id: R95
+          verdict: Partial
+          reason: >-
+            A cited path is resolved against each directory's own listing, so the answer is the same
+            on a case-insensitive disk and on a Linux runner; it is resolved on disk, not against
+            git, so a present file that is not tracked still resolves. A non-ASCII path stored in
+            another Unicode normalization than the row spells it is driven by no case.
+          evidence: >-
+            `path-in-exact-case` exits 0 on rows citing `docs/notes.md`, `docs/` and `tool.sh` as
+            listed; `path-in-wrong-case` exits 1 naming `docs/NOTES.md` and `DOCS/` "in that exact
+            case", on this case-insensitive disk too; `script-in-wrong-case` exits 1 naming `Tool.sh`.
+            Falsified 2026-10-12 with the listing compared case-insensitively: 10 of 11,
+            `path-in-wrong-case` red.
       # Every requirement PARSED, not the subset that produced findings.
       # "0 missing rows" is only a claim about a spec somebody actually parsed.
       from: stdout_count
@@ -697,15 +712,28 @@ checks:
     exit_codes:
       pass: [0]
       fail: [1]        # a requirement attributed to an import with no marking
-      refused: [2]     # an unparseable spec, or a git history that could not be walked
+      refused: [2]     # an unparseable spec, or a git history that could not be walked, or a backlog naming Stage 0c whose history could not be read
     coverage:
       spec_units:
+        - id: R92
+          verdict: Covered
+          evidence: >-
+            1.2 reads a backlog line naming `Stage 0c` as evidence only in the commit that also
+            drafted the requirements it names. The committed suite, run by `--selftest`:
+            `stage-in-the-import-commit` exits 1 (the drafting commit wrote the line, the cohort is
+            unmarked); `backlog-appended-later` and `backlog-append-names-id` exit 0 (a line
+            appended later, even one naming a real id, is not evidence); `stage-in-the-backlog`
+            exits 0 on a backlog naming the stage in the work tree only; `backlog-without-git`
+            exits 2, a history that could not be read. Falsified 2026-10-12 with 1.1's reading of
+            the backlog as it stands restored beside 1.2's: 12 of 13, `backlog-append-names-id` red.
         - id: R10
           verdict: n/a
           reason: >-
             R10 is event-driven - "WHEN a repository with history is imported" - and no import has
             happened here. Four independent sources are read every run and none records a Stage 0c
-            import: the change log, the commit history, elsewhere in the spec, and the backlog. The
+            import: the change log, the commit history, elsewhere in the spec, and a backlog line
+            written by the commit that drafted requirements; the backlog as it stands is not
+            evidence (1.2). The
             guard is shut, the same shape as `jira-unbound`, and this claim expires by itself -
             record an import and the premise holds, the other three assertions run, and a cohort
             with no markings becomes a finding under its own heading. What stays unreachable even
@@ -1896,13 +1924,15 @@ checks:
             reading found none of them was a citation anybody meant. Since v4.68.0 every example
             id in the tree is marked or is R0, so a change adding every tracked file reads 0
             findings; what the precision is on changes made after that is not yet measured.
-            Fixture and eval trees, the spec, the constitution, the backlog and the generated
-            requirement index are not read.
+            Fixture and eval trees, the spec, the constitution and the generated requirement index
+            are not read; the backlog is, since 1.2. Replayed over this repository's history, 1.1
+            fired on 26 commits with 91 findings and 1.2 on 27 with 94; the three new findings are a
+            forward citation of R32 and an illustrative R42 read twice.
           evidence: >-
             Every requirement id on an added line is resolved against the spec at HEAD through
             spec-requirements.sh. An id at or above `Next requirement id` is
             CITATION_NEVER_ALLOCATED and one below it with no row is CITATION_ALLOCATED_MISSING;
-            every commit trailer in the range goes through `req-trailer.sh --validate`. 28
+            every commit trailer in the range goes through `req-trailer.sh --validate`. 31
             self-test cases over exit codes 0 1 2, each asserting a sentence. `R0`, the reserved
             example id, prints as an EXAMPLE line; an id with a leading zero is
             CITATION_NEVER_ALLOCATED; an id beside a multibyte character, read under a UTF-8
@@ -1918,6 +1948,18 @@ checks:
             A new citation of a superseded id prints `NOTE CITATION_SUPERSEDED <path>:<line> <id> ->
             <id>`, following `Superseded by` to the requirement that stands now; the `superseded`
             self-test case asserts `R1 -> R4`. A note does not change the exit code.
+        - id: R93
+          verdict: Partial
+          reason: >-
+            The check is advisory, so a dangling id on an added backlog line is reported and does not
+            refuse the change. Only ADDED lines are read: a line rewritten in place is read as added,
+            and a line already in the backlog at the base is not examined.
+          evidence: >-
+            Since 1.2 the backlog is read like any other file. `backlog` exits 1 naming
+            `CITATION_NEVER_ALLOCATED .claude/productizer/backlog.md:2` for an appended row citing an
+            id never allocated; `backlog-rewritten` exits 1 reading only the one line that changed;
+            `backlog-r0` exits 0 printing R0 as an EXAMPLE. Falsified 2026-10-12 with the backlog
+            excluded again, as 1.1 did: 28 of 31, those three red.
       from: stdout_count
       pattern: 'requirements resolved against:\s*([0-9]+)'
       min_covered: 1
@@ -1993,7 +2035,7 @@ checks:
             variants such as `.GitHub/workflows`; `workflow-forbidden`,
             `build-mode-spec-forbidden` and `plan-mode-code-forbidden` still exit 3, and
             `backlog-allowed` and `build-mode-code-allowed` exit 0, so the rule is not refusing
-            everything. 109 cases.
+            everything. 129 cases since 1.4.
         - id: R66
           verdict: Covered
           evidence: >-
@@ -2071,9 +2113,34 @@ checks:
             exits 0, `attended-checks-result-deleted-r66` exits 3 by R66. Each unattended case
             exited 2 against 7e5b2c4, which did not know the flag. Falsified 2026-10-12 with the
             refusal made never to fire: 104 of 109, five unattended cases red.
+        - id: R90
+          verdict: Covered
+          evidence: >-
+            Exit 3 in every mode on a non-ASCII path that READS as a refused one, each allowed by
+            1.3: `homoglyph-35` to `homoglyph-40` - a Cyrillic i in `.github`, a Cyrillic A in
+            AGENTS.md, a Cyrillic C in a nested CLAUDE.md, a Cyrillic o in docs/CODEOWNERS, a
+            division slash for `/`, a Hangul filler inside `.github` - and `homoglyph-of-spec-build-mode`,
+            a homoglyph of the spec's directory; `homoglyph-dot-name-41` exits 3 on a non-ASCII
+            name beginning with a dot that no list holds. `homoglyph-allowed-42` and `-43` exit 0
+            - a reading that is no rule file, and a component with no ASCII letter or digit - so
+            a non-ASCII name is judged and not refused. Falsified 2026-10-12 with the reading's
+            refusal made never to fire: 122 of 129, those seven red; and by B125, before the
+            spec-exception case was added, with the dot refusal removed, 127 of 128.
+        - id: R91
+          verdict: Covered
+          evidence: >-
+            Under --unattended, exit 3 on a path no list names when it has a dot component or a
+            non-ASCII byte: `unattended-shape-44` to `-47` (.vscode/tasks.json, src/.eslintrc.js, a
+            plugin manifest under .claude-plugin/, src/café.sh) and `unattended-dot-path-base-mode`
+            (a .gitignore under --base, as deliver's second ask reads it). The exceptions hold on
+            their exact paths: `unattended-backlog-exception`, `unattended-plan-exception` and
+            `unattended-spec-exception` (the spec at intent -> design) exit 0. Attended the list
+            alone applies: `attended-dot-path-allowed` and `attended-dot-path-base-mode` exit 0.
+            Falsified 2026-10-12 with the allowlist made never to fire: 124 of 129, those five
+            red; with the spec's exception removed, 128 of 129, `unattended-spec-exception` red.
     limitations:
       - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
-      - The forbidden set is a list, not a proof; a cross-script homoglyph is not folded. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
+      - The forbidden set is a list, not a proof. Attended, nothing but the list applies; under --unattended an ASCII, dot-free file the list does not name (Jenkinsfile, GEMINI.md, a script checks.yaml runs) is still allowed. A homoglyph is read, not folded - one non-ASCII character as one to two characters - so a reading of three or more, and a homoglyph made of ASCII alone (rn for m), are not refused; and a legitimate non-ASCII name that reads as a rule file is refused attended too. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
       - Default-deny over `.claude/**` also refuses a design move that touches `.claude/productizer/` files such as requirement-index.md, as this repository's own design commits do. Which of those a design stage may write is undecided (B112).
       - A stage other than design or build with evidence of its own is driven by no case.
 
@@ -2263,11 +2330,10 @@ checks:
         - id: R84
           verdict: Partial
           reason: >-
-            prepare --body-out is where the CI template renders a body, and it is covered here. The
-            renderer itself, pr-spec-comment.sh 1.2, also refuses (exit 3, nothing rendered; its
-            case `no-probe-refused`), but its self-test is run only by the workflow, not by a
-            declared check (B130), so a person rendering a body by hand is not covered by this
-            claim.
+            prepare --body-out is where the CI template renders a body, and it is covered here. A
+            person rendering a body by hand calls the renderer, pr-spec-comment.sh 1.2, directly;
+            that refusal is claimed by `pr-body-renderer`, which runs the renderer's self-test
+            since v4.70.0 (B130).
           evidence: >-
             `prepare-body-refused-without-probe` - with no evals/solver-probe.py, prepare --body-out
             exits 3 naming the file and that the CI build template requires the adopter to provide
@@ -3417,6 +3483,246 @@ checks:
       min_covered: 1
     limitations:
       - It raises SC2086 and nothing else. A split that is intended must be written as one - an array, or `tr` - rather than left unquoted; a file that needs an exception says so with a `# shellcheck disable=SC2086` comment and its reason beside it.
+
+# --- an early reader on a pipe under pipefail (B131) -----------------------
+#
+# `grep -q` stops at its first match and `head` once it has its lines; whatever
+# is still writing into the pipe takes SIGPIPE and exits 141, and pipefail makes
+# that the pipeline's status. So a self-test's documented-codes loop reported a
+# code that WAS reached as missing (seen once for real in build-guide.sh under
+# parallel load), and an assignment from such a pipeline ends a `set -e` script
+# with no message. Measured 2026-10-12: 148 false misses in 12000 runs through
+# the pipe, 0 in 12000 through a here-string. Every tracked shell file reads 0
+# findings since v4.70.0: 41 scripts were converted to here-strings first, and
+# the last 18 sites in v4.70.0 itself.
+  - id: sigpipe-under-pipefail
+    why: an early reader on a pipe under pipefail turns a match into exit 141, so a self-test reports a code it reached as missing and a set -e script ends with no message
+    when:
+      paths: ["**/*.sh", "**/*.bash"]
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-sigpipe.sh]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-sigpipe.sh, --version]
+    mode: per_file
+    command: [./plugins/productizer/skills/spec/scripts/check-sigpipe.sh, "{file}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # an early reader on a pipe under pipefail, named by file and line
+      refused: [2]     # an unreadable file, or an exemption with no reason
+    coverage:
+      from: per_file_exit
+      # 0 = read end to end with nothing found, 1 = read end to end with a
+      # finding. A 2 is a file it could not read or an exemption it would not
+      # honour, and neither is a file it checked.
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - Pipefail switched on in another file (sourced or inherited) is not seen; the `set` line is looked for in each file scanned.
+      - A reader reached through a function, alias or variable, other early readers (`sed q`, `awk` with `exit`, `read`, `cmp`, python), and shell outside a .sh or .bash file - a workflow `run:` block, a Markdown fence - are not read. The workflow's two `gh --version` lines were fixed by hand in v4.70.0, not by this check.
+      - A `$( ... )` inside an unquoted here-document body, and backtick substitution, are read as text and as plain code respectively.
+
+# --- self-tests the workflow ran and no declared check did (B130) -----------
+#
+# Each tool below carried a self-test that `.github/workflows/checks.yml` ran
+# and no check in this file did, so the requirements its cases prove could not
+# be claimed: an unclaimed active requirement reads Missing and refuses the run.
+# Declared as their self-tests, the way stage-advance-guard and build-dispatch
+# are, because none of the four is a check over a change - each is a tool whose
+# verdict a commit can return only as "does it still do what it says". A fifth,
+# view-builder, runs build-view.sh's self-test for B115.
+
+  - id: pr-body-renderer
+    why: the pull request body is the one rendering of a change a reviewer reads, and an adopter's body that names this repository's artifacts, or renders without the solver probe, reads as evidence that does not exist
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/pr-spec-comment.sh, git, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/pr-spec-comment.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/pr-spec-comment.sh, --selftest]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of [0-9]+ cases held'
+      min_covered: 1
+      spec_units:
+        - id: R84
+          verdict: Covered
+          evidence: >-
+            The renderer refuses itself, whoever calls it: `no-probe-refused` exits 3 with "there is
+            no readable evals/solver-probe.py in this tree", and its `lacks` assertion holds that
+            nothing of the body - not even `## What this change did to the spec` - was printed. The
+            CI template's own call is covered by build-dispatch (`prepare-body-refused-without-probe`).
+            Falsified 2026-10-12 with the probe test made always true: 23 of 25, both no-probe cases
+            red.
+        - id: R85
+          verdict: Covered
+          evidence: >-
+            In an adopter-shaped repository the body names nothing of this one: `adopter-corpus-size-derived`
+            exits 0 and its three `lacks` assertions hold that the body carries no `26-case`, no
+            `publish-checklist.md` and no `checks.yml`; the corpus size is read from the probe's own
+            count rows; `adopter-gate-path-from-hook` reads the checklist path from the installed
+            hook; `no-constitution-named-not-spec` names a missing constitution as missing rather
+            than blaming the spec; `no-store-is-partial` carries no corpus size it did not read.
+            Falsified 2026-10-12 with the corpus line made to name this repository's 26-case corpus:
+            22 of 25, `adopter-corpus-size-derived`, its `lacks` and `no-store-is-partial (lacks)`
+            red.
+    limitations:
+      - The body's prose is asserted by named fragments a case must carry or lack, not as a whole; an artifact this repository has and no `lacks` assertion names would pass.
+
+  - id: checks-stage-runner
+    why: the runner is the checks stage, and a refused check whose own reason never reaches the log has to be reconstructed rather than read, which is how the v4.65.0 tag run was lost
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/run-checks.sh, git, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/run-checks.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/run-checks.sh, --selftest]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case or a result-file assertion did not hold
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'self-test cases driven: ([0-9]+), result-file assertions: [0-9]+\. Cases and assertions that did not hold: 0'
+      min_covered: 1
+      spec_units:
+        - id: R86
+          verdict: Partial
+          reason: >-
+            The tail is asserted to be printed, and to be the check's own output; its BOUNDS are not.
+            No case's tool prints more than 20 lines or a line longer than 300 characters, so a
+            runner printing the whole output, or the first 20 lines, would pass every case.
+          evidence: >-
+            `refused-says-why`: a blocking check that refuses with a reason of its own exits 3, and
+            stderr carries the summary heading the check's own output under its row and the tool's
+            own reason, which before B89 reached only the result file; the clean case asserts a
+            passing check prints no output tail. Falsified 2026-10-12 with the tail never printed: the
+            run's two `refused-says-why` stderr assertions red.
+    limitations:
+      - It is the runner's self-test, not this repository's run. That the real suite's refusals print their tails in CI is seen in the workflow log, not asserted here.
+
+  - id: ci-replay
+    why: a local suite that passes on this machine's git defaults and fails on the runner's is how two pushes went red, and the replay is only worth running if it removes those defaults
+    when:
+      always: true
+    severity: block
+    requires: [python3, git]
+    version_command: [python3, --version]
+    mode: batch
+    command: [python3, ./scripts/replay-ci.py, --selftest]
+    timeout_seconds: 300
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of [0-9]+ cases held'
+      min_covered: 1
+      spec_units:
+        - id: R87
+          verdict: Covered
+          evidence: >-
+            `B124: steps see the runner's git - master, no identity, no global config - and UTC, not
+            this shell's` exits 0 on a fixture workflow whose steps print the default branch, the
+            identity and the global configuration they see; `B124: a fixture whose bare origin takes
+            git's default branch goes red, as it did on the runner` exits 1 on the v4.67.3 fixture,
+            which passed on this machine's own git. Falsified 2026-10-12 with the replay's
+            init.defaultBranch pin removed: 17 of 18, the runner's-git case red. The bare-origin case
+            stayed red without the pin, because with no system or global configuration this git's
+            own default is already master; the pin is what makes that independent of the git.
+    limitations:
+      - The replay's version is python3's, because replay-ci.py takes no --version; the script itself is pinned only by the commit.
+      - The runner's own identity refusal and LANG are not measured; only the default branch is quoted from a runner log.
+
+  - id: classification-recorder
+    why: a classification record is the provenance of an intake decision, and a record written into whichever repository the caller stood in is provenance for the wrong spec
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/record-classification.sh, git, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/record-classification.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/record-classification.sh, --selftest]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code and the sentence it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'selftest: ([0-9]+) of [0-9]+ case\(s\) held'
+      min_covered: 1
+      spec_units:
+        - id: R88
+          verdict: Covered
+          evidence: >-
+            Every case runs the writer from a working directory OUTSIDE the root it is given, the
+            layout B132 was measured in: `outside-root-default-store` writes the record in the
+            root's store, `outside-root-cwd-untouched` holds that nothing lands relative to the
+            working directory, `relative-store-under-root` and `relative-store-cwd-untouched` do the
+            same for a relative --store, `guard-reads-root-store` holds that a record of the same
+            intent in the working directory is not the root's, and `relative-root` resolves a
+            relative --root once. Falsified 2026-10-12 with the destination taken relative to the
+            working directory again, as 1.0 did: 8 of 15, seven cases red.
+        - id: R89
+          verdict: Covered
+          evidence: >-
+            `absolute-spec-outside-root` exits 2 - no commit of the root can be cited for a spec
+            outside it - and `absolute-spec-inside-root` exits 0 recording the path repo-relative,
+            so the refusal is of the outside path and not of every absolute one;
+            `relative-spec-under-root` reads a relative --spec-path under the root. Falsified
+            2026-10-12 with the inside-the-root test made always true: 14 of 15,
+            `absolute-spec-outside-root` red - it still exited 2, for a spec that did not hash, and
+            the case's sentence is what told the two refusals apart.
+    limitations:
+      - An unreadable spec or store, a repository with no HEAD, two intent ids that slug to one filename and an interrupted run are driven by no case.
+
+  - id: view-builder
+    why: the dashboard embeds repository text - backlog prose, commit subjects - and one row that names the capability object, or closes the data block's script element, turns prose into something the page can be read as running
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/build-view.sh, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/build-view.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/build-view.sh, --selftest]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: []         # build-view.sh --selftest exits 2 when a case does not hold; it has no 1
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'cases driven: ([0-9]+)\. Cases that did not hold: 0'
+      min_covered: 1
+      spec_units:
+        - id: R94
+          verdict: Partial
+          reason: >-
+            Every sink that goes through the builder's two encoders is encoded; an href is
+            deliberately not (a character reference there decodes to text the browser can run), so
+            a repository path in a link carries the name verbatim. The encoding is sound only while
+            embedded text reaches no sink that executes it. And the case builds one page from one
+            row: a sink reached by neither encoder is not driven.
+          evidence: >-
+            `embedded-name` builds two pages from roots differing in one backlog row - naming the
+            user config dot-file, bracket-indexing the name and closing the data block's script
+            element - and asserts the row added 0 references to the capability object and 0 script
+            elements, decodes to its own text in the HTML and is carried encoded in the JS literals.
+            Falsified 2026-10-12 with the HTML encoder made the plain escape again: 7 of 8,
+            `embedded-name` red, exit 2. check-view-readonly.sh's `prose-path` exits 0 on a backlog
+            row naming the path and goes red against e540b84's builder (5 of 6).
+    limitations:
+      - The builder's own code reaches the capability object; only what embedded text adds is counted, against a page built without that row.
 
 # --- a blocking check proves its alarms are real before it may block --------
 #

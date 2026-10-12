@@ -1094,7 +1094,7 @@ CFG
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 2 3 4; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 2 3 4\n' "$REACHED"
   printf '    NOT ASSERTED: the undeclared-exit bucket is not driven - every fixture tool returns a code its own config declares. The group kill on timeout IS asserted (group-kill): until 1.1 it was exercised but not asserted, because its fixture grandchild exited by itself after 5s.\n'

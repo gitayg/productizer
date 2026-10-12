@@ -229,7 +229,7 @@ STUB
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: the WORDING of any finding, and the exit code of the runner itself, which this check deliberately does not read. A case that went red for the wrong reason is invisible here.\n'

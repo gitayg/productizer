@@ -54,6 +54,9 @@
 #                    printed and recorded in the result.
 #   --out PATH       where the result JSON lands ("-" for stdout).
 #                    Default: policy.output from the config
+#   --version        print this runner's version and exit 0. Added in v4.70.0
+#                    so a check that runs this runner's own self-test can
+#                    record which runner it ran (B130).
 #
 # EXIT CODES ARE THE CONTRACT.
 #
@@ -233,6 +236,7 @@ on_exit() {
 trap on_exit EXIT
 
 die_usage() { printf 'run-checks: %s\n' "$1" >&2; exit 2; }
+VERSION="run-checks 1.0"
 
 # Echoes the git work tree containing $1, or nothing. git's own explanation is
 # kept in GIT_WHY rather than discarded: a fallback that cannot say why it fell
@@ -281,6 +285,7 @@ while [ "$#" -gt 0 ]; do
     # goes stale the first time someone adds a paragraph to it, and then the
     # help text stops mid-sentence and nobody notices.
     -h | --help) awk 'NR>1 && !/^#/{exit} NR>1' "$0"; exit 0 ;;
+    --version) printf '%s\n' "$VERSION"; exit 0 ;;
     # `--self-test` is an alias, not a second flag: this repository spells the
     # same obligation both ways and a tool that answers only one spelling reads
     # as carrying no self-test to whichever scanner is looking for the other.
@@ -763,9 +768,9 @@ SELFTEST_CFG_GONE_NO_TOOL
   # whoever is running the self-test. If this ever stops reporting an R line the
   # two files no longer look alike to git, and the case has quietly become
   # `deleted-under-base` a second time.
-  if GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-rename" \
-       diff --find-renames --name-status "$GIT_RENAME_BASE_REF" HEAD 2>> "$SB/repo-rename-build.log" \
-       | grep -q '^R'; then :; else
+  if rename_status="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-rename" \
+       diff --find-renames --name-status "$GIT_RENAME_BASE_REF" HEAD 2>> "$SB/repo-rename-build.log")" \
+       && grep -q '^R' <<<"$rename_status"; then :; else
     self_unmeasured "git does not report the rename fixture's two commits as a rename even with detection explicitly on, so there is no rename collapse for the runner to be asked about. Unmeasured, not a pass"
   fi
 
@@ -1359,7 +1364,7 @@ SELFTEST_ASSERT_AT
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2 3; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '  exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
   printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The five cases from `deleted-in-scope` to `all-gone-and-no-tool` are the exception - twenty-four assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope`, `deleted-under-base` and `renamed-away` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'

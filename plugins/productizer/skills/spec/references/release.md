@@ -70,15 +70,24 @@ forwarded within minutes, and mail cannot be recalled.
 **In this repository, CI drafts the GitHub release and a person publishes it.**
 Measured 2026-09-14: of 81 version tags, 22 had a release page, and nothing in
 the workflow had ever created one - while several release checklists said a tag
-push did. The `release-draft` job in `.github/workflows/checks.yml` now runs on a
-version-tag push, only after `checks` passed on that tag. It assembles the notes
-with `build-release-notes.sh`, creates the release as a **draft**, and reads it
-back, failing the job if the release is anything but a draft. A draft is visible
-only to people with write access, so nothing has reached an audience yet: the
-person publishing edits the evidence into prose, runs the checklist above, and
-presses Publish. The job never edits a release that already exists. This is the
-same split as the rest of the stage, with the typing moved into CI rather than
-into a command someone runs by hand. The notes are evidence, not the post.
+push did. Two jobs in `.github/workflows/checks.yml` now run on a version-tag
+push, only after `checks` passed on that tag. **`release-prep`** holds a
+read-only token: it checks out the tagged commit, refuses a tag that names any
+other commit, assembles the title and the notes with `build-release-notes.sh`,
+and writes a copy of the CI build template with `PRODUCTIZER_SHA` set to the
+tag's commit - differing from the template in that one line, and passed by
+`check-ci-template.py` with no note - and hands the three files on.
+**`release-draft`** holds the token that can write, and so checks out nothing
+and runs no code from the repository: it reads the handed-over files as text
+(present, under a size cap, valid UTF-8, the notes carrying their heading, the
+copy naming this tag's commit), creates the release as a **draft**, reads it
+back - failing if it is anything but a draft - and attaches the pinned
+`build-from-spec.yml` to it (from v4.70.0). A draft is visible only to people
+with write access, so nothing has reached an audience yet: the person publishing
+edits the evidence into prose, runs the checklist above, and presses Publish.
+The job never edits a release that already exists. This is the same split as
+the rest of the stage, with the typing moved into CI rather than into a command
+someone runs by hand. The notes are evidence, not the post.
 
 **Screenshots come from the released build, in this session, with the version in
 the filename.** A screenshot from the previous release is a lie with a picture

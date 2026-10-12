@@ -42,8 +42,8 @@
 #      queue in front of intake, and a row is a wish, not a result.
 #   5  NOT A FORWARD MOVE. --to is at or before --from in the stage order.
 #   3  FORBIDDEN PATH. The change touches a path the target stage may not.
-#      THE FORBIDDEN SET lives in one function, forbidden_any_mode(), and is
-#      matched on a FOLDED KEY of the path - format characters removed, NFKC,
+#      THE FORBIDDEN SET lives in four lists, FORBID_*, read by one function,
+#      forbidden_any_mode(), and is matched on a FOLDED KEY of the path - format characters removed, NFKC,
 #      Unicode case folding - so a variant that a case- or normalisation-
 #      insensitive checkout would fold onto a rule file is refused too (case,
 #      NFD, the long s, the Kelvin sign; and a fullwidth letter, which only a
@@ -80,11 +80,20 @@
 #                   stand for another path or for code outside the change, and
 #                   this decider judges names. Deleting a symlink, or turning
 #                   one into a file, is judged by its path like any other.
+#        HOMOGLYPHS, any mode: a path whose bytes are not ASCII, when a
+#                   READING of it - each non-ASCII character taken as any one
+#                   character (none or one for a combining mark or a filler,
+#                   one or two for a Latin letter) - is a path refused above,
+#                   or when a component of it begins with a dot. No
+#                   confusables table is used; the reading is a superset of
+#                   one. A component with no ASCII letter or digit is not read.
 #      These are the files that decide what CI runs, what an agent is told and
 #      allowed, how git treats a path, and what the run is judged by. A stage
 #      run is the wrong actor to edit any of them. An artifacts.path under
 #      .claude/ or .github/ therefore cannot hold a plan an unattended run may
 #      write: the any-mode set is checked first.
+#      The set is a LIST, and nothing proves a list complete. Under
+#      --unattended it is bounded by an allowlist instead (UNATTENDED below).
 #
 # UNATTENDED. --unattended says no person is at the keyboard: the copyable CI
 # template's deliver (build-dispatch.sh) passes it on both of its calls. Under
@@ -96,6 +105,25 @@
 # measurement (maintainer ruling 2026-10-12, B126). Without the flag nothing
 # changes: a person's run legitimately rewrites the file every time it runs
 # run-checks.sh, so attended, its addition or modification stays "nothing".
+#
+# THE UNATTENDED ALLOWLIST (B125). Under --unattended a changed path is also
+# refused (3) unless it has the shape a build's own output takes: its bytes
+# are ASCII, and no component of it begins with a dot. The exceptions, on
+# their exact bytes only, are the backlog, the plan in plan mode, and the spec
+# outside build mode; the bookkeeping rules above are unchanged. Configuration
+# of nearly every tool lives under a dot name - CI (.gitlab-ci.yml,
+# .circleci/), editors that run tasks on open (.vscode/), dev containers,
+# direnv, npm, linters that execute their config, other agents' rule files -
+# so the files a reader must still trust the named list for are the ASCII,
+# dot-free ones, and the list names those it knows (CLAUDE.md, AGENTS.md,
+# REVIEW.md, CODEOWNERS, lefthook.yml). Attended runs keep the list alone: an
+# allowlist would refuse a person's legitimate `.gitignore` edit, and a person
+# sees the change. Measured by replaying this repository's 143 non-root
+# commits at v4.69.1 as build -> test in build mode: the allowlist refuses 23
+# that the list allows - 22 touch a plugin manifest under `.claude-plugin/`,
+# which declares hooks and MCP servers and so steers an agent the list never
+# named, and 1 touches `.gitignore`. An adopter's unattended build that edits
+# a dot file exits 3, and that edit is a person's to make.
 #
 # STAGE ORDER is the key order of `github.issues.stage_labels` in
 # .claude/productizer/config.json; a STAGE may be given as the key (`build`) or
@@ -154,7 +182,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.3"
+VERSION="stage-advance 1.4"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -166,7 +194,9 @@ usage() {
   printf '                        [--mode plan|build] [--unattended] [--format text|json]\n'
   printf '       stage-advance.sh --selftest | --version | --help\n'
   printf '  --unattended  no person is at the keyboard: any change to\n'
-  printf '                .claude/productizer/checks-result.json is refused (exit 3)\n'
+  printf '                .claude/productizer/checks-result.json is refused (exit 3),\n'
+  printf '                and so is any path that is not ASCII or has a component\n'
+  printf '                beginning with a dot (bar the backlog, the plan, the spec)\n'
   printf 'exit: 0 advance allowed, 1 produced nothing, 2 usage, 3 forbidden path,\n'
   printf '      4 cannot determine, 5 not a forward move\n'
 }
@@ -341,6 +371,8 @@ JSON
     "$R" --from design --to build --mode build --base base
   drive json-format 0 '"verdict": "advance"' \
     "$R" --from sdlc:design --to sdlc:build --mode plan --base base --format json
+  drive unattended-plan-exception 0 "docs/sdlc/greet/plan.md" \
+    "$R" --from design --to build --mode plan --unattended --base base
 
   newrepo patch-design; R="$WORK/patch-design"
   cp "$R/.claude/productizer/spec.md" "$WORK/spec.orig"
@@ -351,6 +383,10 @@ JSON
   cp "$WORK/spec.orig" "$R/.claude/productizer/spec.md"
   drive patch-not-yet-applied 0 "R2 added" \
     "$R" --from intent --to design --patch "$WORK/design.patch"
+  # B125: the spec's own exception under --unattended, outside build mode -
+  # its path begins with a dot, and the allowlist must not refuse it there.
+  drive unattended-spec-exception 0 "R2 added" \
+    "$R" --from intent --to design --unattended --patch "$WORK/design.patch"
 
   CASES=$((CASES + 1)); CODES="$CODES 0"
   if cmp -s "$WORK/spec.orig" "$R/.claude/productizer/spec.md" && [ -z "$(G "$R" status --porcelain)" ]; then
@@ -503,6 +539,52 @@ JSON
     drive "fold-allowed-$n" 0 "$p" \
       "$R" --from build --to test --mode build --patch "$WORK/rule-$n.patch"
   done
+  # --- B125. A HOMOGLYPH of a forbidden name, from another script. 1.3 folded
+  # none of these and exited 0: a Cyrillic i, A, C and o; a division slash; a
+  # Hangul filler, which is invisible and not a format character; and a dot
+  # name no list holds, with a Cyrillic es.
+  addpatch() {
+    printf 'diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+x\n' \
+      "$1" "$1" "$1" > "$2"
+  }
+  local reads
+  for u in '.g\321\226thub/workflows/x.yml=.github/workflows/x.yml' '\320\220GENTS.md=agents.md' \
+           'src/\320\241LAUDE.md=src/claude.md' 'd\320\276cs/CODEOWNERS=docs/codeowners' \
+           'docs\342\210\225codeowners=docs/codeowners' '.git\343\205\244hub/workflows/x.yml=.github/workflows/x.yml' \
+           '.vs\321\201ode/tasks.json=' ; do
+    p="$(printf '%b' "${u%%=*}")"; reads="${u#*=}"; n=$((n + 1))
+    addpatch "$p" "$WORK/rule-$n.patch"
+    if [ -n "$reads" ]; then
+      drive "homoglyph-$n" 3 "$p (not ASCII, and can be read as $reads)" \
+        "$R" --from build --to test --mode build --patch "$WORK/rule-$n.patch"
+    else
+      drive "homoglyph-dot-name-$n" 3 "$p (not ASCII, under a name that begins with a dot)" \
+        "$R" --from build --to test --mode build --patch "$WORK/rule-$n.patch"
+    fi
+  done
+  # Precision: a reading that is no rule file, and a component with no ASCII
+  # letter or digit (four Japanese characters are not read as `.git`).
+  for u in 'd\320\276cs/readme.md' 'docs/ja/\343\201\257\343\201\230\343\202\201\343\201\253/x.md'; do
+    p="$(printf '%b' "$u")"; n=$((n + 1))
+    addpatch "$p" "$WORK/rule-$n.patch"
+    drive "homoglyph-allowed-$n" 0 "$p" \
+      "$R" --from build --to test --mode build --patch "$WORK/rule-$n.patch"
+  done
+
+  # --- B125. THE UNATTENDED ALLOWLIST: no dot component, ASCII bytes. 1.3
+  # allowed each of these under --unattended; attended they stay allowed.
+  for u in '.vscode/tasks.json=a name that begins with a dot' 'src/.eslintrc.js=a name that begins with a dot' \
+           'plugins/x/.claude-plugin/plugin.json=a name that begins with a dot' 'src/caf\303\251.sh=not ASCII'; do
+    p="$(printf '%b' "${u%%=*}")"; reads="${u#*=}"; n=$((n + 1))
+    addpatch "$p" "$WORK/rule-$n.patch"
+    drive "unattended-shape-$n" 3 "$p (unattended: $reads)" \
+      "$R" --from build --to test --mode build --unattended --patch "$WORK/rule-$n.patch"
+  done
+  drive attended-dot-path-allowed 0 ".vscode/tasks.json" \
+    "$R" --from build --to test --mode build --patch "$WORK/rule-$((n - 3)).patch"
+  drive unattended-backlog-exception 0 "advance allowed: build -> test in build mode" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/backlog.patch"
+
   # A case variant of the artifacts directory is not "outside artifacts.path"
   # in build mode, so it is not evidence either (B106 meets B114).
   printf 'diff --git a/Docs/SDLC/greet/notes.md b/Docs/SDLC/greet/notes.md\nnew file mode 100644\n--- /dev/null\n+++ b/Docs/SDLC/greet/notes.md\n@@ -0,0 +1 @@\n+x\n' > "$WORK/art-variant.patch"
@@ -551,6 +633,11 @@ JSON
     "$p" "$p" "$p" > "$WORK/nfd.patch"
   drive nfd-variant-of-spec-forbidden 3 "forbidden for test: $p" \
     "$R" --from build --to test --mode build --patch "$WORK/nfd.patch"
+  # B125: a homoglyph of the spec's directory, read against the spec's key.
+  p="$(printf 'd\320\276cs/sp\303\251c.md')"
+  addpatch "$p" "$WORK/spec-homoglyph.patch"
+  drive homoglyph-of-spec-build-mode 3 "$p (not ASCII, and can be read as docs/sp"$'\303\251'"c.md)" \
+    "$R" --from build --to test --mode build --patch "$WORK/spec-homoglyph.patch"
 
   # --- B117. A write-once record MODIFIED. Their writers refuse to overwrite
   # one, so a rewrite is never theirs; 1.1 let it pass beside a real plan.
@@ -612,6 +699,15 @@ JSON
   drive unattended-checks-result-base-mode 3 "Changed: $CR (modified)" \
     "$R" --from build --to test --mode build --unattended --base with-result
 
+  # --- B125. The allowlist on a commit (--base), as deliver's second ask
+  # reads it: a .gitignore beside code is refused unattended, allowed attended.
+  newrepo un-dot; R="$WORK/un-dot"
+  printf 'x\n' > "$R/.gitignore"; printf 'echo bye\n' > "$R/src/app.sh"; commit "$R"
+  drive unattended-dot-path-base-mode 3 ".gitignore (unattended: a name that begins with a dot)" \
+    "$R" --from build --to test --mode build --unattended --base base
+  drive attended-dot-path-base-mode 0 ".gitignore" \
+    "$R" --from build --to test --mode build --base base
+
   # --- B120. The backlog in build mode: an item may be added, none changed.
   newrepo bl; R="$WORK/bl"
   printf '| B1 | a wish | todo |\n' > "$R/.claude/productizer/backlog.md"
@@ -672,7 +768,7 @@ JSON
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; a homoglyph from another script (a Cyrillic letter for a Latin one), which is not folded; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent.\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script, a script checks.yaml runs); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); a bookkeeping record ADDED under --unattended, which stays inert.\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -861,10 +957,24 @@ else
   CHANGES="$(git -C "$ROOT" diff --raw --no-renames -z "$BASE...$HEAD_REF" | read_raw)" \
     || finish 4 "cannot determine the changed paths: git diff $BASE...$HEAD_REF failed"
 fi
-if printf '%s\n' "$CHANGES" | grep -q '^?'; then
-  finish 4 "cannot determine the changed paths: a changed path holds a control character (newline, tab or carriage return), and such a name is not judged: $(printf '%s\n' "$CHANGES" | grep '^?' | head -1 | cut -f2-)"
+if grep -q '^?' <<<"$CHANGES"; then
+  bad="$(grep '^?' <<<"$CHANGES")"
+  finish 4 "cannot determine the changed paths: a changed path holds a control character (newline, tab or carriage return), and such a name is not judged: $(head -n 1 <<<"$bad" | cut -f2-)"
 fi
 CHANGES="$(printf '%s\n' "$CHANGES" | awk 'NF' | sort -u)"
+
+# THE FORBIDDEN SET, every mode. The one place it is written - four lists of
+# folded names and the function that reads them; the header's FORBIDDEN PATH
+# list and references/ci-build.md describe them. The homoglyph rule reads the
+# same lists, so a name added here is guarded against a homoglyph too.
+#   ROOT_TREES    the name at the root, and everything under it
+#   NESTED_TREES  the name below the root, and everything under it
+#   ROOT_FILES    exactly this path from the root
+#   BASENAMES     a file of this name at any depth
+FORBID_ROOT_TREES=".github .claude .git .husky .githooks .productizer-run .productizer-tools"
+FORBID_NESTED_TREES=".claude .git"
+FORBID_ROOT_FILES=".pre-commit-config.yaml lefthook.yml .lefthook.yml lefthook-local.yml .lefthook-local.yml codeowners docs/codeowners review.md"
+FORBID_BASENAMES="claude.md claude.local.md agents.md .mcp.json .gitattributes .gitmodules"
 
 # --- the folded key ---------------------------------------------------------
 # A forbidden name is matched on a FOLDED KEY of the path, not on its bytes:
@@ -879,22 +989,81 @@ CHANGES="$(printf '%s\n' "$CHANGES" | awk 'NF' | sort -u)"
 # backlog, the spec outside build mode, the plan in plan mode) is granted on
 # the exact bytes, never on the key, so a variant spelling never inherits one.
 # A bytes-invalid name is folded through surrogate escapes and judged, not
-# guessed at. A homoglyph from another script (a Cyrillic letter for a Latin
-# one) is NOT folded: no file system or git folds it either.
+# guessed at.
+#
+# A HOMOGLYPH from another script (a Cyrillic letter for a Latin one) is not
+# folded by any file system or by git, and Python's standard library carries
+# no Unicode confusables table (TR39) to fold it with. So no table is used:
+# every character the key still holds outside ASCII is READ as ANY character,
+# a slash included - exactly one, or none to one for a combining mark or a
+# filler (the Hangul filler is invisible and not a format character), or one
+# to two for a Latin letter (a digraph such as U+02A3). A component of the
+# key that holds such a character and at least one ASCII letter or digit is
+# matched, so read, against every name in the forbidden lists and the spec's
+# key, and every component of each; each name it can be read as gives a
+# CANDIDATE key with that component replaced, and a candidate the forbidden
+# set refuses refuses the path. That is a superset of every one-for-one
+# confusable a table would list. A component with no ASCII letter or digit is
+# not read (a Japanese directory of four characters is not `.git`), and a
+# non-ASCII path with a component that begins with a dot is refused outright
+# (any tool's configuration hides there, listed or not). Measured on this
+# repository's history at v4.69.1: 0 of 2127 changed paths in 144 commits
+# hold a byte outside ASCII.
+# shellcheck disable=SC2086  # each FORBID_* list splits into one name per argument
 FOLDED="$(printf '%s\n' "$CHANGES" | python3 -I -c '
-import sys, unicodedata
+import itertools, re, sys, unicodedata
 def key(s):
     s = "".join(c for c in s if unicodedata.category(c) != "Cf")
     return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", s).casefold())
 def b2s(b): return b.decode("utf-8", "surrogateescape")
+def s2b(s): return s.encode("utf-8", "surrogateescape")
 out = sys.stdout.buffer
-for a in sys.argv[1:]:
-    out.write(key(b2s(a.encode("utf-8", "surrogateescape"))).encode("utf-8", "surrogateescape") + b"\n")
+spec, art = (key(b2s(s2b(a))) for a in sys.argv[1:3])
+names = set(sys.argv[3:]) | {spec}
+names |= {part for n in names for part in n.split("/")}
+def span(ch):
+    # How many characters one non-ASCII character can be read as.
+    n = unicodedata.name(ch, "")
+    if unicodedata.category(ch) in ("Mn", "Me") or "FILLER" in n or "BLANK" in n:
+        return (0, 1)
+    if n.startswith("LATIN "):
+        return (1, 2)
+    return (1, 1)
+def reading(comp):
+    rx = ""
+    for ch in comp:
+        if ch.isascii():
+            rx += re.escape(ch)
+        else:
+            lo, hi = span(ch)
+            rx += ".{%d,%d}" % (lo, hi)
+    return re.compile(rx, re.S)
+def candidates(k):
+    comps = k.split("/")
+    opts = []
+    for c in comps:
+        if c.isascii() or not re.search(r"[a-z0-9]", c):
+            opts.append([c])
+        else:
+            rx = reading(c)
+            opts.append([c] + sorted(n for n in names if rx.fullmatch(n)))
+    cands = []
+    for combo in itertools.product(*opts):
+        cand = "/".join(combo)
+        if cand != k and cand not in cands:
+            cands.append(cand)
+        if len(cands) >= 64: break
+    return cands
+out.write(s2b(spec) + b"\n" + s2b(art) + b"\n")
 for line in sys.stdin.buffer.read().split(b"\n"):
     if not line: continue
     f = line.split(b"\t", 3)
-    out.write(line + b"\t" + key(b2s(f[3])).encode("utf-8", "surrogateescape") + b"\n")
-' "$SPEC" "$ART")" || finish 4 "cannot fold the changed paths to their comparison key (python3 failed)"
+    k = key(b2s(f[3]))
+    ascii_ = b"1" if f[3].isascii() else b"0"
+    cands = candidates(k) if not k.isascii() else []
+    out.write(line + b"\t" + s2b(k) + b"\t" + ascii_ + b"\t" + b"\x1f".join(s2b(c) for c in cands) + b"\n")
+' "$SPEC" "$ART" $FORBID_ROOT_TREES $FORBID_NESTED_TREES $FORBID_ROOT_FILES $FORBID_BASENAMES)" \
+  || finish 4 "cannot fold the changed paths to their comparison key (python3 failed)"
 SPEC_KEY="$(printf '%s\n' "$FOLDED" | sed -n 1p)"
 ART_KEY="$(printf '%s\n' "$FOLDED" | sed -n 2p)"
 CHANGES="$(printf '%s\n' "$FOLDED" | sed 1,2d)"
@@ -922,30 +1091,43 @@ is_write_once() {
   esac
   return 1
 }
-# THE FORBIDDEN SET, every mode. The one place it is written; the header's
-# FORBIDDEN PATH list and references/ci-build.md describe this function.
+# THE FORBIDDEN SET is the four FORBID_* lists above the folded key, read by
+# this function.
 # forbidden_any_mode <path> <folded key>
 forbidden_any_mode() {
-  local raw="$1" k="$2" base
-  base="${k##*/}"
-  case "$k" in
-    .github|.github/*) return 0 ;;
-    .claude|.claude/*)
-      is_bookkeeping "$raw" && return 1
-      [ "$raw" = "$BACKLOG" ] && return 1
-      [ "$MODE" != "build" ] && [ "$raw" = "$SPEC" ] && return 1
-      return 0 ;;
-    */.claude|*/.claude/*|.git|.git/*|*/.git|*/.git/*) return 0 ;;
-    .husky|.husky/*|.githooks|.githooks/*) return 0 ;;
-    .productizer-run|.productizer-run/*|.productizer-tools|.productizer-tools/*) return 0 ;;
-    .pre-commit-config.yaml|lefthook.yml|.lefthook.yml|lefthook-local.yml|.lefthook-local.yml) return 0 ;;
-    codeowners|docs/codeowners|review.md) return 0 ;;
-  esac
-  case "$base" in
-    claude.md|claude.local.md|agents.md|.mcp.json|.gitattributes|.gitmodules) return 0 ;;
-  esac
+  local raw="$1" k="$2" n
+  for n in $FORBID_ROOT_TREES; do
+    case "$k" in
+      "$n"|"$n"/*)
+        if [ "$n" = .claude ]; then
+          is_bookkeeping "$raw" && return 1
+          [ "$raw" = "$BACKLOG" ] && return 1
+          [ "$MODE" != "build" ] && [ "$raw" = "$SPEC" ] && return 1
+        fi
+        return 0 ;;
+    esac
+  done
+  for n in $FORBID_NESTED_TREES; do
+    case "$k" in */"$n"|*/"$n"/*) return 0 ;; esac
+  done
+  for n in $FORBID_ROOT_FILES; do
+    [ "$k" = "$n" ] && return 0
+  done
+  for n in $FORBID_BASENAMES; do
+    [ "${k##*/}" = "$n" ] && return 0
+  done
   return 1
 }
+# An exception granted on the exact bytes: the backlog, the spec outside build
+# mode, and in plan mode the plan. The shape rules below never refuse one.
+is_exact_exception() {
+  [ "$1" = "$BACKLOG" ] && return 0
+  [ "$MODE" != "build" ] && [ "$1" = "$SPEC" ] && return 0
+  [ "$MODE" = "plan" ] && [[ "$1" =~ $PLAN_RE ]] && return 0
+  return 1
+}
+# has_dot_component <folded key>: a component begins with a dot.
+has_dot_component() { case "/$1" in */.*) return 0 ;; esac; return 1; }
 # is_forbidden <path> <folded key>
 is_forbidden() {
   forbidden_any_mode "$1" "$2" && return 0
@@ -955,7 +1137,8 @@ is_forbidden() {
 }
 
 REAL=""; BK_DELETED=""; BK_REWRITTEN=""; BK_UNATTENDED=""; LINKS=""; BACKLOG_ST=""
-while IFS=$'\t' read -r st om nm p k; do
+SHAPE_REFUSED=0
+while IFS=$'\t' read -r st om nm p k a c; do
   [ -n "$p" ] || continue
   # A LINK, any path, any mode. A symbolic link makes one name stand for
   # another path, and a gitlink makes one name stand for a commit of code that
@@ -990,7 +1173,34 @@ while IFS=$'\t' read -r st om nm p k; do
   fi
   [ "$p" = "$BACKLOG" ] && BACKLOG_ST="$st"
   REAL="$REAL$st"$'\t'"$p"$'\t'"$k"$'\n'
-  if is_forbidden "$p" "$k"; then FORBIDDEN="$FORBIDDEN$p"$'\n'; fi
+  if is_forbidden "$p" "$k"; then FORBIDDEN="$FORBIDDEN$p"$'\n'; continue; fi
+  is_exact_exception "$p" && continue
+  # A HOMOGLYPH, any mode: a path whose bytes are not ASCII is refused when a
+  # reading of it (see "the folded key") is a path the set above refuses, or
+  # when it has a component that begins with a dot.
+  if [ "$a" = 0 ]; then
+    hit=""
+    if [ -n "$c" ]; then
+      IFS=$'\x1f' read -r -a cands <<< "$c"
+      for cand in "${cands[@]}"; do
+        if is_forbidden "$p" "$cand"; then hit="$cand"; break; fi
+      done
+    fi
+    if [ -n "$hit" ]; then FORBIDDEN="$FORBIDDEN$p (not ASCII, and can be read as $hit)"$'\n'; continue; fi
+    if has_dot_component "$k"; then FORBIDDEN="$FORBIDDEN$p (not ASCII, under a name that begins with a dot)"$'\n'; continue; fi
+  fi
+  # THE UNATTENDED ALLOWLIST. With no person at the keyboard, a path is
+  # allowed only in the shape a build's own output takes: ASCII bytes, and no
+  # component that begins with a dot. Everything else is refused, listed or
+  # not, so the files a reader must trust the list for are the ASCII ones with
+  # no dot - and the named set above still refuses those it names.
+  if [ "$UNATTENDED" = 1 ]; then
+    if [ "$a" = 0 ]; then
+      FORBIDDEN="$FORBIDDEN$p (unattended: not ASCII)"$'\n'; SHAPE_REFUSED=1
+    elif has_dot_component "$k"; then
+      FORBIDDEN="$FORBIDDEN$p (unattended: a name that begins with a dot)"$'\n'; SHAPE_REFUSED=1
+    fi
+  fi
 done <<< "$CHANGES"
 
 if [ -n "$BK_UNATTENDED" ]; then
@@ -1013,7 +1223,9 @@ fi
 [ -n "$REAL" ] \
   || finish 1 "the run produced nothing outside the lifecycle's own bookkeeping; $FROM_KEY -> $TO_KEY has no result to take over"
 if [ -n "$FORBIDDEN" ]; then
-  finish 3 "the change touches a path the target stage does not permit${MODE:+ in $MODE mode}; forbidden for $TO_KEY: $(printf '%s' "$FORBIDDEN" | tr '\n' ' ' | sed 's/ $//')"
+  SHAPE_NOTE=""
+  [ "$SHAPE_REFUSED" = 0 ] || SHAPE_NOTE="; under --unattended a path is allowed only when its bytes are ASCII and no component of it begins with a dot, bar the backlog, the plan in plan mode and the spec outside build mode on their exact bytes"
+  finish 3 "the change touches a path the target stage does not permit${MODE:+ in $MODE mode}; forbidden for $TO_KEY: $(printf '%s' "$FORBIDDEN" | tr '\n' ' ' | sed 's/ $//')$SHAPE_NOTE"
 fi
 
 # THE BACKLOG IN BUILD MODE: an item may be ADDED, none removed or rewritten.

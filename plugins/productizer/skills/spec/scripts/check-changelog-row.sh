@@ -371,7 +371,7 @@ if [ -n "$SELFTEST" ]; then
   REACHED="$(printf '%s' "$CODES" | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s\n' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "${REACHED:-none - the corpus drove nothing}"
   printf '    NOT ASSERTED: anything outside the six committed spec versions. The corpus is six histories differing by one thing each; a defect that needs a seventh shape is invisible to it, and R32.5 sets no exit code by design.\n'

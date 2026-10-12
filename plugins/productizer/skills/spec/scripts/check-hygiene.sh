@@ -335,7 +335,7 @@ if [ -n "$SELFTEST" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: the default local-list resolution ($PRODUCTIZER_HYGIENE_PATTERNS and .claude/productizer/hygiene-local.txt) is pinned out of every case above, because that file is not committed and a case whose verdict depends on it is not evidence. Only the --patterns arm of that path is driven.\n'

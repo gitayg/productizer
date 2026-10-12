@@ -555,7 +555,7 @@ again. A prompt that shows nothing is how approval becomes a reflex."
   # segment can carry a trailing redirection that is not part of what publishes.
   # Still specific: the checklist must name this version, so it cannot approve a
   # different tag or a second publish hiding in the same line.
-  _ck_cmd="$(sed -n 's/^Command: //p' "$GATE_CHECKLIST" | head -1)"
+  _ck_cmd="$(sed -n 's/^Command: //p' "$GATE_CHECKLIST")"; _ck_cmd="$(head -n 1 <<<"$_ck_cmd")"
   case "$seg" in
     "$_ck_cmd"*) _ck_ok=1 ;;
     *)           _ck_ok=0 ;;

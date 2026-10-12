@@ -475,7 +475,7 @@ REC
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   if [ "$FAILED" -ne 0 ]; then
@@ -709,7 +709,7 @@ while IFS="$(printf '\t')" read -r cline cstate cid did; do
   esac
 done < "$WORK/concerns.tsv"
 
-in_list() { printf '%s' "$2" | grep -qxF -- "$1"; }
+in_list() { [ -n "$2" ] && grep -qxF -- "$1" <<<"${2%$'\n'}"; }
 # ---------------------------------------------------------------------------
 # The rulings directory. Absent and unreadable are different sentences.
 # ---------------------------------------------------------------------------

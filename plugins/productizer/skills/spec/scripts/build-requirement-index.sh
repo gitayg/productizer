@@ -252,7 +252,7 @@ FIXTURE_SPEC
       FIXTURE_BROKEN=""
     elif [ "$got" != "$want" ]; then
       verdict="NOT HELD"
-    elif [ -n "$sentence" ] && ! cat "$SELF_TMP/out" "$SELF_TMP/err" | grep -qF -- "$sentence"; then
+    elif [ -n "$sentence" ] && ! grep -qF -- "$sentence" "$SELF_TMP/out" "$SELF_TMP/err"; then
       verdict="NOT HELD (right code, wrong reason)"
     fi
     if [ "$verdict" = "held" ]; then SELF_UPHELD=$((SELF_UPHELD + 1)); fi
@@ -436,7 +436,7 @@ SWAP_MARKERS
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2 3; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
   printf '    NOT ASSERTED: the citation rule against check-acceptance-rows.sh itself. The rule is a copy, and no case here runs both files over one row and compares their answers, so the two can drift apart and every case above stays green.\n'

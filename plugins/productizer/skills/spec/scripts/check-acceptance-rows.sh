@@ -39,10 +39,18 @@
 #                               claim for THIS requirement
 #   a backticked path, i.e. a   that the file or directory exists, resolved
 #   token holding `/` and       against the work tree and against the skill
-#   ending in an extension      directory this script lives in
+#   ending in an extension      directory this script lives in, IN EXACT CASE
 #   or a `/`
-#   a backticked `NAME.sh` or   that a file of that name exists somewhere in
-#   `NAME.py` with no `/`       the work tree
+#   a backticked `NAME.sh` or   that a file of that name, in exact case,
+#   `NAME.py` with no `/`       exists somewhere in the work tree
+#
+# 1.2 - EXACT CASE ON EVERY HOST. Until 1.2 a path was resolved by asking the
+# filesystem whether it exists, and a case-insensitive disk answers yes for
+# `.claude/productizer/BACKLOG.md` when only `backlog.md` is there. R74's row
+# passed locally that way and failed on the Linux runner (B134). Each path
+# component is now compared against its directory's own listing, so a laptop
+# and a runner give the same verdict. A file that is present but untracked
+# (gitignored) still resolves, as before: only the spelling became strict.
 #
 # WHAT IS NOT ASSERTED, AND IS PRINTED RATHER THAN PASSED SILENTLY:
 #
@@ -115,6 +123,12 @@
 # wrong with the clean one - so a clean case that is not clean is exit 2 for
 # the whole selftest, never a pass on the seven that followed.
 #
+# Three more cases are BUILT in a temporary directory rather than committed
+# (B134): a row citing a path or a script in its exact case (exit 0), and in
+# the wrong case (exit 1). A committed pair of names differing only in case
+# cannot even be checked out on a case-insensitive disk. These three also
+# assert the sentence their run printed, not only the exit code.
+#
 # EXIT CODES ARE THE CONTRACT.
 #
 #   0  every active requirement has a row, and everything those rows name
@@ -130,7 +144,7 @@
 # was not clean (2).
 set -euo pipefail
 
-VERSION="check-acceptance-rows 1.1"
+VERSION="check-acceptance-rows 1.2"
 ROOT=""
 SPEC=".claude/productizer/spec.md"
 CHECKS=".claude/productizer/checks.yaml"
@@ -271,6 +285,56 @@ if [ "$MODE" = "selftest" ]; then
   [ "$CLEAN_HELD" = "$CLEAN_SEEN" ] \
     || die_unmeasured "the clean case did not exit 0. Every other case's failure is then unattributable - they would be red for whatever is wrong with the clean one - so this is unmeasured, not a corpus that held"
 
+  # B134: three cases built in the scratch directory rather than committed,
+  # because a committed `docs/NOTES.md` beside `docs/notes.md` cannot be
+  # checked out on a case-insensitive disk at all. One tree holds
+  # `docs/notes.md` and `tool.sh`; each case is a row citing them in exact or
+  # in wrong case. These also assert the sentence the run printed, since a
+  # wrong-case path that went red for some other reason would prove nothing.
+  CASE_TREE="$SCRATCH/exact-case"
+  mkdir -p "$CASE_TREE/docs"
+  printf '# A file the rows name by path.\n' > "$CASE_TREE/docs/notes.md"
+  printf '# A file the rows name by basename. Never executed.\n' > "$CASE_TREE/tool.sh"
+  printf 'version: 1\nchecks:\n  - id: alpha\n    coverage:\n      spec_units:\n        - id: R1\n' \
+    > "$CASE_TREE/checks.yaml"
+  exact_case_case() {
+    # $1 name, $2 expected exit, $3 the row's evidence cell, $4 reason,
+    # $5... sentences the output must hold.
+    local name="$1" expected="$2" evidence="$3" reason="$4" got=0 verdict sentence
+    shift 4
+    printf '# Fixture spec\n\n## Requirements\n\n- **R1** — The lifecycle shall hold exactly one living spec per product.\n\n## Acceptance criteria\n\n| Requirement | Verified by |\n|---|---|\n| R1 | %s |\n' \
+      "$evidence" > "$CASE_TREE/spec.md"
+    bash "$0" --root "$CASE_TREE" --spec spec.md --checks checks.yaml \
+      > "$SCRATCH/$name.out" 2> "$SCRATCH/$name.err" || got=$?
+    CASES=$((CASES + 1))
+    CODES="$CODES$got
+"
+    verdict="held"
+    [ "$got" = "$expected" ] || verdict="NOT HELD"
+    for sentence in "$@"; do
+      grep -qF -- "$sentence" "$SCRATCH/$name.out" || verdict="NOT HELD (no line: $sentence)"
+    done
+    if [ "$verdict" = "held" ]; then UPHELD=$((UPHELD + 1)); fi
+    REPORT="$REPORT      $name  expected $expected  got $got  $verdict  $reason
+"
+  }
+  # shellcheck disable=SC2016  # the backticks are markdown, literal on purpose
+  exact_case_case path-in-exact-case 0 \
+    '`alpha` check over `docs/notes.md`, the directory `docs/` and `tool.sh`.' \
+    'every citation spelled as the directory lists it resolves' \
+    'rows naming something that does not resolve: 0'
+  # shellcheck disable=SC2016  # the backticks are markdown, literal on purpose
+  exact_case_case path-in-wrong-case 1 \
+    '`alpha` check over `docs/NOTES.md` and the directory `DOCS/`.' \
+    'R36.d - a wrong-case path is unreal on every host, case-insensitive disk included' \
+    'names `docs/NOTES.md`, and no such file or directory exists, in that exact case' \
+    'names `DOCS/`, and no such file or directory exists, in that exact case'
+  # shellcheck disable=SC2016  # the backticks are markdown, literal on purpose
+  exact_case_case script-in-wrong-case 1 \
+    '`alpha` check over `Tool.sh`.' \
+    'R36.e - a wrong-case script basename is unreal on every host' \
+    'names the script `Tool.sh`, and no file of that name exists'
+
   printf '    selftest cases driven: %d\n' "$CASES"
   printf '%s' "$REPORT"
   [ "$OUTSIDE" -eq 0 ] \
@@ -285,10 +349,10 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '    NOT ASSERTED: the corpus drives the exit CODE, never the wording of a finding; a case that went red for the wrong reason is invisible here and is read off the case output by hand\n'
+  printf '    NOT ASSERTED: the committed corpus drives the exit CODE, never the wording of a finding, so a corpus case that went red for the wrong reason is invisible here and is read off the case output by hand (only the three exact-case cases assert a sentence); a non-ASCII path stored in a different Unicode normalization than the row spells it\n'
   [ "$CASES" = "$UPHELD" ] || exit 1
   if [ -n "$MISSING" ]; then
     printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
@@ -541,12 +605,38 @@ for dirpath, dirnames, filenames in os.walk(root):
         basenames.add(name)
 
 
+def exact_case(base, token):
+    """True where every component of `token` is spelled, case included, as
+    the directory that holds it lists it. A plain existence test asks the
+    filesystem, and a case-insensitive one finds `BACKLOG.md` for a
+    `backlog.md` that a Linux runner then cannot: R74's row passed this
+    check locally and failed it on CI (B134). Comparing each name against
+    the directory's own listing gives the same answer on every host. A file
+    that is present but untracked still resolves, as it always has."""
+    current = '/' if token.startswith('/') else base
+    for part in token.split('/'):
+        if part in ('', '.'):
+            continue
+        if part == '..':
+            current = os.path.dirname(current)
+            continue
+        try:
+            listed = os.listdir(current)
+        except OSError:
+            return False
+        if part not in listed:
+            return False
+        current = os.path.join(current, part)
+    return os.path.isdir(current) if token.endswith('/') else os.path.exists(current)
+
+
 def resolves(token):
-    """True where a path token names something on disk. Two bases: the work
-    tree, and the skill directory this script lives in - a row citing
-    `references/ears.md` means the copy shipped beside the scripts."""
+    """True where a path token names something on disk, in exact case. Two
+    bases: the work tree, and the skill directory this script lives in - a
+    row citing `references/ears.md` means the copy shipped beside the
+    scripts."""
     for base in (root, skill_dir):
-        if os.path.exists(os.path.join(base, token)):
+        if exact_case(base, token):
             return True
     return False
 
@@ -632,8 +722,9 @@ for requirement in sorted([r for r in requirements if r['status'] == 'active'],
             else:
                 FINDINGS.append(
                     'R36.d  %s  %s:%d  names `%s`, and no such file or '
-                    'directory exists under the work tree or the skill '
-                    'directory' % (rid, spec_shown, row['line'], token))
+                    'directory exists, in that exact case, under the work '
+                    'tree or the skill directory'
+                    % (rid, spec_shown, row['line'], token))
                 printed.append((rid, 'path  ', token, 'MISSING'))
         else:
             scripts_examined += 1
@@ -689,8 +780,8 @@ assertion('R36.c', 'cited-check-claims-this-requirement', claim_examined,
           None if claim_examined else 'no active row names a check that '
                                       'exists, so this assertion did not fire')
 assertion('R36.d', 'cited-path-exists', paths_examined, paths_upheld,
-          'a backticked path named by a row resolves under the work tree or '
-          'the skill directory',
+          'a backticked path named by a row resolves, in exact case, under '
+          'the work tree or the skill directory',
           None if paths_examined else 'no active row names a path, so this '
                                       'assertion did not fire')
 assertion('R36.e', 'cited-script-exists', scripts_examined, scripts_upheld,

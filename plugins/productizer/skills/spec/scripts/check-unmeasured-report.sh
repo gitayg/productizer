@@ -328,7 +328,7 @@ SELFTEST_HYGIENE
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '  NOT ASSERTED: which of the twelve assertions moved. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
@@ -382,7 +382,7 @@ fi
 # PREMISE TWO. The unmeasurable runner config must name a spec that is not in the
 # sandbox it runs against, or the denominator was derivable and nothing was
 # unmeasured.
-DECLARED_SPEC="$(sed -n 's/^ *spec: *\([^ #][^#]*\)$/\1/p' "$FIXTURE/runner/checks.yaml" | head -1 | sed 's/[[:space:]]*$//')"
+DECLARED_SPEC="$(sed -n 's/^ *spec: *\([^ #][^#]*\)$/\1/p' "$FIXTURE/runner/checks.yaml")"; DECLARED_SPEC="$(head -n 1 <<<"$DECLARED_SPEC" | sed 's/[[:space:]]*$//')"
 [ -n "$DECLARED_SPEC" ] || die_unmeasured "the runner fixture names no spec path, so the denominator's premise cannot be established"
 case "$DECLARED_SPEC" in
   /*) die_unmeasured "the runner fixture's spec path is absolute; it would name a different file on every machine" ;;

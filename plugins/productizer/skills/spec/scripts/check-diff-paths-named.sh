@@ -454,7 +454,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: no case drives --last survey mode, whose verdict is composed from per-commit runs rather than measured here; and no case reaches the unreadable-git-output refusal, which needs a broken git\n'
@@ -501,8 +501,8 @@ if [ -n "$LAST" ]; then
     for g in ${GENERATED+"${GENERATED[@]}"}; do args+=(--generated "$g"); done
     out="$(bash "$0" "${args[@]}" 2>&1)" || code=$?
     n=$((n + 1))
-    ex="$(printf '%s\n' "$out" | sed -n 's/^  units examined: \([0-9]*\),.*/\1/p' | head -1)"
-    un="$(printf '%s\n' "$out" | sed -n 's/^  units examined: [0-9]*, named: [0-9]*, not named: \([0-9]*\).*/\1/p' | head -1)"
+    ex="$(sed -n 's/^  units examined: \([0-9]*\),.*/\1/p' <<<"$out")"; ex="$(head -n 1 <<<"$ex")"
+    un="$(sed -n 's/^  units examined: [0-9]*, named: [0-9]*, not named: \([0-9]*\).*/\1/p' <<<"$out")"; un="$(head -n 1 <<<"$un")"
     [ -n "$ex" ] || ex=0
     [ -n "$un" ] || un=0
     paths_total=$((paths_total + ex))

@@ -300,7 +300,7 @@ returned 50, so one in this range but older than those is not listed here.**
   REACHED="$(printf '%s' "$CODES" | sort -un | tr '\n' ' ' | sed 's/ *$//')"
   MISSING=""
   for want in $DOCUMENTED; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: %s\n' "$REACHED" "$DOCUMENTED"
 
@@ -419,7 +419,7 @@ else
         unplaceable=$((unplaceable + 1))
         continue
       fi
-      printf '%s\n' "$range_commits" | grep -qxF "$oid" || continue
+      grep -qxF "$oid" <<<"$range_commits" || continue
       kept="$kept  - ${row#* }
 "
     done <<PULLS

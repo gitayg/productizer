@@ -2,6 +2,7 @@
 # build-view.sh [repo-root] [--out FILE] [--stale-after SECONDS|never]
 # build-view.sh --arch [FILE] [repo-root]
 # build-view.sh --selftest
+# build-view.sh --version
 #
 # Generates the lifecycle dashboard from a repository's real files. Nothing on
 # the page is stored here: every count, every state and every row is read from
@@ -113,6 +114,9 @@ while [ $# -gt 0 ]; do
       esac ;;
     --arch=*) MODE=arch; ARCH_FILE="${1#--arch=}"; shift ;;
     --selftest|--self-test) MODE=selftest; shift ;;
+    # Added in v4.70.0 so the check running this builder's self-test can
+    # record which builder it ran (B115, B130).
+    --version) echo "build-view 1.0"; exit 0 ;;
     # The graph assertion suite. Driven by --selftest as one of its cases and
     # separately runnable, because when it goes red the first question is which
     # of A1..A16 went red and that answer is on its own stdout.
@@ -133,6 +137,7 @@ while [ $# -gt 0 ]; do
       echo "usage: build-view.sh [repo-root] [--out FILE] [--stale-after SECONDS|never]"
       echo "       build-view.sh --arch [FILE] [repo-root]   print the VZ_ARCH graph as JSON"
       echo "       build-view.sh --selftest"
+      echo "       build-view.sh --version"
       exit 0 ;;
     -*) echo "build-view: unknown option: $1" >&2; exit 2 ;;
     *) [ -z "$ROOT" ] || { echo "build-view: only one repo-root" >&2; exit 2; }; ROOT="$1"; shift ;;
@@ -181,7 +186,7 @@ if [ "$MODE" = selftest ]; then
       FAILED=$((FAILED + 1))
       return 0
     fi
-    if ! printf '%s' "$_out" | grep -q -- "$_need"; then
+    if [ -z "$_need" ] || ! grep -q -- "$_need" <<<"$_out"; then
       printf '  FAIL %-20s exit %s as declared, but nothing it printed says: %s\n' \
         "$_name" "$_rc" "$_need"
       FAILED=$((FAILED + 1))
@@ -199,10 +204,66 @@ if [ "$MODE" = selftest ]; then
   drive no-such-root   2 'no such directory' ./no-such-directory-under-build-view
   drive bad-stale      2 'whole seconds'    --stale-after=zzz
 
+  # B115 - embedded text never carries the capability object's name verbatim.
+  # Two pages are built from two throwaway roots that differ in ONE backlog
+  # row: a row naming the user's config dot-file by its home-directory path,
+  # bracket-indexing it, and trying to close the data block's script element.
+  # Measured against the plain page rather than against a constant, so the
+  # builder's own code - which does reach the capability object - is the
+  # baseline and only what the row added is counted. The row must add no
+  # occurrence of the name followed by a property access, no script element,
+  # and must still decode to its own text in the HTML and in the JS literals.
+  EMB="$(mktemp -d "${TMPDIR:-/tmp}/build-view-embed.XXXXXX")"
+  for _v in plain named; do
+    mkdir -p "$EMB/$_v/.claude/productizer"
+    { printf '# Backlog\n\n## Items\n\n'
+      printf '| Id | What is wanted | Status | Jira | Raised | Notes |\n'
+      printf '|---|---|---|---|---|---|\n'
+      # The backticks are markdown in the row, not command substitution.
+      # shellcheck disable=SC2016
+      if [ "$_v" = named ]; then
+        printf '%s\n' '| B1 | Read `~/.claude.json` and `~/.claude["x"]` | `todo` | — | selftest | The user config at ~/.claude.json, then </script><script>var b115=1</script> ends. |'
+      else
+        printf '%s\n' '| B1 | Read the user config file | `todo` | — | selftest | The user config, then a plain sentence ends. |'
+      fi
+    } > "$EMB/$_v/.claude/productizer/backlog.md"
+  done
+  _rc=0
+  _out="$( { bash "$SELF" "$EMB/plain" --out "$EMB/plain.html" \
+             && bash "$SELF" "$EMB/named" --out "$EMB/named.html" \
+             && python3 -I - "$EMB/plain.html" "$EMB/named.html" <<'PYEMB'
+import html, re, sys
+ACCESS = re.compile(r'(?<![A-Za-z0-9_$])claude(?![A-Za-z0-9_$])\s*(?:\?\s*)?[.\[]')
+plain, named = (open(p, encoding='utf-8').read() for p in sys.argv[1:3])
+added = len(ACCESS.findall(named)) - len(ACCESS.findall(plain))
+scripts = named.count('<script') - plain.count('<script')
+shown = '~/.claude.json' in html.unescape(named) and '~/.claude["x"]' in html.unescape(named)
+carried = '~/.\\u0063laude.json' in named
+print('the row added %d reference(s) to the capability object and %d script element(s); '
+      'its text %s in the HTML and %s in the JS literals'
+      % (added, scripts, 'decodes' if shown else 'DOES NOT DECODE',
+         'is carried encoded' if carried else 'IS NOT CARRIED'))
+PYEMB
+           } 2>&1)" || _rc=$?
+  rm -rf "$EMB"
+  DRIVEN=$((DRIVEN + 1))
+  CODES="$CODES$_rc
+"
+  _need='the row added 0 reference(s) to the capability object and 0 script element(s); its text decodes in the HTML and is carried encoded in the JS literals'
+  if [ "$_rc" -eq 0 ] && grep -qF -- "$_need" <<<"$_out"; then
+    printf '  ok   %-20s exit 0, and it said: %s\n' embedded-name "$_need"
+  else
+    printf '  FAIL %-20s exit %s; wanted it to say: %s\n' embedded-name "$_rc" "$_need"
+    # The scratch root is named as <tmp>: this output is tailed into a
+    # committed result, and an absolute path there is somebody's home.
+    printf '%s\n' "$_out" | awk -v t="$EMB" '{ while ((i = index($0, t)) > 0) $0 = substr($0, 1, i - 1) "<tmp>" substr($0, i + length(t)); print "         " $0 }' | tail -8
+    FAILED=$((FAILED + 1))
+  fi
+
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '  cases driven: %d. Cases that did not hold: %d\n' "$DRIVEN" "$FAILED"
   # The R39.b declaration. The reached half is computed from the codes the
@@ -219,8 +280,9 @@ if [ "$MODE" = selftest ]; then
     printf 'FAIL: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
     exit 2
   fi
-  printf '  NOT ASSERTED: the rendered page. --selftest drives the VZ_ARCH graph and the\n'
-  printf '  argument contract; that the HTML around it is well formed is asserted by\n'
+  printf '  NOT ASSERTED: the rendered page. --selftest drives the VZ_ARCH graph, the\n'
+  printf '  argument contract, and the BYTES of two built pages (embedded-name); no browser\n'
+  printf '  draws them here. That the HTML around it is well formed is asserted by\n'
   printf '  check-view-readonly.sh and check-view-publish-refused.sh over a real build.\n'
   exit 0
 fi
@@ -1659,9 +1721,48 @@ def describe(path):
 # rendering
 # --------------------------------------------------------------------------
 
-def esc(t):
+# B115. The page embeds repository text - backlog prose, spec text, commit
+# subjects, file paths - and check-view-readonly.sh reads every byte of the
+# page for the capability object's name followed by a property access. Prose
+# that names the user's config dot-file by its home-directory path spells
+# exactly that, and failed the check. The check stays strict (3.1 tried to
+# tell prose from code there and was reverted as a parser differential, B133),
+# so the data is encoded instead: wherever repository text lands in the page,
+# the one character `c` of that name, as a whole identifier, is written as a
+# character reference in HTML and as `c` in a JavaScript string literal.
+# The browser decodes both to the same text, so what the reader sees and what
+# a copy button copies are unchanged, and the page never carries the name
+# verbatim in anything but the builder's own code.
+#
+# The boundary is the check's own: not preceded and not followed by an
+# identifier character. In JSON output that also keeps the substitution out
+# of a `\uXXXX` escape, whose `c` is always preceded by a hex digit.
+#
+# ONLY where the decoded text cannot run. A character reference in an event
+# handler or a `javascript:` URL decodes to code the browser runs and the check
+# could no longer read, so every value that goes into an href is written with
+# escu(), which encodes nothing. And a `c` is inert only while it stays
+# inside its string: `<` in the data block is written `<` for that reason,
+# so no text can close the script element and carry an identifier escape out
+# into code.
+CAP_NAME = re.compile(r'(?<![A-Za-z0-9_$])claude(?![A-Za-z0-9_$])')
+
+
+def escu(t):
+    """HTML-escape for an attribute the browser may run, such as an href."""
     return (str(t).replace('&', '&amp;').replace('<', '&lt;')
             .replace('>', '&gt;').replace('"', '&quot;'))
+
+
+def esc(t):
+    return CAP_NAME.sub('&#99;laude', escu(t))
+
+
+def jdata(v, **kw):
+    """JSON for the page's data block: a JS literal whose strings carry no `<`
+    and no verbatim capability object name."""
+    return CAP_NAME.sub(lambda _m: '\\u0063laude',
+                        json.dumps(v, **kw).replace('<', '\\u003c'))
 
 def blob(path):
     if GH and path in tracked:
@@ -2793,7 +2894,7 @@ else:
         if JIRA_SITE and it['jira']:
             j = ('<a class="bk-jira" href="%s/browse/%s" target="_blank" rel="noopener" '
                  'title="Status is read from Jira and never written back">%s</a>'
-                 % (esc(JIRA_SITE), esc(it['jira']), esc(it['jira'])))
+                 % (escu(JIRA_SITE), escu(it['jira']), esc(it['jira'])))
         elif it['jira']:
             j = ('<span class="bk-j mono" title="no jira.site in %s, so this key cannot be linked">%s</span>'
                  % (esc(CFG_PATH), esc(it['jira'])))
@@ -2867,7 +2968,7 @@ else:
         else:
             push = '<span class="rpush warn">not pushed</span>'
         sha = ('<a class="relsha mono" href="https://github.com/%s/commit/%s" target="_blank" '
-               'rel="noopener">%s</a>' % (esc(GH), esc(r['sha']), esc(r['short']))) if GH \
+               'rel="noopener">%s</a>' % (escu(GH), escu(r['sha']), esc(r['short']))) if GH \
             else '<span class="relsha mono">%s</span>' % esc(r['short'])
         bl = ''.join('<li>%s</li>' % esc(b) for b in r['bullets'])
         if not bl:
@@ -4838,7 +4939,7 @@ def _cell(v):
 def _js(t):
     """A JavaScript string literal. `<` is escaped so nothing in the payload
     can close the script element early."""
-    return json.dumps(t, ensure_ascii=True).replace('<', '\\u003c')
+    return jdata(t, ensure_ascii=True)
 
 
 _ev = ['# %s \u2014 the evidence behind the SDLC pipeline view' % PRODUCT, '',
@@ -4994,17 +5095,17 @@ BODY = BODY + DL + STALE
 DATA = ('var PROD = %s;\nvar CUR0 = %d;\nvar HUMAN = %d;\nvar DEFERRED = %d;\nvar HUMANL = %s;\nvar S = %s;\n'
         'var VZ_HISTORY = %s;\n'
         'var VZ_ARCH = %s;\n'
-        % (json.dumps(PRODUCT), CUR0, HUMAN_ITEMS, len(_deferred),
-           json.dumps(HUMAN_LIST, ensure_ascii=False),
-           json.dumps(S, indent=1, sort_keys=True, ensure_ascii=False),
+        % (jdata(PRODUCT), CUR0, HUMAN_ITEMS, len(_deferred),
+           jdata(HUMAN_LIST, ensure_ascii=False),
+           jdata(S, indent=1, sort_keys=True, ensure_ascii=False),
            # null, not an empty series: a chart drawn from [] is a chart of a
            # repository whose tooling never tested itself, and that is a
            # different claim from "this was not measured".
-           json.dumps(VZ_HIST, sort_keys=True, ensure_ascii=False),
+           jdata(VZ_HIST, sort_keys=True, ensure_ascii=False),
            # Always an object, never null: its own `state` says whether the
            # file was read, and a renderer that has to tell absent from
            # unreadable cannot do it from a missing variable.
-           json.dumps(VZ_ARCH, sort_keys=True, ensure_ascii=False)))
+           jdata(VZ_ARCH, sort_keys=True, ensure_ascii=False)))
 
 tpl = slurp(TEMPLATE)
 # @@STALECSS@@ sits flush against the end of the last rule in the stylesheet,

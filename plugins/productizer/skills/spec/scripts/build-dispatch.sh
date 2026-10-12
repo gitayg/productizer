@@ -303,8 +303,8 @@ JSON
       HELD=$((HELD + 1)); printf '  ok    %-40s exit %s\n' "$name" "$got"
     else
       printf '  FAIL  %-40s exit %s (wanted %s and the text: %s)\n' "$name" "$got" "$want" "$text"
-      sed 's/^/          stdout: /' "$ST/$name.out" | head -n 12
-      sed 's/^/          stderr: /' "$ST/$name.err" | head -n 12
+      head -n 12 "$ST/$name.out" | sed 's/^/          stdout: /'
+      head -n 12 "$ST/$name.err" | sed 's/^/          stderr: /'
     fi
   }
   # also <name> <description> <command...>: an extra assertion on state the

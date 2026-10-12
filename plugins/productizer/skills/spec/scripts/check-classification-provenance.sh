@@ -506,7 +506,7 @@ BREAK_THE_COMMIT
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: assertion 8, which reads the change log for cited intents. The fixture spec deliberately carries no change log, so no case above exercises it; and the corpus drives the exit code, never the wording of a finding.\n'
@@ -762,9 +762,9 @@ fi
 
 classification_word() { # <backlog line, as grep -n printed it>
   local w
-  w="$(printf '%s\n' "$1" | sed -n -E 's/.*classified (as )?(an? )?\**`?(extend|refine|duplicate|contradict)`?\**.*/\3/p' | head -1)"
+  w="$(sed -n -E 's/.*classified (as )?(an? )?\**`?(extend|refine|duplicate|contradict)`?\**.*/\3/p' <<<"$1")"; w="$(head -n 1 <<<"$w")"
   if [ -z "$w" ]; then
-    w="$(printf '%s\n' "$1" | sed -n -E 's/.*as an? (duplicate|contradiction) of R[0-9]+.*/\1/p' | head -1)"
+    w="$(sed -n -E 's/.*as an? (duplicate|contradiction) of R[0-9]+.*/\1/p' <<<"$1")"; w="$(head -n 1 <<<"$w")"
     [ "$w" != "contradiction" ] || w="contradict"
   fi
   # Only ever a word from the closed set of four reaches stdout. A record

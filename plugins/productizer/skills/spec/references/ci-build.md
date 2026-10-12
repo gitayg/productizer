@@ -201,10 +201,14 @@ refuses (exit 5) unless the plan is committed there.
 | Mode | Asked | Evidence it needs | What it forbids |
 |---|---|---|---|
 | `plan` | `design -> build --mode plan --unattended` | a `plan.md` under `artifacts.path` | every path except the plan |
-| `build` | `build -> test --mode build --unattended` | a path outside `artifacts.path` (a plan alone is not a build), and never the backlog | the spec, plus the forbidden set below |
+| `build` | `build -> test --mode build --unattended` | a path outside `artifacts.path` (a plan alone is not a build), and never the backlog | the spec, the forbidden set below, and - unattended - any path that is not ASCII or has a component beginning with a dot, bar the backlog on its exact path |
 
-**The forbidden set, every mode.** It is written once, in `forbidden_any_mode()`
-in `stage-advance.sh`, and matched on the folded key described below it:
+**The forbidden set, every mode.** Since `stage-advance.sh` 1.4 it is written
+once, as four lists - `FORBID_ROOT_TREES` (a name at the root and everything
+under it), `FORBID_NESTED_TREES` (the same below the root), `FORBID_ROOT_FILES`
+(exactly that path from the root) and `FORBID_BASENAMES` (a file of that name
+at any depth) - read by one function, `forbidden_any_mode()`, and matched on the
+folded key described below it:
 
 - `.github/**`: every workflow, composite action, `CODEOWNERS` and
   `dependabot.yml`, all of it.
@@ -227,6 +231,33 @@ onto a rule file is refused; exceptions are granted on the exact bytes only. A
 symbolic link created or retargeted, and a gitlink added, repointed or removed,
 is refused at any path. In build mode the backlog may gain an item but not lose
 or change one.
+
+**Homoglyphs, every mode (B125).** No file system or git folds a letter from
+another script onto a Latin one, and Python's standard library has no Unicode
+confusables table, so 1.4 uses none. A path whose bytes are not ASCII is READ:
+each non-ASCII character is taken as any one character (none or one for a
+combining mark or a filler, one or two for a Latin letter), and if any reading
+is a path the lists refuse, the path is refused - a Cyrillic letter in
+`.github`, `AGENTS.md` or `docs/CODEOWNERS`, a division slash for `/`, a Hangul
+filler inside a name. A non-ASCII path with a component beginning with a dot is
+refused outright. A component with no ASCII letter or digit is not read, so a
+directory named in Japanese is not taken for `.git`. A legitimate non-ASCII
+name can still read as a rule file and be refused, attended too.
+
+**Unattended, an allowlist bounds the list (B125).** A list is not a proof:
+the next tool that reads a config file from the repository root extends it
+silently. So under `--unattended`, which `deliver` passes, a changed path is
+also refused unless its bytes are ASCII and no component of it begins with a
+dot. The exceptions, on their exact bytes only, are the backlog, the plan in
+plan mode, and the spec outside build mode. Nearly every tool's configuration
+lives under a dot name - other CI systems, editor tasks, dev containers,
+linters that execute their config, other agents' rule files - so what a reader
+must still trust the list for is the ASCII, dot-free files, and it names those
+it knows. Attended runs keep the list alone: a person's `.gitignore` edit is
+theirs to make, and they see it. Replayed over this repository's 143 non-root
+commits at v4.69.1 as `build -> test` in build mode, the allowlist refuses 23
+the list allows: 22 touch a plugin manifest under `.claude-plugin/` and 1 the
+`.gitignore`. An adopter's unattended build that edits a dot file exits 3.
 
 These decide what CI runs, what an agent is told and may do, how git treats a
 path, and what the run is judged by. Because the set is checked first, an
@@ -544,6 +575,34 @@ your copy after every edit.
    object `d669edc…`, `refs/tags/v4.65.1^{}` the commit `d9573c0…`). Keep the
    value quoted. Then run `check-ci-template.py` on your copy: its `tools-pin`
    assertion refuses anything but 40 lower-case hex digits.
+
+   **Or take the pinned copy.** From v4.70.0 on, each release has a
+   `build-from-spec.yml` asset attached: the template with `PRODUCTIZER_SHA`
+   already set to that release's own commit. CI's `release-prep` job makes it
+   when the tag is pushed, with a token that can only read. It changes the one
+   line, refuses the copy if any other line differs, and runs
+   `check-ci-template.py` on it, which must pass with no placeholder note. The
+   release notes are assembled in the same job. `release-draft`, the only job
+   that holds the write token, does not check out the repository. It checks
+   the handed-over files as text with system tools, creates the draft release
+   and attaches the copy. No code from this repository runs while that token
+   is held. A person publishes the draft, so the asset appears when the
+   release does. Releases before v4.70.0 have no such asset. A pinned copy is still a file you are trusting, so check it
+   before you commit it:
+
+   ```
+   gh release download vX.Y.Z --repo gitayg/productizer --pattern build-from-spec.yml
+   git ls-remote https://github.com/gitayg/productizer 'refs/tags/vX.Y.Z^{}'
+   grep -n 'PRODUCTIZER_SHA: "' build-from-spec.yml
+   curl -fsSL https://raw.githubusercontent.com/gitayg/productizer/<commit>/plugins/productizer/skills/spec/templates/build-from-spec.yml \
+     | diff - build-from-spec.yml
+   ```
+
+   The `grep` must print the commit id that `git ls-remote` printed. The `diff`
+   against the template at that commit must show exactly one changed line,
+   `PRODUCTIZER_SHA`, from forty zeros to that commit id. Then
+   `check-ci-template.py build-from-spec.yml` must exit 0 without
+   printing `note: PRODUCTIZER_SHA is the all-zero placeholder`.
 3. **Provide the solver probe.** The template requires
    `evals/solver-probe.py` in your repository; without it `prepare` refuses
    every run, exit 3, before any model is called. The pull request body reports

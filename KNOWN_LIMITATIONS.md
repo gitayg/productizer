@@ -365,12 +365,14 @@ files that steer CI or an agent - CLAUDE.md, AGENTS.md, `.mcp.json`,
 `.gitattributes`, `.gitmodules`, hook managers and others. Since 1.2 a name is
 matched after folding case, Unicode normalisation and format characters, so a
 variant a checkout folds onto a rule file is refused, and a symbolic link or a
-submodule entry is refused at any path. Still allowed: a homoglyph from another
-script, and, in an attended run only, a rewritten checks result (its writer,
-`run-checks.sh`, rewrites it every run). Since 1.3, under `--unattended` - which
-the CI template's `deliver` passes on both of its calls - any change to the
-checks result is refused, because nothing in an unattended pipeline writes it
-(maintainer ruling 2026-10-12, B126). Nothing shows the list is complete (B125).
+submodule entry is refused at any path. In an attended run only, a rewritten
+checks result is still allowed (its writer, `run-checks.sh`, rewrites it every
+run). Since 1.3, under `--unattended` - which the CI template's `deliver` passes
+on both of its calls - any change to the checks result is refused, because
+nothing in an unattended pipeline writes it (maintainer ruling 2026-10-12,
+B126). Since 1.4 a homoglyph from another script is read rather than folded, and
+under `--unattended` an allowlist bounds the list (items 19 and 20). Attended,
+nothing shows the list is complete (B125).
 
 The same default-deny refuses a design move that writes
 `.claude/productizer/` files such as `requirement-index.md`, which this
@@ -439,3 +441,80 @@ guarantee the template states - no shell for the agent, no write token beside
 it, no repository code in the job that writes (R71, v4.67.3), a draft pull
 request only - is proven by self-tests against local repositories and by static
 checks of the YAML, and by nothing that ran on GitHub.
+
+## Added in v4.70.0
+
+### 19 · `stage-advance.sh` refuses some legitimate non-ASCII names
+
+1.4 reads each non-ASCII character of a changed path as any character (one, or
+none to one for a combining mark or a filler, one to two for a Latin letter),
+and refuses the path if a reading is a refused one. No confusables table is
+used, so the reading is a superset of one, and it over-refuses: a six-letter
+Cyrillic file name ending `.md` reads as `AGENTS.md` and is refused, in an
+attended run too. A non-ASCII name under a dot component is refused outright.
+Measured on this repository's history at v4.69.1: 0 of 2127 changed paths in
+144 commits hold a byte outside ASCII, so nothing here was refused by it. Not
+refused: a reading of three or more characters for one, a component with no
+ASCII letter or digit, and a homoglyph made of ASCII alone (`rn` for `m`).
+
+### 20 · A steering file that is ASCII, has no dot and is not on the list
+
+Under `--unattended` 1.4 allows only ASCII paths with no component beginning
+with a dot, bar the backlog, the plan and the spec on their exact paths, so
+most tools' configuration is refused without being named. What the allowlist
+still admits, and the named list must catch, is an ASCII, dot-free file:
+`Jenkinsfile`, `azure-pipelines.yml`, `GEMINI.md`, a `package.json` script, or
+a script `checks.yaml` runs - an unattended build may edit that last one and
+neuter the check that runs it. None of those is on the list. Attended runs
+apply the list alone. The plugin manifests under `.claude-plugin/` declare hooks
+and MCP servers and are refused unattended by their dot; attended they are not
+on the list, because adding them would refuse 22 of this repository's own
+version bumps, and that needs a ruling.
+
+### 21 · The view builder's encoding holds only while embedded text reaches no code-executing sink
+
+`build-view.sh` writes the capability object's name in embedded repository text
+as a character reference in HTML and as a `\u0063` escape in a JavaScript
+string, so the page never carries it verbatim and `check-view-readonly.sh` can
+keep reading every byte (B115). Both decode back to the text in the browser.
+That is safe only while the decoded text lands where nothing runs it: a
+character reference inside an event handler or a `javascript:` URL decodes to
+code the browser runs and the check could no longer read. No such sink exists
+in the builder today, and nothing but review keeps it that way.
+
+### 22 · Links are deliberately not encoded
+
+For the same reason, every value written into an `href` goes through an escape
+that encodes nothing beyond the HTML metacharacters, so a repository path or a
+Jira key in a link carries the capability object's name verbatim if it holds
+it. The check reads those bytes like any others; a link naming the user's config
+dot-file by its home-directory path would be a finding.
+
+### 23 · The pinned template asset exists only from v4.70.0, and the release jobs have not yet run
+
+`release-prep` attaches `build-from-spec.yml` with `PRODUCTIZER_SHA` pinned to
+the release's commit. Releases before v4.70.0 carry no such asset; an adopter
+of one still pins by hand. Both jobs run only on a version-tag push, so until
+the v4.70.0 tag is pushed neither has run: whether `pull-requests: read` is
+enough for `build-release-notes.sh` to read the merged pull requests is
+unmeasured, and no declared check reads the release jobs at all, so the two
+requirements drafted for them were not added (backlog).
+
+### 24 · `check-acceptance-rows.sh` resolves a cited path on disk, not in git
+
+1.2 compares each component of a cited path against its directory's own
+listing, so the answer is the same on a case-insensitive disk and on a Linux
+runner (B134). It still reads the disk: a file that is present and untracked
+resolves, and a row citing it passes here and fails in a clean clone.
+
+### 25 · What `check-sigpipe.sh` does not see
+
+It reads each `.sh` and `.bash` file it is given as shell, statically:
+pipefail switched on in another file (sourced or inherited); a reader reached
+through a function, alias or variable; other early readers (`sed q`, `awk` with
+`exit`, `read`, `cmp`, python); shell outside a `.sh` or `.bash` file - a
+workflow `run:` block or a Markdown fence (the workflow's two `gh --version`
+lines were fixed by hand); a `$( ... )` inside an unquoted here-document body;
+backtick substitution, read as plain code; and, in a file without errexit, a
+function whose last pipeline ends in a reader and whose caller tests it, an `if
+x="$(a | head -1)"`, and a group or subshell tested from outside.

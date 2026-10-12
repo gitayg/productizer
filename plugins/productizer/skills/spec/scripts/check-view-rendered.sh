@@ -354,7 +354,8 @@ case_states() {  # case_states <tsv>
     f=0; all_distinct "$TMP/words.$m" 1 || f=1
     hold "word-distinct/$m" "$f" "the six state words are six words"
     f=0
-    cut -f2 <"$TMP/states.$m" | grep -q '^$' && f=1
+    cut -f2 <"$TMP/states.$m" >"$TMP/field2.$m"
+    grep -q '^$' "$TMP/field2.$m" && f=1
     hold "word-present/$m" "$f" "every state carries its word on the node, not only in a legend"
   done
 
@@ -459,16 +460,16 @@ ROWS
 
 # The two shapes of "no reading", and the one shape they must never take.
 case_nothing_drawn() {  # case_nothing_drawn <tsv> <case> <phrase>
-  local tsv="$1" name="$2" phrase="$3" m f
+  local tsv="$1" name="$2" phrase="$3" m f got
   for m in $MODES; do
     f=0
     [ "$(rd_count "$tsv" "$m" unread)" = "1" ] || f=1
     hold "$name-box-drawn/$m" "$f" "exactly one ? box is drawn for a reading nobody could take"
     f=0
-    rd_unread "$tsv" "$m" | grep -q '?' || f=1
+    { got="$(rd_unread "$tsv" "$m")" && grep -q '?' <<<"$got"; } || f=1
     hold "$name-carries-glyph/$m" "$f" "the box carries the ? glyph this page means by read, and could not be determined"
     f=0
-    rd_unread "$tsv" "$m" | grep -qi -- "$phrase" || f=1
+    { got="$(rd_unread "$tsv" "$m")" && grep -qi -- "$phrase" <<<"$got"; } || f=1
     hold "$name-says-why/$m" "$f" "the box says which of the two it is, in words"
     f=0
     [ "$(rd_count "$tsv" "$m" nodes)" = "0" ] || f=1
@@ -479,13 +480,13 @@ case_nothing_drawn() {  # case_nothing_drawn <tsv> <case> <phrase>
 }
 
 case_no_base() {  # case_no_base <tsv>
-  local tsv="$1" m f
+  local tsv="$1" m f got
   for m in $MODES; do
     f=0
     [ "$(rd_count "$tsv" "$m" dunk)" = "1" ] || f=1
     hold "no-base-box-drawn/$m" "$f" "a spec delta with no base draws the ? block"
     f=0
-    rd_dunk "$tsv" "$m" | grep -q '?' || f=1
+    { got="$(rd_dunk "$tsv" "$m")" && grep -q '?' <<<"$got"; } || f=1
     hold "no-base-carries-glyph/$m" "$f" "that block carries ?, not a count"
     f=0
     [ "$(rd_count "$tsv" "$m" drows)" = "0" ] || f=1
@@ -678,7 +679,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: the WORDING of any finding, and that a case went red for the reason its break names rather than for another. The seven breaks are applied to a BUILT page, so a template edit that moves the text they match reads as a mutation that did not apply, which is printed and fails the run rather than silently driving one case fewer.\n'

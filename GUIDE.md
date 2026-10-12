@@ -773,7 +773,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Seventy-seven requirements are active**, and they are the whole of what has
+**Eighty-eight requirements are active**, and they are the whole of what has
 been agreed.
 
 Seven more are superseded and none withdrawn, and neither kind is listed here.
@@ -815,7 +815,7 @@ happening:
 - **R80** — The CI build template shall interpolate no `${{ }}` expression
   into a `run:` script.
 
-**When something arrives.** Nineteen things happen on a discrete trigger:
+**When something arrives.** Twenty-seven things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -860,8 +860,27 @@ happening:
   with no newline included.
 - **R82** — When the stderr-suppression check scans a YAML file, the check
   shall examine only `run:` values.
+- **R85** — When the lifecycle renders a pull request body, the body shall
+  name only artifacts that exist in the repository it is rendered in.
+- **R86** — When a check does not pass, the checks stage shall print the last
+  20 lines of its own output beneath its row.
+- **R87** — When the CI replay runs a workflow step, the replay shall run it
+  with no system or global git configuration and with git's default branch set
+  to master.
+- **R88** — When a classification is recorded with a root given, the lifecycle
+  shall write the record under that root, whatever the working directory.
+- **R92** — When the import marking is examined, the lifecycle shall count a
+  backlog line as evidence of an import only where the commit that added it
+  also introduced requirements.
+- **R93** — When a change adds a line to the backlog, the lifecycle shall
+  resolve every requirement id on that line against the spec.
+- **R94** — When the view builder embeds repository-derived text in the page,
+  the view builder shall encode the capability object's name so that it does
+  not appear verbatim as an identifier.
+- **R95** — When an acceptance row cites a path or a script, the lifecycle
+  shall resolve it in the exact case its directory lists.
 
-**For as long as a state lasts.** Six requirements are true for the duration
+**For as long as a state lasts.** Seven requirements are true for the duration
 of a state, not at a moment inside it:
 
 - **R12** — While a contradiction is unruled, the lifecycle shall merge no
@@ -878,8 +897,12 @@ of a state, not at a moment inside it:
 - **R81** — While PRODUCTIZER_SHA is the all-zero placeholder, the CI build
   template shall refuse to run before checking anything out, naming the
   command that prints a release's commit id.
+- **R91** — While a stage run is judged under `--unattended`, the lifecycle
+  shall refuse that run's change to a path that holds a character outside
+  ASCII or has a component that begins with a dot, except the backlog, the
+  plan in plan mode and the spec outside build mode on their exact paths.
 
-**When something goes wrong.** Thirty-three defences, written as `If … then`
+**When something goes wrong.** Thirty-five defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R15** — If a check exits zero having examined less than it declared, then
@@ -959,6 +982,12 @@ because a designed path and a defended one are not the same thing:
   result, then the lifecycle shall refuse to deliver that change.
 - **R84** — If the repository has no solver probe, then the lifecycle shall
   refuse to render a pull request body.
+- **R89** — If the spec path given for a classification is outside the root,
+  then the lifecycle shall refuse to record it.
+- **R90** — If a stage run's changed path holds a character outside ASCII and
+  either has a component that begins with a dot or, read with each such
+  character as any character, is a path the lifecycle refuses, then the
+  lifecycle shall refuse to deliver that change.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

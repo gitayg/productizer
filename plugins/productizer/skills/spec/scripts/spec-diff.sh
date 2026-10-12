@@ -120,8 +120,8 @@ selftest() {
     else
       printf '  FAIL  %-34s exit %s (wanted %s), %s of 3 other placements diverged, text: %s\n' \
         "$name" "$rc1" "$want" "$off" "$text"
-      sed 's/^/          stdout: /' "$ST/$name.1.out" | head -n 8
-      sed 's/^/          stderr: /' "$ST/$name.1.err" | head -n 8
+      head -n 8 "$ST/$name.1.out" | sed 's/^/          stdout: /'
+      head -n 8 "$ST/$name.1.err" | sed 's/^/          stderr: /'
     fi
   }
   single() { # single <name> <want> <text> <dir> [args...]
@@ -133,8 +133,8 @@ selftest() {
       HELD=$((HELD + 1)); printf '  ok    %-34s exit %s\n' "$name" "$got"
     else
       printf '  FAIL  %-34s exit %s (wanted %s and the text: %s)\n' "$name" "$got" "$want" "$text"
-      sed 's/^/          stdout: /' "$ST/$name.out" | head -n 8
-      sed 's/^/          stderr: /' "$ST/$name.err" | head -n 8
+      head -n 8 "$ST/$name.out" | sed 's/^/          stdout: /'
+      head -n 8 "$ST/$name.err" | sed 's/^/          stderr: /'
     fi
   }
 

@@ -371,7 +371,7 @@ STRIP_MARKERS
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2 3; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
   printf '    NOT ASSERTED: the CONTENT of the generated section. The corpus drives the exit code, so a renderer producing different but self-consistent prose in both modes would pass every case above; what the section says is asserted by R9.a against the committed guide, and read by a person.\n'

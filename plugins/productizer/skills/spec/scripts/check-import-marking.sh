@@ -61,9 +61,10 @@
 # UNMEASURED, never 0. The committed suite measures it as 0: `never-imported`
 # and `silent-import` both declare 0 and both hold, and `--selftest` exits 0
 # over all 8 cases. The exit-2 row above is the state the suite actually
-# declares as 2 - `stage-in-the-backlog`, `IMPORT ON THE RECORD, COHORT
-# UNRESOLVED`. No behaviour was changed by this correction; only the prose,
-# which described an earlier draft's intent.
+# declares as 2 - `IMPORT ON THE RECORD, COHORT UNRESOLVED`, driven since 1.2
+# by `stage-in-the-spec-prose` (it was `stage-in-the-backlog` until the
+# backlog stopped being evidence on its own). No behaviour was changed by this
+# correction; only the prose, which described an earlier draft's intent.
 #
 # ==========================================================================
 # HOW AN IMPORT IS DETECTED. READ THIS BEFORE TRUSTING ANY RUN.
@@ -91,13 +92,29 @@
 #      change log afterwards.
 #
 #   C  A DECLARED STAGE (MARKER-FREE). `Stage 0c` named in a change-log row, a
-#      commit message, anywhere else in the spec, or in the backlog. This is
-#      the ONE piece of prose used, because it is a stage identifier rather
-#      than an English word - `import` is a substring of `important` and a
-#      topic half this repo's requirements are about; `stage 0c` is neither.
-#      C is what makes an import that marked NOTHING visible, and it is why
-#      the backlog is now read: step 5 of the procedure writes the import's
-#      refusals down as backlog items, and those survive a spec nobody marked.
+#      commit message, anywhere else in the spec, or in a backlog line WRITTEN
+#      BY THE COMMIT THAT DRAFTED THE REQUIREMENTS. This is the ONE piece of
+#      prose used, because it is a stage identifier rather than an English
+#      word - `import` is a substring of `important` and a topic half this
+#      repo's requirements are about; `stage 0c` is neither. C is what makes
+#      an import that marked NOTHING visible, and it is why the backlog is
+#      read: step 5 of the procedure writes the import's refusals down as
+#      backlog items, in the same pass, and those survive a spec nobody marked.
+#
+#      THE BACKLOG AS IT STANDS IS NOT EVIDENCE, since 1.2 (B127, R73's rule
+#      for stage-advance.sh applied here). 1.1 read every line of the file in
+#      the work tree, so ONE APPENDED ROW naming the stage turned this blocking
+#      check from 0 into 2, and a row reading `Stage 0c drafted R5` made R5 a
+#      finding - measured on this repository on 2026-10-12, both. A backlog
+#      line now counts only through git: a commit that introduced requirement
+#      bullets for the first time AND, in the same commit, added a backlog line
+#      naming the stage. That commit's NEW ids are the cohort, so this route
+#      now resolves a cohort where 1.1 could only refuse. An append that drafts
+#      nothing is not a commit touching the spec and is never walked. Lines in
+#      the work tree that name the stage are still counted and printed as a
+#      note, so the reader sees them and why they did not count. Where git
+#      cannot be walked or the backlog lies outside the work tree, such lines
+#      are UNVERIFIED and the run is exit 2, never a quiet 0.
 #
 #   D  A DECISION-RECORD PROMOTION (marker-free in effect). Promotion DELETES
 #      the marker line, so a ratified requirement is bare BY DESIGN. A row
@@ -146,6 +163,14 @@
 #     instead of inferring.
 #   - A SHALLOW CLONE removes evidence from B without removing it from the
 #     repository, and B silently sees fewer introductions. Exit 2.
+#   - AN IMPORT THAT WROTE ITS BACKLOG REFUSALS IN A LATER COMMIT than the one
+#     that drafted its requirements is, through the backlog, invisible: that
+#     later commit is byte-identical in kind to an append, and treating it as
+#     evidence is the hole 1.2 closed. Step 5 says "in the same pass".
+#   - A COMMIT THAT DRAFTS A NEW REQUIREMENT AND APPENDS A BACKLOG LINE naming
+#     the stage still attributes that requirement. It is a spec change, the
+#     red tier, and it is exactly as strong as naming the stage in that
+#     commit's message, which already counted.
 #   - AN IMPORT SPLIT ACROSS SEVERAL CHANGE-LOG ROWS only pulls in the rows
 #     that name a marked id or the stage; a row where every marker was
 #     forgotten and the stage went unnamed is a row this check never reaches.
@@ -195,12 +220,15 @@
 # knows the path can run is not one the tool carries. The flag is that way in
 # and it adds no second copy of the cases.
 #
-# The suite drives all three of this check's exit codes: 0 on four cases
+# The suite drives all three of this check's exit codes: 0 on seven cases
 # (never imported, every requirement marked, all of them promoted, an import
-# that left no trace at all), 1 on three (nothing marked, a marker forgotten,
-# the stage named only in a commit message) and 2 on one (the stage named in
-# the backlog and nowhere else, so an import is on the record and its cohort
-# cannot be resolved).
+# that left no trace at all, and three backlogs that name the stage by an
+# append or in the work tree only), 1 on four (nothing marked, a marker
+# forgotten, the stage named only in a commit message, the stage named in a
+# backlog line the drafting commit wrote) and 2 on two (the stage named in the
+# spec's prose on a line holding no id, so an import is on the record and its
+# cohort cannot be resolved; and a backlog naming the stage under a root git
+# cannot walk).
 #
 # Under --selftest the three codes mean: every case produced the verdict it
 # declares (0), at least one did not (1), and the suite could not be run at
@@ -208,7 +236,7 @@
 # both ways.
 set -euo pipefail
 
-VERSION="check-import-marking 1.1"
+VERSION="check-import-marking 1.2"
 ROOT=""
 SPEC=".claude/productizer/spec.md"
 BACKLOG=".claude/productizer/backlog.md"
@@ -308,7 +336,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s\n' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "${REACHED:-none - the suite drove nothing}"
   printf '    NOT ASSERTED: the suite compares the exit code and ONE load-bearing line, never the whole finding, so a case red for a second reason on top of the right one is invisible here\n'
@@ -402,24 +430,25 @@ lines = text.split('\n')
 # The backlog is READ, not required. Step 5 of the import procedure writes the
 # survey's refusals down as backlog items, and those survive a spec where the
 # marker was never applied - which is the one case cohorts A and B cannot see.
-# A repository with no backlog is normal; a backlog that exists and cannot be
-# opened is not, and it is not quietly treated as empty either.
+# Since 1.2 the file as it stands is read only to be reported: the evidence is
+# the commit that wrote the line, read under source B below. A repository with
+# no backlog is normal; a backlog that exists and cannot be opened is not, and
+# it is not quietly treated as empty either.
 backlog_lines = []
-backlog_read = False
 backlog_note = None
 if os.path.exists(backlog_path):
     try:
         with open(backlog_path, encoding='utf-8') as handle:
             backlog_lines = handle.read().split('\n')
-        backlog_read = True
         out.write('%s\n' % shown_backlog)
     except OSError as exc:
         refuse('%s exists and cannot be read: %s. An unreadable evidence '
                'source is not an absent one'
                % (shown_backlog, exc.strerror or exc))
 else:
-    backlog_note = ('%s does not exist, so the backlog was not searched for a '
-                    'declared stage' % shown_backlog)
+    backlog_note = ('%s does not exist in the work tree; only the commits '
+                    'that drafted requirements were searched for a backlog '
+                    'line naming the stage' % shown_backlog)
 
 
 def section_bounds(title):
@@ -511,13 +540,14 @@ for index, line in enumerate(lines):
         attributed.setdefault(rid, set()).add('%s:%d names `Stage 0c`'
                                               % (shown, index + 1))
 
-for index, line in enumerate(backlog_lines):
-    if not RE_STAGE0C.search(line):
-        continue
-    c_backlog += 1
-    for rid in ids_in(line):
-        attributed.setdefault(rid, set()).add('%s:%d names `Stage 0c`'
-                                              % (shown_backlog, index + 1))
+# The backlog as it stands is NOT evidence (R73's rule, applied here in 1.2):
+# anyone may append a row, and an appended `Stage 0c` used to turn this
+# blocking check from 0 into 2, or name any id and make it a finding. The
+# lines are still counted, so the note below can say they were seen and why
+# they did not count. What does count is source C-backlog under source B: a
+# commit that introduced requirements AND added a backlog line naming the
+# stage, which an append alone cannot be.
+backlog_named = sum(1 for line in backlog_lines if RE_STAGE0C.search(line))
 
 # --- source A: change-log rows, and C where the row names the stage ---------
 a_rows = 0
@@ -576,6 +606,12 @@ b_commits = None
 c_commits = 0
 walked = None
 git_note = None
+# The backlog is read through git only where git can name it: a --backlog
+# outside the work tree has no history here, and its lines stay unverified.
+backlog_git = os.path.relpath(os.path.realpath(backlog_path),
+                              os.path.realpath(root))
+if backlog_git == os.pardir or backlog_git.startswith(os.pardir + os.sep):
+    backlog_git = None
 
 
 def git(*args):
@@ -602,6 +638,7 @@ else:
         walked = len(commits)
         introduced = {}
         stage_commits = []
+        backlog_commits = []
         failed = None
         for sha, message in commits:
             show = git('show', '--unified=0', '--format=', sha, '--', spec_rel)
@@ -615,6 +652,10 @@ else:
                 match = RE_ADDED_REQ.match(line)
                 if match:
                     hits.add(match.group(1))
+            # The ids this commit is the FIRST to hold. Only these can be
+            # attributed through the backlog: a commit that merely re-words
+            # an old requirement is not where that requirement was drafted.
+            fresh = set(r for r in hits if r not in introduced)
             # Oldest wins: `--reverse` means the first commit seen holding a
             # bullet is the one that introduced it, so a later reformat that
             # re-adds every bullet in its diff is not read as the import.
@@ -622,6 +663,22 @@ else:
                 introduced.setdefault(rid, sha)
             if RE_STAGE0C.search(message) and hits:
                 stage_commits.append((sha, hits))
+            # C-backlog: the SAME commit drafted requirements and wrote a
+            # backlog line naming the stage - step 5 of the procedure, done
+            # in the pass it says. An append that drafts nothing never
+            # reaches this line: it is not a commit touching the spec.
+            if fresh and backlog_git is not None:
+                bshow = git('show', '--unified=0', '--format=', sha, '--',
+                            backlog_git)
+                if bshow.returncode != 0:
+                    failed = (bshow.stderr.strip().split('\n')[-1]
+                              if bshow.stderr.strip()
+                              else 'git show %s failed' % sha[:12])
+                    break
+                if any(l.startswith('+') and not l.startswith('+++')
+                       and RE_STAGE0C.search(l)
+                       for l in bshow.stdout.split('\n')):
+                    backlog_commits.append((sha, fresh))
         if failed is not None:
             git_note = failed
         else:
@@ -640,6 +697,12 @@ else:
                 for rid in hits:
                     attributed.setdefault(rid, set()).add(
                         'commit %s names `Stage 0c`' % sha[:12])
+            for sha, fresh in backlog_commits:
+                c_backlog += 1
+                for rid in fresh:
+                    attributed.setdefault(rid, set()).add(
+                        'commit %s drafted it and named `Stage 0c` in %s'
+                        % (sha[:12], shown_backlog))
 
 # --- the cohort -------------------------------------------------------------
 known = sorted((r for r in attributed if r in requirements),
@@ -652,6 +715,14 @@ settled = [r for r in known
 findings = [r for r in known if r not in settled]
 
 c_total = c_spec + c_backlog + c_changelog + c_commits
+# The backlog figure is history, so it is an em dash wherever history was not
+# read for it: git could not be walked, or the backlog lies outside the tree.
+if b_commits is None:
+    backlog_figure = '—'
+elif backlog_git is None:
+    backlog_figure = '— (outside the work tree, so no history)'
+else:
+    backlog_figure = str(c_backlog)
 # The premise, and it is deliberately NOT `known`. A marked requirement, a
 # promotion row, an import row or a declared stage each say an import ran here
 # even when no id can be pinned to it - and "an import ran and I cannot say
@@ -677,12 +748,17 @@ out.write('    source C - `Stage 0c` named, marker-free: %d total — change '
           'log %d, commit messages %s, elsewhere in %s %d, %s %s\n'
           % (c_total, c_changelog,
              '—' if b_commits is None else str(c_commits),
-             shown, c_spec, shown_backlog,
-             str(c_backlog) if backlog_read else '— (not present)'))
+             shown, c_spec, shown_backlog, backlog_figure))
 out.write('    source D - decision record rows promoting an imported '
           'requirement: %d\n' % d_rows)
 if backlog_note:
     out.write('    note: %s\n' % backlog_note)
+if backlog_named:
+    out.write('    note: %d line(s) of %s name `Stage 0c` as it stands. A '
+              'backlog line is not evidence of an import on its own - anyone '
+              'may append one - so it counts only where the commit that wrote '
+              'it also drafted requirements: %s such commit(s)\n'
+              % (backlog_named, shown_backlog, backlog_figure))
 out.write('    requirements attributed to an import: %d\n' % len(known))
 out.write('    of those, already marked, refused or promoted: %d\n'
           % len(settled))
@@ -777,6 +853,18 @@ for rid in findings:
 # could not be read.
 if findings:
     raise SystemExit(1)
+
+if not premise and backlog_named and backlog_figure.startswith('—'):
+    # The backlog names the stage and its history could not be read, so
+    # whether an import commit wrote those lines is UNKNOWN. That is not the
+    # premise measured absent; it is the one evidence source left unread.
+    out.write('    BACKLOG UNVERIFIED.  %s names `Stage 0c` and the commits '
+              'that wrote it could not be read, so whether an import wrote '
+              'it is unknown.\n' % shown_backlog)
+    sys.stderr.write('check-import-marking: %s names `Stage 0c` and its '
+                     'history could not be read. Unmeasured, not clean.\n'
+                     % shown_backlog)
+    raise SystemExit(2)
 
 if not premise:
     # NO IMPORT ON THE RECORD IS A MEASUREMENT, NOT A REFUSAL - and getting this

@@ -341,7 +341,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2 3; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
   printf '    NOT ASSERTED: the eight cases above pair their exit code with a required phrase, so a case going red for another dimension is caught; the four could-not-run and example-block cases are still asserted on the CODE ALONE and a wrong reason there is invisible\n'
@@ -565,7 +565,9 @@ print(v if isinstance(v, int) else "")
 }
 
 yaml_schema_version() { # <path> -> integer or empty. Anchored, fixed class.
-  sed -n 's/^version:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$1" | head -1
+  local v
+  v="$(sed -n 's/^version:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$1")" || return
+  head -n 1 <<<"$v"
 }
 
 compare_schema() { # <relative path> <template name> <json|yaml>

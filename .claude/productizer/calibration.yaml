@@ -455,3 +455,46 @@ checks:
     status: uncalibrated
     reason: "measured nothing - it triggered on 30 of the 30 commits and returned a verdict on none: 30 refused, 0 undeclared exit, 0 tool absent at that commit, 0 timed out. Every refusal is python3 finding no check-ci-template.py, which did not exist before 2026-10-10, so no past commit carries it"
     measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-10", config: "checks.yaml in the working tree, with ci-template-safe declared", command: "measure-check-overfire.sh --check ci-template-safe --commits 30 --history clone"}
+  - id: sigpipe-under-pipefail
+    status: uncalibrated
+    reason: "measured nothing - it triggered on 22 of the 30 commits and returned a verdict on none: 0 refused, 0 undeclared exit, 22 tool absent at that commit, 0 timed out. check-sigpipe.sh did not exist before v4.70.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-12", config: "checks.yaml in the working tree, with sigpipe-under-pipefail declared", command: "measure-check-overfire.sh --check sigpipe-under-pipefail --commits 30 --history empty"}
+  - id: pr-body-renderer
+    status: measured
+    window: {first: 434bd790139e3e7b76e4b1bee2cce5701b1a3f40, last: e540b848a3ad8b550c2464cbf378cdee0cdb625c, commits: 30, history: clone}
+    triggered: 30
+    excluded: {refused: 20}
+    verdicts: 10
+    fires: 0
+    fire_rate: "0/10 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-12", config: "checks.yaml in the working tree, with pr-body-renderer declared", command: "measure-check-overfire.sh --check pr-body-renderer --commits 30 --history clone"}
+  - id: checks-stage-runner
+    status: measured
+    window: {first: 434bd790139e3e7b76e4b1bee2cce5701b1a3f40, last: e540b848a3ad8b550c2464cbf378cdee0cdb625c, commits: 30, history: clone}
+    triggered: 30
+    verdicts: 30
+    fires: 0
+    fire_rate: "0/30 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-12", config: "checks.yaml in the working tree, with checks-stage-runner declared", command: "measure-check-overfire.sh --check checks-stage-runner --commits 30 --history clone"}
+  - id: ci-replay
+    status: measured
+    window: {first: 434bd790139e3e7b76e4b1bee2cce5701b1a3f40, last: e540b848a3ad8b550c2464cbf378cdee0cdb625c, commits: 30, history: clone}
+    triggered: 30
+    excluded: {refused: 14}
+    verdicts: 16
+    fires: 0
+    fire_rate: "0/16 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-12", config: "checks.yaml in the working tree, with ci-replay declared", command: "measure-check-overfire.sh --check ci-replay --commits 30 --history clone"}
+  - id: classification-recorder
+    status: uncalibrated
+    reason: "measured nothing - it triggered on 30 of the 30 commits and returned a verdict on none: 30 refused, 0 undeclared exit, 0 tool absent at that commit, 0 timed out. Every refusal is record-classification.sh 1.0 rejecting --selftest as an unknown option; the self-test did not exist before v4.70.0"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-12", config: "checks.yaml in the working tree, with classification-recorder declared", command: "measure-check-overfire.sh --check classification-recorder --commits 30 --history clone"}
+  - id: view-builder
+    status: measured
+    window: {first: 434bd790139e3e7b76e4b1bee2cce5701b1a3f40, last: e540b848a3ad8b550c2464cbf378cdee0cdb625c, commits: 30, history: clone}
+    triggered: 30
+    excluded: {refused: 3}
+    verdicts: 27
+    fires: 0
+    fire_rate: "0/27 = 0.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-12", config: "checks.yaml in the working tree, with view-builder declared", command: "measure-check-overfire.sh --check view-builder --commits 30 --history clone"}

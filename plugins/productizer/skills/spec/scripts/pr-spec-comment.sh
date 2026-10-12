@@ -150,8 +150,8 @@ JSON
       HELD=$((HELD + 1)); printf '  ok    %-40s exit %s\n' "$name" "$got"
     else
       printf '  FAIL  %-40s exit %s (wanted %s and the text: %s)\n' "$name" "$got" "$want" "$text"
-      sed 's/^/          stdout: /' "$ST/$name.out" | head -n 12
-      sed 's/^/          stderr: /' "$ST/$name.err" | head -n 8
+      head -n 12 "$ST/$name.out" | sed 's/^/          stdout: /'
+      head -n 8 "$ST/$name.err" | sed 's/^/          stderr: /'
     fi
   }
 
@@ -333,9 +333,9 @@ esac
 HEAD_SHA="$(git rev-parse --verify 'HEAD^{commit}')"
 # One resolution of the base, lifted from spec-diff.sh's own header, so every
 # section below is measured against the ref the delta was measured against.
-BASE_SHA="$(sed -n 's/^Base: .* at \([0-9a-f]\{7,\}\),.*/\1/p' "$SD_OUT" | head -n 1)"
+BASE_SHA="$(sed -n 's/^Base: .* at \([0-9a-f]\{7,\}\),.*/\1/p' "$SD_OUT")"; BASE_SHA="$(head -n 1 <<<"$BASE_SHA")"
 # shellcheck disable=SC2016  # the backticks are literal, in a sed regex matching spec-diff.sh's markdown; single quotes are what keeps them literal
-BASE_LABEL="$(sed -n 's/^Base: `\([^`]*\)`.*/\1/p' "$SD_OUT" | head -n 1)"
+BASE_LABEL="$(sed -n 's/^Base: `\([^`]*\)`.*/\1/p' "$SD_OUT")"; BASE_LABEL="$(head -n 1 <<<"$BASE_LABEL")"
 [ -n "$BASE_LABEL" ] || BASE_LABEL="did not resolve"
 
 # Each file's own outcome, from the heading spec-diff.sh gives it. Its EXIT is
@@ -530,8 +530,8 @@ else
       UNREADABLE=1
       continue
     fi
-    verdict="$(sed -n 's/^Classification:[[:space:]]*//p' "$f" | head -n 1)"
-    intent="$(sed -n 's/^Intent:[[:space:]]*//p' "$f" | head -n 1)"
+    verdict="$(sed -n 's/^Classification:[[:space:]]*//p' "$f")"; verdict="$(head -n 1 <<<"$verdict")"
+    intent="$(sed -n 's/^Intent:[[:space:]]*//p' "$f")"; intent="$(head -n 1 <<<"$intent")"
     case "$verdict" in
       contradict)
         CONTRADICTS=$((CONTRADICTS + 1))
@@ -704,7 +704,7 @@ say "Posting it is a separate step for a person to take, for example by piping t
 say "\`gh pr comment <n> --body-file -\`."
 if [ -r "$GATE_HOOK" ]; then
   # shellcheck disable=SC2016  # the hook's own line is matched literally; nothing here should expand
-  GATE_LIST="$(sed -n 's/^GATE_CHECKLIST="\${GATE_CHECKLIST:-\([^}]*\)}"$/\1/p' "$GATE_HOOK" | head -n 1)"
+  GATE_LIST="$(sed -n 's/^GATE_CHECKLIST="\${GATE_CHECKLIST:-\([^}]*\)}"$/\1/p' "$GATE_HOOK")"; GATE_LIST="$(head -n 1 <<<"$GATE_LIST")"
   if [ -n "$GATE_LIST" ]; then
     say "This repository's \`$GATE_HOOK\` holds a publish until a checklist names the command:"
     say "write \`$GATE_LIST\` with \`Command: gh pr comment <n> --body-file -\` as its first line, then"

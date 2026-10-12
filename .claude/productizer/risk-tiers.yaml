@@ -253,8 +253,16 @@ rules:
   - tier: blue
     glob: ".claude/productizer/backlog.md"
     why: >-
-      nothing in the backlog is agreed, and the file says so. Reordering it is
-      an ordinary edit by the backlog's own rule
+      blue for an APPEND, which is the edit the backlog exists for: nothing in
+      it is agreed, the file says so, and reordering it is an ordinary edit by
+      its own rule. A path cannot tell an append from a removed or rewritten
+      item - both read blue here, measured - so this rule is not what makes
+      the backlog safe. The property it needs is held by content checks
+      instead: in build mode only an append is accepted (R77), the backlog is
+      never evidence for a stage (R73), an appended `Stage 0c` line is not
+      evidence of an import (check-import-marking 1.2), and an added line's
+      citations are resolved (check-citations 1.2). See the THIRD CALIBRATION
+      NOTE for why the tier did not move instead
 
   - tier: blue
     glob: ".claude/productizer/classifications/**"
@@ -376,3 +384,30 @@ rules:
 # because a path cannot tell that edit from a version bump. What would close it
 # is a rule reading the FIELD that changed, which is a different mechanism and is
 # not proposed here.
+#
+# THIRD CALIBRATION NOTE - the backlog, and why it stayed blue (B127).
+#
+# B120 asked that no check grant `.claude/productizer/backlog.md` a pass by
+# filename, and this rule is one: an agent may land ANY backlog edit on its
+# own judgement, a deleted item included. `classify-change-risk.sh` reads no
+# content, so it was measured rather than argued, on 2026-10-12 over the 144
+# commits then in history (the backlog is touched by 73 of them):
+#
+#     backlog blue (as written)     red 75  52.1%   amber 65  45.1%   blue 4  2.8%
+#     backlog red                   red 107 74.3%   amber 34  23.6%   blue 3  2.1%
+#     backlog amber                 red 75  52.1%   amber 66  45.8%   blue 3  2.1%
+#
+# Red would make 32 more commits red for no other reason than a backlog row,
+# and a tier reached by three commits in four directs attention nowhere - the
+# plugin.json note above, again. Amber moves one commit and says the wrong
+# thing: it means shipped machinery, reviewed by seeing a test fail, and the
+# backlog is prose. And neither tier would close the hole, because a commit
+# appending one row and a commit deleting thirty-five both classify as one
+# path matched by one rule, whatever tier that rule names.
+#
+# So the rule stays blue and its reason now names the property it relies on,
+# and the four content checks that hold it. THE HOLE, NAMED: outside build
+# mode, a removed or rewritten backlog item is still blue here, and no check
+# reads the removal. Closing it needs a rule that reads the diff's SHAPE
+# (append-only or not), which is a different mechanism and is not proposed
+# here.

@@ -81,9 +81,21 @@
 #       different requirement wearing the same name. check-suspect-links.sh
 #       measured this: 81 tracked files matched one id, 19 of them outside
 #       those trees.
-#     - `.claude/productizer/spec.md`, `constitution.md` and `backlog.md`.
-#       validate-spec.py owns citations inside them, section-aware; a second
-#       reader here would report the same defect twice under two names.
+#     - `.claude/productizer/spec.md` and `constitution.md`. validate-spec.py
+#       owns citations inside them, section-aware; a second reader here would
+#       report the same defect twice under two names.
+#
+#   `.claude/productizer/backlog.md` IS read, since 1.2 (B127). 1.1 excluded
+#   it by name on the claim above, and the claim was false for it: measured
+#   2026-10-12, validate-spec.py run over this repository's spec and a backlog
+#   with a row citing an id above the counter reported 0 errors and 0
+#   warnings. A typo like R5 for R50 in a backlog row is a dangling citation
+#   like any other, and the filename was the only thing letting it through.
+#   Only the lines a change ADDS are read, as everywhere else, so a row is
+#   re-read when it is rewritten (a status flipped to `done`) and the rows
+#   already there are not. An EXAMPLE block cannot sit inside a markdown table
+#   without ending it, so a backlog row that needs an illustrative id writes
+#   `R0`, which is never a finding.
 #     - lines inside an EXAMPLE block, in the file as it stands at HEAD: from
 #       a line that STARTS with `<!-- EXAMPLE:BEGIN` to the next line that
 #       starts with `<!-- EXAMPLE:END` or `EXAMPLE:END`. Leading whitespace
@@ -146,7 +158,7 @@
 # did not (1), and the corpus could not be built (2).
 set -euo pipefail
 
-VERSION="check-citations 1.1"
+VERSION="check-citations 1.2"
 ROOT=""
 BASE=""
 HEAD_REF="HEAD"
@@ -323,9 +335,32 @@ if [ "$MODE" = "selftest" ]; then
   mkdir -p "$SB/excluded/fixtures" "$SB/excluded/sub/evals"
   printf 'cites %s\n' "$NEVER" > "$SB/excluded/fixtures/a.md"
   printf 'cites %s\n' "$NEVER" > "$SB/excluded/sub/evals/b.md"
-  printf 'cites %s\n' "$NEVER" > "$SB/excluded/.claude/productizer/backlog.md"
   printf 'cites %s\n' "$NEVER" > "$SB/excluded/.claude/productizer/constitution.md"
   commit_all "$SB/excluded" "cite it where other readers own the citation"
+
+  # backlog: a row appended to the backlog cites a never-allocated id. No
+  # other reader checks it, so this one does. backlog-rewritten: an existing
+  # row that already cited it is rewritten (its status flipped), so the
+  # rewritten line is an added line and is read again; the row beside it,
+  # untouched, is not. backlog-r0: the reserved example id in a backlog row is
+  # an EXAMPLE line, the one way a table row can illustrate an id.
+  base_repo backlog
+  printf '| B1 | a row | todo | cites R4 |\n' > "$SB/backlog/.claude/productizer/backlog.md"
+  commit_all "$SB/backlog" "a backlog that cites a real requirement"
+  printf '| B2 | a typo | todo | cites %s |\n' "$NEVER" >> "$SB/backlog/.claude/productizer/backlog.md"
+  commit_all "$SB/backlog" "append a backlog row"
+
+  base_repo backlog-rewritten
+  printf '| B1 | old | todo | cites %s |\n| B2 | old | todo | cites R3 |\n' "$NEVER" \
+    > "$SB/backlog-rewritten/.claude/productizer/backlog.md"
+  commit_all "$SB/backlog-rewritten" "a backlog with two old rows"
+  printf '| B1 | old | done | cites %s |\n| B2 | old | todo | cites R3 |\n' "$NEVER" \
+    > "$SB/backlog-rewritten/.claude/productizer/backlog.md"
+  commit_all "$SB/backlog-rewritten" "close B1"
+
+  base_repo backlog-r0
+  printf '| B1 | an illustration | todo | writes R0 for the example |\n' > "$SB/backlog-r0/.claude/productizer/backlog.md"
+  commit_all "$SB/backlog-r0" "a backlog row that illustrates an id"
 
   base_repo example
   add_line example "<!-- EXAMPLE:BEGIN -->\nan example: $NEVER\n<!-- EXAMPLE:END -->" "an example block"
@@ -381,7 +416,10 @@ if [ "$MODE" = "selftest" ]; then
 
   drive clean              0 'summary: lines read 1, citations 1, findings 0, notes 0'
   drive superseded         0 'NOTE CITATION_SUPERSEDED notes.md:3 R1 -> R4'
-  drive excluded           0 '0 file(s) with added lines read, 4 excluded'
+  drive excluded           0 '0 file(s) with added lines read, 3 excluded'
+  drive backlog-r0         0 'EXAMPLE .claude/productizer/backlog.md:1 R0 (the reserved example id'
+  drive backlog            1 "FINDING CITATION_NEVER_ALLOCATED .claude/productizer/backlog.md:2 $NEVER\$"
+  drive backlog-rewritten  1 'summary: lines read 1, citations 1, findings 1'
   drive reserved-r0        0 'EXAMPLE notes.md:3 R0 (the reserved example id: ids start at R1'
   drive example            0 "EXAMPLE notes.md:4 $NEVER (inside an EXAMPLE block"
   drive added-then-removed 0 'summary: lines read 0, citations 0'
@@ -415,7 +453,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: a withdrawn citation (CITATION_WITHDRAWN) and a supersede chain that ends anywhere but an active requirement; a spec that itself defines R0, which then resolves like any other id; a binary file in the range; a merge commit in the range; the refusal for a base and head with no merge base, which needs two unrelated histories; a shallow clone that holds the base but not the merge base; and whether a citation MEANS the requirement - every case asserts a token resolved, never that the sentence around it is about that requirement.\n'
@@ -556,10 +594,10 @@ for f in added.tsv binary.txt files.txt; do [ -f "$WORK/$f" ] || : > "$WORK/$f";
 # Exclusions, by path. See the header for why each one.
 excluded() {
   case "$1" in
-    .claude/productizer/spec.md|.claude/productizer/constitution.md|.claude/productizer/backlog.md) return 0 ;;
+    .claude/productizer/spec.md|.claude/productizer/constitution.md) return 0 ;;
     .claude/productizer/requirement-index.md) return 0 ;;
   esac
-  printf '%s\n' "$1" | grep -Eq '(^|/)(fixtures|evals)/'
+  grep -Eq '(^|/)(fixtures|evals)/' <<<"$1"
 }
 : > "$WORK/read.txt"
 : > "$WORK/excluded.txt"
@@ -570,7 +608,7 @@ while IFS= read -r rel; do
 done < "$WORK/files.txt"
 
 N_COMMITS="$(git -C "$TOP" rev-list --count "$BASE_SHA..$HEAD_SHA")"
-printf 'range: %s commit(s); %s file(s) with added lines read, %s excluded (fixtures/, evals/, spec, constitution, backlog, requirement index), %s binary not read\n' \
+printf 'range: %s commit(s); %s file(s) with added lines read, %s excluded (fixtures/, evals/, spec, constitution, requirement index), %s binary not read\n' \
   "$N_COMMITS" "$(awk 'END { print NR }' "$WORK/read.txt")" \
   "$(awk 'END { print NR }' "$WORK/excluded.txt")" "$(awk 'END { print NR }' "$WORK/binary.txt")"
 while IFS= read -r b; do

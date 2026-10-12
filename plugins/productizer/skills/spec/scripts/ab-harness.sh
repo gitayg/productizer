@@ -206,7 +206,7 @@ if [ "$MODE" = "run" ]; then
     cost="unavailable"
     if [ -f "$out/cost.usd" ]; then
       raw="$(tr -d ' \n' < "$out/cost.usd")"
-      if printf '%s\n' "$raw" | grep -Eq '^[0-9]+(\.[0-9]+)?$'; then cost="$raw"; fi
+      if grep -Eq '^[0-9]+(\.[0-9]+)?$' <<<"$raw"; then cost="$raw"; fi
     fi
     bytes="$(wc -c < "$out/stdout" | tr -d ' ')"
 

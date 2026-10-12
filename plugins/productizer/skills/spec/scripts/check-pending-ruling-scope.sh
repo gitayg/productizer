@@ -392,7 +392,7 @@ if [ "$MODE" = "selftest" ]; then
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 1 2; do
-    printf '%s' "$CODES" | grep -qx "$want" || MISSING="$MISSING $want"
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
   printf '    NOT ASSERTED: every nested run carries the marker that switches the self-assertion off, so this mode measures the SWEEP and never the self-assertion count the ordinary run prints\n'
@@ -611,10 +611,10 @@ if [ "${PRODUCTIZER_RULING_SCOPE_SELFTEST:-}" != "$ROOT" ]; then
   grep -qxF 'Status: pending' "$FIXDIR/D1-merge-nothing.md" ||
     die_unmeasured "$FIXREL/D1-merge-nothing.md is not pending, so the window it is supposed to hold open is not open and neither assertion below tests anything."
   for fx in merged-spec.md unrelated-spec.md; do
-    "$PARSER" "$FIXDIR/$fx" | awk -F'\t' '$1 == "R3"' | grep -q . ||
+    { r3="$("$PARSER" "$FIXDIR/$fx" | awk -F'\t' '$1 == "R3"')" && grep -q . <<<"$r3"; } ||
       die_unmeasured "$FIXREL/$fx does not define R3, so the allocation the assertions turn on is not in the fixture."
   done
-  if "$PARSER" "$FIXDIR/base-spec.md" | awk -F'\t' '$1 == "R3"' | grep -q .; then
+  if r3="$("$PARSER" "$FIXDIR/base-spec.md" | awk -F'\t' '$1 == "R3"')" && grep -q . <<<"$r3"; then
     die_unmeasured "$FIXREL/base-spec.md already defines R3, so R3 is not an allocation made inside the window and neither assertion tests anything."
   fi
 

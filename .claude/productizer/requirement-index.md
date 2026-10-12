@@ -109,5 +109,16 @@ marker, because a table left there would be one nothing writes or checks.
 | R81 | state | active | `ci-template-safe` |
 | R82 | event | active | `stderr-suppression` |
 | R83 | unwanted | active | `stage-advance-guard`, `build-dispatch` |
-| R84 | unwanted | active | `build-dispatch` |
+| R84 | unwanted | active | `build-dispatch`, `pr-body-renderer` |
+| R85 | event | active | `pr-body-renderer` |
+| R86 | event | active | `checks-stage-runner` |
+| R87 | event | active | `ci-replay` |
+| R88 | event | active | `classification-recorder` |
+| R89 | unwanted | active | `classification-recorder` |
+| R90 | unwanted | active | `stage-advance-guard` |
+| R91 | state | active | `stage-advance-guard` |
+| R92 | event | active | `import-marking` |
+| R93 | event | active | `dangling-citations` |
+| R94 | event | active | `view-builder` |
+| R95 | event | active | `acceptance-rows` |
 <!-- productizer:requirement-index:end -->
