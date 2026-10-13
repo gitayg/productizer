@@ -103,7 +103,7 @@ Checked by
 absent/unknown/zero rendering.
 
 Enforced by
-: R13, R15, R16, R20.
+: R13, R15, R25, R26, R20.
 
 ### P2 — Nothing reaches an audience without a person deciding
 Active. Ratified 2026-08-28 by the maintainer.
@@ -172,6 +172,7 @@ pattern, instead of spread across the feature PRs that each relaxed it.
 | Date | Principle | Change | Prompted by | Why | Ratified by |
 |---|---|---|---|---|---|
 | 2026-10-10 | P1 | amended in place | B95 | `Checked by` named `track-traffic.sh`, a script that does not exist in this repository; a check nothing can run checks nothing, and `validate-spec.py`'s `PRINCIPLE_CHECK_ABSENT` found it. The name is removed and the other three stay. What P1 forbids is unchanged | the maintainer |
+| 2026-10-13 | P1 | amended in place | B98 | `Enforced by` named R16, which was retired and split into R25 (report a value that could not be measured as unmeasured) and R26 (never record it as zero); P1 now names both halves, so its enforcement is exactly what it was. What P1 forbids is unchanged | the maintainer |
 | 2026-10-12 | — | record corrected | B99 | Two rows that stood below the P1 entry were the template's own examples - an amendment of P4 under #612 and a withdrawal of P5 under #588 - and described changes that never happened in this repository; a record that carries invented history cannot be trusted for the real entries. Both are removed. No principle changes | the maintainer |
 
 ## Open questions
