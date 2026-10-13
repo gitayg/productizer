@@ -390,8 +390,8 @@ Unified Process (Apache-2.0, Simon Martinelli).
 | 2 Design | yes, on the spec delta being **committed** | the delta is the evidence; a transition before the commit claims work that does not exist yet |
 | 3 Build | yes, on the branch existing and `plan.md` committed | |
 | 4 Test | **no** | `test` stays in `transitions` for workflows that want it, but out of `transition_on`: a ticket that bounces on every red build trains everyone to ignore its status |
-| 5 Deploy | yes, on **merge** — not on opening the PR | a ticket that says "Ready to Release" while the PR is in review is a lie a release manager acts on |
-| 6 Maintain | no | the finding is a new intent and gets its own ticket |
+| 6 Deploy | yes, on **merge** — not on opening the PR | a ticket that says "Ready to Release" while the PR is in review is a lie a release manager acts on |
+| 9 Maintain | no | the finding is a new intent and gets its own ticket |
 
 **Writebacks.** Two comments and one link, each written once:
 
@@ -436,6 +436,14 @@ curl -sS -u "$AUTH" --connect-timeout 5 --max-time 15 \
 - **Back into the spec:** ticket text never goes into `.claude/productizer/spec.md`
   without passing through intake. The ticket is an input to classification, not
   a source of requirement wording.
+
+**The status map has never met a real Jira.** `jira.status_map` in
+`templates/config.json` maps eleven Jira workflow states to backlog statuses,
+and not one of the eleven has ever been run against a real Jira instance. It is
+kept, untested, by the maintainer's ruling of 2026-10-13 (B4, won't test now):
+read it as a starting point to edit against your own project's statuses, not as
+a verified table. What was checked, and only against Atlassian's documentation,
+is in `references/backlog.md`, "The status map is unverified".
 
 ## A contradiction owes a human ruling
 
@@ -643,8 +651,8 @@ Observed behaviour of `gh search issues`, and its limits:
 | 2 Design | commit the delta to `.claude/productizer/spec.md`; the key goes in the change-log Issue column | after the commit: transition `design`, comment the classification, the ids added / refined / superseded, and the spec SHA. On a contradiction: label `jira.labels.contradiction` and comment the conflict — **no transition** |
 | 3 Build | branch `feature/KEY-slug` or `feature/123-slug`; commit `plan.md` | transition `build` |
 | 4 Test | CI status on the branch | nothing — `test` is in `transitions` but out of `transition_on`, because a ticket that bounces on every red build trains everyone to ignore its status |
-| 5 Deploy | draft PR titled `KEY: ...` or `#123: ...`; `Closes #123` in the body; review findings as comments | remote link to the PR on open; transition `deploy` on **merge**, never on opening the PR |
-| 6 Maintain | issue or PR from the diagnosis | new ticket carrying the generated intent, through intake like any other |
+| 6 Deploy | draft PR titled `KEY: ...` or `#123: ...`; `Closes #123` in the body; review findings as comments | remote link to the PR on open; transition `deploy` on **merge**, never on opening the PR |
+| 9 Maintain | issue or PR from the diagnosis | new ticket carrying the generated intent, through intake like any other |
 
 Every Jira cell above is skippable. If the write fails, report it and finish the
 stage — the row describes the view, not the lifecycle.

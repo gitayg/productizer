@@ -99,8 +99,11 @@ It writes a report and raises questions. It changes no agreed behaviour.
 - **The one thing it does write to the spec is a concern.** Raising a ruling
   adds a `C<n>` row to *Areas of concern* and a `D<n>` ruling file, per
   `references/rulings.md`. That records a question; it agrees nothing.
-- **It opens issues, not commits to code.** A finding a human accepts becomes an
-  issue — the same door Stage 1 uses — and re-enters the lifecycle at intake.
+- **It opens issues, not commits to code.** A finding a human accepts becomes a
+  NEW issue — the same door Stage 1 uses — and so a new work item that starts
+  at intent. It never moves an existing work item back: stage moves are
+  forward-only (R55), and `stage-advance.sh` refuses a move to a stage at or
+  before the item's current one (exit 5).
 
 The output is `templates/converge.md`: a report with one row per finding, a
 proposed disposition, and an empty ruling column.
@@ -170,7 +173,7 @@ it — never by the drift run:
 
 | Ruling | Means | Executed by |
 |---|---|---|
-| **Fix the code** | the requirement stands; the code is wrong | issue → Stage 1, then the normal lifecycle |
+| **Fix the code** | the requirement stands; the code is wrong | a new issue → Stage 1, a new work item, then the normal lifecycle |
 | **Refine the requirement** | it was imprecise, the behaviour is agreed | intake `refine` — same id, changed text |
 | **Retire the requirement** | the behaviour is genuinely gone by decision | intake supersede or `Withdrawn.` marker, with a reason line; never a deletion |
 | **Specify the code** | the behaviour is wanted and was never written down | intake `extend` — new ids from the one allocator |

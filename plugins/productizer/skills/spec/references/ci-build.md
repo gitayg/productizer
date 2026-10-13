@@ -216,7 +216,12 @@ folded key described below it:
   every rule under `.claude/productizer/` (`checks.yaml`, `calibration.yaml`,
   `constitution.md`, `config.json`, and whatever is added later). The
   exceptions are the lifecycle's bookkeeping, `.claude/productizer/backlog.md`,
-  and the spec outside build mode. A nested `*/.claude/**` has no exceptions.
+  the spec outside build mode, and - since 1.5, in an attended move to design
+  only - `.claude/productizer/requirement-index.md` MODIFIED, because a design
+  move regenerates it from the spec it changes (B112, maintainer ruling
+  2026-10-13). A classification record a design move ADDS is bookkeeping and
+  already allowed; one modified or deleted stays refused. A nested
+  `*/.claude/**` has no exceptions.
 - At any depth: `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`,
   `.gitattributes`, `.gitmodules`.
 - At the root: `.git/**`, `.husky/**`, `.githooks/**`,
@@ -258,6 +263,16 @@ theirs to make, and they see it. Replayed over this repository's 143 non-root
 commits at v4.69.1 as `build -> test` in build mode, the allowlist refuses 23
 the list allows: 22 touch a plugin manifest under `.claude-plugin/` and 1 the
 `.gitignore`. An adopter's unattended build that edits a dot file exits 3.
+
+**Plugin manifests: refused unattended, allowed attended (maintainer ruling
+2026-10-13, B135).** A `.claude-plugin/` manifest declares hooks and MCP
+servers, so it steers an agent, and the named set does not list it. Under
+`--unattended` it is refused by the allowlist above, through its dot directory
+(the `unattended-shape-46` case, a `plugin.json` under `.claude-plugin/`).
+Attended, a manifest edit is allowed, because a version bump edits it - 22 of
+this repository's own commits did - and a person sees the change. The
+requirement index is not an unattended exception either: R91 names the three,
+so an unattended design move may not write it.
 
 These decide what CI runs, what an agent is told and may do, how git treats a
 path, and what the run is judged by. Because the set is checked first, an

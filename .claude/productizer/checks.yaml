@@ -112,13 +112,15 @@ checks:
       pattern: 'true positives[^0-9]*([0-9]+)'
       min_covered: 1
       spec_units:
-        - id: R33
-          verdict: Covered
-          evidence: >-
-            R33 is the STOP half of the old R23, split out under B31 so it has its own id and its
-            own claim. The solver halts on a real contradiction and stays quiet on a non-conflict,
-            at precision 1.00 over the committed corpus, run on every commit rather than only when
-            its own source changes.
+        - id: R101
+          verdict: Partial
+          reason: >-
+            R101 supersedes R33 (B102), which this check claimed Covered. The solver halts on a
+            real contradiction and stays quiet on a non-conflict, at precision 1.00 over the
+            committed corpus, run on every commit - which asserts the DETECTION that starts the
+            stop, and nothing about how long it lasts: not that work on the intent waits, and not
+            that a person ruled. A missed contradiction does not fail it; recall is reported, not
+            gated. `pending-ruling-scope` holds the spec half of the wait.
 
   # --- and the probe that is NOT a check here -------------------------------
   #
@@ -225,7 +227,7 @@ checks:
       must_cover: all_triggering
       min_covered: 1
       spec_units:
-        - id: R82
+        - id: R117
           verdict: Partial
           reason: >-
             The obligation is the scanner's, and this check runs the scanner over the change's
@@ -380,7 +382,7 @@ checks:
       pattern: '([0-9]+) file\(s\) checked'
       min_covered: 1
       spec_units:
-        - id: R57
+        - id: R110
           verdict: Covered
           evidence: >-
             check-frontmatter.py 1.1 fails any agent template whose frontmatter `name` contains
@@ -429,6 +431,15 @@ checks:
       refused: [2, 3]  # no markers to write between, or a spec that could not be read
     coverage:
       spec_units:
+        - id: R105
+          verdict: Partial
+          reason: >-
+            B102. `--check` refuses (2) a guide carrying no markers to write between and (3) a spec
+            it cannot read, and the check is blocking, so the checks job fails; the release jobs
+            in .github/workflows/checks.yml run only after it (`needs: checks`), so a tag push with
+            a guide that cannot be regenerated drafts no release. NOT asserted: that chain, which
+            is workflow structure no check reads; a release prepared outside CI; and a failed write
+            of the guide, which exits 1 uncaught and is driven by no case.
         - id: R9
           verdict: Partial
           reason: >-
@@ -508,7 +519,7 @@ checks:
             finding. R31's actual consequence, the publish step declining, is asserted by
             `view-publish-refused` against the real hook; this check observes the page not asking,
             which is the earlier and weaker of the two.
-        - id: R4
+        - id: R106
           verdict: Covered
           evidence: >-
             Both halves. The generator writes no repository file - every file hashed before and
@@ -959,9 +970,21 @@ checks:
       refused: [2]     # a ruling that cannot be scoped, or a window out of reach
     coverage:
       spec_units:
-        - id: R12
+        - id: R101
           verdict: Partial
           reason: >-
+            The wait, for the spec only (B102). While a ruling's status is `pending` a spec change
+            touching a requirement it names is refused, and the refusal lifts only when the status
+            changes. NOT asserted: work on the intent outside the spec - a plan, a build, a stage
+            advance - since `stage-advance.sh` never reads rulings; and that the ruling that lifts
+            it was made by a person.
+        - id: R103
+          verdict: Partial
+          reason: >-
+            R103 supersedes R12 (B102), naming the three changes. ADDS is driven: the `merged`
+            case refuses the incoming behaviour allocated under a new id, and `unrelated` lets an
+            unrelated addition through. REFINES (a named requirement's sentence edited) and
+            SUPERSEDES (its status changed) are refused by the code and driven by NO case.
             Refuses a spec change that edits, supersedes or points forward at the contested
             requirement, and now recognises the incoming behaviour merged under a DIFFERENT EARS
             keyword or a reworded condition - the audit's case, which the previous version reported
@@ -1232,17 +1255,31 @@ checks:
       refused: [2]
     coverage:
       spec_units:
-        - id: R5
+        - id: R107
           verdict: Covered
           evidence: >-
             A check declaring no coverage requirement is refused at config load; driven
             through the real runner over a committed fixture.
-        - id: R15
+        - id: R96
           verdict: Covered
           evidence: >-
-            A fixture check exiting 0 having examined less than it declared is reported
-            hollow AND refuses the stage; the inverse still passes. Falsified by patching
-            the hollow branch to record a pass - four of ten assertions went red.
+            The report half of the old R15 (B102). A fixture check exiting 0 having examined
+            less than it declared is recorded with status `hollow`, its coverage reads
+            satisfied=False with the shortfall (examined 1 against a declared minimum of 2), and
+            the runner's report line reads HOLLOW for it; the inverse still passes. Falsified by
+            patching the hollow branch to record a pass - four of ten assertions went red.
+        - id: R97
+          verdict: Partial
+          reason: >-
+            The verdict half of the old R15 (B102). Asserted for a BLOCKING check only: the
+            runner exits 3 over the shortfall and the result reads verdict `refused` with one
+            blocking failure. An advisory check that comes back hollow is recorded as an advisory
+            failure and voids its claims (run-checks.sh's own `adv-hollow-voids` case), and no
+            case of this check drives one.
+          evidence: >-
+            `the run exits 3 (refused) over the shortfall` and `it counts as a blocking failure
+            and the verdict is refused`, two of the ten assertions; both went red when the hollow
+            branch was patched to record a pass.
       from: stdout_paths
       pattern: '^(\S+)$'
       must_cover: none
@@ -1326,7 +1363,13 @@ checks:
     coverage:
       spec_units:
         - id: R11
-          verdict: Covered
+          verdict: Partial
+          reason: >-
+            Downgraded from Covered 2026-10-13 (B102). Two figures are tied to their files: the
+            Living spec tile moves with the spec it is built from (R11.1) and renders a marker when
+            that spec cannot be read (R11.2), and the Checks tile reads `?` over a result file that
+            will not parse (R11.3). Nothing asserts that EVERY figure is read from a repository
+            file, and no case here removes a source file.
           evidence: >-
             A figure whose source cannot be read is drawn as a marker and never as a number,
             and a real measurement still renders its number.
@@ -1369,14 +1412,17 @@ checks:
       refused: [2]
     coverage:
       spec_units:
-        - id: R29
+        - id: R102
           verdict: Covered
           evidence: >-
-            The three bypasses R29 was written for are each constructed and each refused: a program
-            taken positionally, a repo-local script passed as an argument, and a build tool named by
-            neither list - while a legitimate command still runs. R18 is the narrower sentence this
-            supersedes in practice; R29 is the obligation actually asserted.
-        - id: R17
+            R102 supersedes R29 (B102), naming R22's opt-in as its exception. The three bypasses
+            R29 was written for are each constructed and each refused: a repo-local script passed
+            as an argument with the opt-in off (`interpreter-operand`), and - with the opt-in ON,
+            so the refusal cannot be the opt-in's - a program taken positionally and a build tool
+            named by neither list; a legitimate command still runs. Measured 2026-10-13 through
+            run-checks.sh: under the opt-in a repo-local program in argv[0] or an interpreter's
+            first operand runs, while awk, make, env and an inline program stay refused.
+        - id: R123
           verdict: Partial
           reason: >-
             Asserts the BLOCK half only - 30 refused rows and 14 allowed ones, so a gate that
@@ -1441,7 +1487,7 @@ checks:
       refused: [2]
     coverage:
       spec_units:
-        - id: R17
+        - id: R123
           verdict: Covered
           evidence: >-
             Both halves asserted by construction. BLOCK: 30 refused rows and 14 allowed, so a gate
@@ -2138,10 +2184,24 @@ checks:
             alone applies: `attended-dot-path-allowed` and `attended-dot-path-base-mode` exit 0.
             Falsified 2026-10-12 with the allowlist made never to fire: 124 of 129, those five
             red; with the spec's exception removed, 128 of 129, `unattended-spec-exception` red.
+        - id: R125
+          verdict: Covered
+          evidence: >-
+            stage-advance.sh 1.5 (B112), 142 cases. At intent -> design, exit 0 with the spec's
+            new requirement and the requirement index MODIFIED (`design-index-modified`), with a
+            classification record ADDED beside both (`design-index-and-classification`) and
+            alone (`design-classification-added`); the index alone is not evidence
+            (`design-index-only-not-evidence`, exit 1). The exception holds nowhere else, exit 3:
+            under --unattended (`design-index-unattended-refused`), at build -> test
+            (`build-index-modified-refused`), the index ADDED (`design-index-added-refused`), a
+            case variant of it (`design-index-variant-refused`), checks.yaml, calibration.yaml,
+            constitution.md and config.json at design, and a classification MODIFIED. The first
+            three exit 3 against 1.4; falsified 2026-10-13 with the exception removed, 139 of
+            142, those three red.
     limitations:
       - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
       - The forbidden set is a list, not a proof. Attended, nothing but the list applies; under --unattended an ASCII, dot-free file the list does not name (Jenkinsfile, GEMINI.md, a script checks.yaml runs) is still allowed. A homoglyph is read, not folded - one non-ASCII character as one to two characters - so a reading of three or more, and a homoglyph made of ASCII alone (rn for m), are not refused; and a legitimate non-ASCII name that reads as a rule file is refused attended too. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
-      - Default-deny over `.claude/**` also refuses a design move that touches `.claude/productizer/` files such as requirement-index.md, as this repository's own design commits do. Which of those a design stage may write is undecided (B112).
+      - Default-deny over `.claude/**` refuses a design move's change to every `.claude/productizer/` file but the spec, the backlog, bookkeeping ADDED and, since 1.5, the requirement index MODIFIED in an attended design move (B112). An unattended design move may not write the index, because R91 lists the unattended exceptions and it is not among them.
       - A stage other than design or build with evidence of its own is driven by no case.
 
   # --- the two ends of an unattended run -----------------------------------
@@ -2203,7 +2263,7 @@ checks:
             `pushed-the-run-branch` - only productizer/<mode>-<issue>-<run> was pushed, by an
             explicit refspec; `prepare-not-tip` - a HEAD that is not the tip of the default branch
             exits 3 before anything is written.
-        - id: R61
+        - id: R111
           verdict: Covered
           evidence: >-
             `body-names-the-run` and `dry-run-body-names-run` - the pull request body says
@@ -2218,7 +2278,7 @@ checks:
             `recheck-called-no-gh` - origin gained no branch, none was left, gh was never called.
             Falsified 2026-10-10 on a copy with the second call replaced by `true`: 47 of 52, those
             five red.
-        - id: R65
+        - id: R113
           verdict: Partial
           reason: >-
             The CLI's real enforcement inside the action is not exercised. Locally `claude -p`
@@ -2234,7 +2294,7 @@ checks:
             and the `no-args-file-ever-says-bypass` sweep finds bypassPermissions in no arguments
             file any case produced. Since v4.67.1 Bash is denied in every option, which narrows the
             agent further still - that is R67, not a widening of what the committed settings grant.
-        - id: R67
+        - id: R114
           verdict: Partial
           reason: >-
             Measured 2026-10-11: `--disallowedTools Bash` removes the built-in Bash tool, in
@@ -2292,7 +2352,7 @@ checks:
             `deliver-body-for-another-head` and `deliver-body-over-cap` (exit 7). Falsified
             2026-10-11 three ways, each 75 of 76: deliver re-rendering through
             pr-spec-comment.sh, the HEAD comparison neutered, the size cap neutered.
-        - id: R78
+        - id: R116
           verdict: Partial
           reason: >-
             `agent-args` is the subcommand the template's "Read the flags" step calls, and the
@@ -2306,7 +2366,7 @@ checks:
             `|| [ -n "$line" ]` from the read loop: 85 of 87, that case and
             `agent-args-refusal-wrote-no-output` red. That was a real bypass in the template's
             shell before B118: an unterminated last line was never validated.
-        - id: R79
+        - id: R124
           verdict: Partial
           reason: >-
             Same as R78: the subcommand is driven, the YAML step that calls it is not.
@@ -2366,7 +2426,7 @@ checks:
       pattern: '([0-9]+) of 14 assertions held'
       min_covered: 1
       spec_units:
-        - id: R62
+        - id: R112
           verdict: Partial
           reason: >-
             Static only: it reads the YAML and never runs GitHub. A token reaching the agent
@@ -2379,7 +2439,7 @@ checks:
             agent-checkout-credentials.yml; 40 self-test cases over exit codes 0 1 2. Falsified
             2026-10-10 on a copy with the agent job's contents read turned to write: rc 1, 5 of 7
             (the checker had seven assertions then; fourteen since v4.68.0).
-        - id: R65
+        - id: R113
           verdict: Partial
           reason: >-
             Static only, and about the workflow's text: what each permissions option adds to the
@@ -2392,7 +2452,7 @@ checks:
             edits-only. The workflow admits only four flag shapes into the agent's arguments.
             Fixtures bypass-in-args.yml, permissions-input-missing.yml, permissions-not-choice.yml
             and permissions-default-widened.yml each exit 1.
-        - id: R67
+        - id: R114
           verdict: Partial
           reason: >-
             Static only: the `deny-bash` assertion reads the YAML and holds that the agent step's
@@ -2439,7 +2499,7 @@ checks:
             under it. Falsified 2026-10-11 by neutering the interpreter rule
             (write-job-runs-python.yml went 1 -> 0) and by restoring the in-workspace
             invocation in the shipped template (11 of 12).
-        - id: R78
+        - id: R116
           verdict: Partial
           reason: >-
             Static only: the `guards` assertion matches the template's lines in order, not its
@@ -2452,14 +2512,14 @@ checks:
             output. Fixtures guard-args-step.yml and guard-claude-args-wiring.yml exit 1, among
             the 6 guard-* fixtures. Falsified 2026-10-12 with the guards never checked: 34 of 40,
             the six guard-* fixtures red.
-        - id: R79
+        - id: R124
           verdict: Partial
           reason: >-
             Same as R78: the refusal itself is build-dispatch's; this asserts only that the
             template calls it before the agent and passes nothing it did not check.
           evidence: >-
             `guards`, as for R78, with guard-args-step.yml (the call removed) exiting 1.
-        - id: R80
+        - id: R115
           verdict: Partial
           reason: >-
             Static only, and over `run:` scripts: an expression interpolated into a script that is
@@ -2472,7 +2532,7 @@ checks:
             `${{ steps.args.outputs.claude_args }}`, which reaches `claude_args:` and no `run:`, is
             not caught. Falsified 2026-10-12 with the expression search made never to match: 34
             of 40, those six fixtures red.
-        - id: R81
+        - id: R122
           verdict: Partial
           reason: >-
             Static only: `tools-pin` checks the pin's shape and `guards` the refusal's lines and
@@ -2563,7 +2623,7 @@ checks:
       refused: [2]     # no python3, no PyYAML, an unparseable or empty checks.yaml or workflow, or a self-test that did not answer inside the budget
     coverage:
       spec_units:
-        - id: R39
+        - id: R108
           verdict: Partial
           reason: >-
             THE SECOND CLAUSE IS NOW COUNTED, NOT ASSERTED. Superseded 2026-09-06; the text
@@ -3217,7 +3277,7 @@ checks:
       refused: [2]
     coverage:
       spec_units:
-        - id: R48
+        - id: R109
           verdict: Partial
           reason: >-
             Asserts that the record NAMES the path - as a full path, a path-shaped directory prefix,
@@ -3268,19 +3328,22 @@ checks:
       refused: [2]
     coverage:
       spec_units:
-        - id: R49
+        - id: R104
           verdict: Partial
           reason: >-
-            Asserts that the five delta states and the five overlay states are pairwise distinct on
-            (border-style, border-width, fill) AND glyph AND word, three times over - plain,
-            `forced-colors: active`, and `prefers-contrast: more` - and that an unreadable or absent
-            result draws exactly one `?` box with zero nodes, zero stat tiles and zero delta rows.
-            What a human eye can actually distinguish is not asserted, and three of the five
-            overlay states have no live example in this repository's own data, so they are asserted
+            R104 supersedes R49 (B102) and claims what is asserted. In each of three modes - plain,
+            `forced-colors: active` and `prefers-contrast: more` - the six overlay states are
+            pairwise distinct on glyph and on state word (the verdict suffix cut off), and the five
+            change states on word, on glyph and on badge class. Asserted beyond R104: the overlay
+            states' (border style, border width, hatched-or-flat fill) TUPLE is distinct - two may
+            share a border style - and an unreadable or absent result draws exactly one `?` box
+            with zero nodes, zero stat tiles and zero delta rows. NOT asserted: colour, which every
+            assertion is blind to, and what a human eye can distinguish; three of the overlay
+            states have no live example in this repository's own data, so they are asserted
             against fixtures only.
           evidence: >-
             76 assertions in 22 seconds against fixtures whose right answers are written down, plus
-            16 self-test cases over exit codes 0 1 2, each break applied to a BUILT page so a
+            17 self-test cases over exit codes 0 1 2, each break applied to a BUILT page so a
             template edit that moves the text it matches reads as a mutation that did not apply and
             fails the run rather than silently driving one case fewer. Writing it found that
             `prefers-contrast: more` was not in the template at all - 0 occurrences before, 2 after.
@@ -3560,7 +3623,7 @@ checks:
             CI template's own call is covered by build-dispatch (`prepare-body-refused-without-probe`).
             Falsified 2026-10-12 with the probe test made always true: 23 of 25, both no-probe cases
             red.
-        - id: R85
+        - id: R118
           verdict: Covered
           evidence: >-
             In an adopter-shaped repository the body names nothing of this one: `adopter-corpus-size-derived`
@@ -3594,7 +3657,7 @@ checks:
       pattern: 'self-test cases driven: ([0-9]+), result-file assertions: [0-9]+\. Cases and assertions that did not hold: 0'
       min_covered: 1
       spec_units:
-        - id: R86
+        - id: R119
           verdict: Partial
           reason: >-
             The tail is asserted to be printed, and to be the check's own output; its BOUNDS are not.
@@ -3628,7 +3691,7 @@ checks:
       pattern: '([0-9]+) of [0-9]+ cases held'
       min_covered: 1
       spec_units:
-        - id: R87
+        - id: R120
           verdict: Covered
           evidence: >-
             `B124: steps see the runner's git - master, no identity, no global config - and UTC, not
@@ -3705,7 +3768,7 @@ checks:
       pattern: 'cases driven: ([0-9]+)\. Cases that did not hold: 0'
       min_covered: 1
       spec_units:
-        - id: R94
+        - id: R121
           verdict: Partial
           reason: >-
             Every sink that goes through the builder's two encoders is encoded; an href is
@@ -3756,14 +3819,29 @@ checks:
       refused: [2]     # an input unreadable or unparseable, or bad usage
     coverage:
       spec_units:
-        - id: R50
+        - id: R98
           verdict: Partial
           reason: >-
-            Asserts that every enabled blocking check - effective severity resolved as the runner
-            resolves it - has a measured record whose fire count matches its rate and whose every
-            fire carries a ruling by a named person. It does NOT assert that the record is still
-            true as the branch moves: it reads no git, so a stale window or a wrong SHA passes. Nor
-            that `by` names a real person - only that it names no agent.
+            The fire-rate third of the old R50 (B102). Every enabled blocking check - effective
+            severity resolved as the runner resolves it - must carry a measured record with a
+            window and a fire rate that agrees with its counts: `a blocking check with no record`,
+            `a measured record with no window` and `a fire_rate that disagrees with its counts` are
+            findings. NOT asserted: that the window is merged history - it reads no git, so a stale
+            window or a wrong SHA passes - and no case drives an absent `fire_rate` key.
+        - id: R99
+          verdict: Partial
+          reason: >-
+            The verdict-count third of the old R50 (B102). `a measured record with no verdict
+            count` and `a measured record with zero verdicts` are findings. NOT asserted: that the
+            count is true of the window's commits - it reads no git - and no case drives a count
+            above the window's commit total.
+        - id: R100
+          verdict: Partial
+          reason: >-
+            The ruling third of the old R50 (B102). `a pending ruling is not a ruling`, `a ruling
+            by an agent is not a ruling` and `a fire with no ruling at all` are findings; a fire
+            ruled false-positive by a person is upheld. NOT asserted: that `by` names a real person
+            - only that it names no agent - or that a ruled commit lies inside the window.
         - id: R51
           verdict: Covered
           evidence: >-

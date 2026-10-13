@@ -364,9 +364,11 @@ when a fix ships, add the eval. A human triages it.
 **Drift is the other loop** (`references/drift.md`, `templates/converge.md`):
 the code and the spec disagree, and the answer is not automatically to update
 the spec to match the code — that ratifies whatever shipped. A finding names
-which side is wrong and re-enters at Stage 1. Where a spec lives when a product
-spans several repos, and what breaks when it is split:
-`references/spec-stores.md`.
+which side is wrong and opens a NEW work item that starts at intent, as a
+Stage 9 finding does. It never moves an existing item back: stage moves are
+forward-only (R55), so re-entering an item at Stage 1 is refused. Where a
+spec lives when a product spans several repos, and what breaks when it is
+split: `references/spec-stores.md`.
 
 ## Non-negotiables
 
@@ -447,7 +449,7 @@ contract before wiring one into a gate.
 | `scripts/req-trailer.sh` | `Productizer-Req:` provenance, orphans, coverage | 0 · 2 no spec · 3 findings · 4 cannot determine |
 | `scripts/check-citations.sh` | a citation this change ADDS that resolves to no requirement, and a new citation of a superseded one; advisory | 0 · 1 findings · 2 refused |
 | `scripts/check-sigpipe.sh` | in a file under `set -o pipefail`, an early reader (`head`, `grep -q`/`-m`/`-l`) downstream of a pipe, whose SIGPIPE turns a match into 141; hand it a file or a here-string instead | 0 · 1 findings · 2 unreadable, or an exemption with no reason |
-| `scripts/stage-advance.sh` | may this work item's stage move, on this change's evidence, judged on the paths git applies; call it before any tracker move. A non-ASCII path that reads as a refused one is refused in every mode. `--unattended` (the CI template passes it) also refuses any change to the checks result, and any path that is not ASCII or has a component beginning with a dot, bar the backlog, the plan and the spec on their exact paths | 0 allowed · 1 produced nothing · 2 usage · 3 forbidden path · 4 cannot determine · 5 not forward |
+| `scripts/stage-advance.sh` | may this work item's stage move, on this change's evidence, judged on the paths git applies; call it before any tracker move. A non-ASCII path that reads as a refused one is refused in every mode. An attended move to design may also modify the requirement index and add classification records (B112). `--unattended` (the CI template passes it) also refuses any change to the checks result, and any path that is not ASCII or has a component beginning with a dot, bar the backlog, the plan and the spec on their exact paths | 0 allowed · 1 produced nothing · 2 usage · 3 forbidden path · 4 cannot determine · 5 not forward |
 | `scripts/build-dispatch.sh` | **EXPERIMENTAL — the template it serves has never run on a real GitHub runner; its main protection, that the AI gets no shell, was measured only with a local CLI; do not adopt it yet (B113, B121).** Both ends of an unattended run in the copyable CI template: `prepare` before the model (and the PR body, `--body-out`, rendered with no write token), `agent-args` checking the prepared flags against fixed shapes before the agent reads them, `stash-git` and `capture` around it (the agent gets no shell and no git it could configure), `deliver` a draft PR after it, running no repository code | 0 · 2 usage · 3 repo not readable as needed, or no `evals/solver-probe.py` for the body · 4 spec unchanged · 5 no plan committed · 6 refused by stage-advance.sh · 7 delivery failed · 8 capture refused (.git in the tree) |
 | `scripts/check-ci-template.py` | **EXPERIMENTAL template (never run on a real GitHub runner; do not adopt it yet - B113, B121).** The CI template's fourteen static safety properties, on the YAML itself (including that the agent step denies Bash, that a post-agent shell pins `BASH_ENV` empty, that the write job runs no repository code, that the runtime guards are in place and PRODUCTIZER_SHA is a quoted 40-hex pin) | 0 · 1 findings · 2 could not run |
 | `scripts/retrieval-budget.sh` | retrieval regression, deterministic | 0 in band · 4 out of band · 5 no baseline |

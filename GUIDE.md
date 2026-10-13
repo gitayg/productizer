@@ -482,7 +482,7 @@ is the movable part. **No check in this repository has yet been shown to satisfy
 
 ## Every check tool tests itself, and the suite runs those tests
 
-R39 obliges a check tool to carry a self-test that reaches each exit code it can return. R40
+R108 obliges a check tool to carry a self-test that reaches each exit code it can return. R40
 obliges the suite to run it. Both read **43 of 43** as of 2026-09-26 (32 of 32 on 2026-09-06); 28 of those self-tests were
 written in one pass, and every one was seen FAILING on a deliberate break before it was believed.
 
@@ -520,21 +520,21 @@ any corpus - and its self-test prints `NOT REACHED:` rather than inventing a cas
 
 `check-selftest-coverage.sh` reads the tools the declared checks and the workflow actually
 invoke, then reports which carry a self-test and which of those anything runs. It exists because
-R39 obliges a check tool to carry a self-test and R40 obliges the suite to run it.
+R108 obliges a check tool to carry a self-test and R40 obliges the suite to run it.
 
 It is red, and that is the point. Measured 2026-09-06: **4 of 32** repository check tools carry a
 self-test that answers, and **3 of those 4** are invoked by something. It names the other 28 one
 by one, and it reports ITSELF as an R40 finding rather than exempting the tool doing the counting.
 
 A subtlety worth knowing before you read the coverage line: a check that FAILS voids its own
-`spec_units` claim - `run-checks.sh` lists `fail` in `VOID_RUN` - so R39 and R40 still read
+`spec_units` claim - `run-checks.sh` lists `fail` in `VOID_RUN` - so R108 and R40 still read
 `Missing` even though a check now names them. What changed is the reason, from *no check names
 this requirement* to *a check named it, came back red, and therefore measured nothing here*. The
 only route to `Partial` is writing the 28 self-tests. Nobody was looking; now something is.
 
 A tool that dispatches a self-test in a shape the scanner does not recognise reads as carrying
 none, which over-reports the shortfall - the safe direction, and stated rather than hidden. And
-R39's second clause, *reaches each exit code it can return*, is not measured at all: no self-test
+R108's second clause, *reaches each exit code it can return*, is not measured at all: no self-test
 here reports which exit codes it drove.
 
 ## The system, drawn from the files that define it
@@ -773,14 +773,14 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Eighty-eight requirements are active**, and they are the whole of what has
+**Ninety-three requirements are active**, and they are the whole of what has
 been agreed.
 
-Seven more are superseded and none withdrawn, and neither kind is listed here.
-The spec keeps both forever with their text intact, so a citation written two
-years ago still leads somewhere — but a guide is read by someone deciding what
-to do next, and a superseded sentence gives them no sign it stopped being
-true.
+Thirty-two more are superseded and none withdrawn, and neither kind is listed
+here. The spec keeps both forever with their text intact, so a citation
+written two years ago still leads somewhere — but a guide is read by someone
+deciding what to do next, and a superseded sentence gives them no sign it
+stopped being true.
 
 **Always, with no trigger.** Fifteen requirements hold whatever else is
 happening:
@@ -790,32 +790,33 @@ happening:
   never renumbered.
 - **R3** — The lifecycle shall keep a replaced requirement's original text in
   the spec, marked superseded.
-- **R4** — Every published view shall be read-only with respect to the spec.
-- **R5** — Every check shall declare what it must have examined for its pass
-  to count.
-- **R39** — Every check tool shall carry a self-test that reaches each exit
-  code it can return.
-- **R48** — Every commit record shall name each path that commit's diff
-  touches.
-- **R57** — Every reviewer agent shall be granted no tool that can write a
-  file.
-- **R61** — Every pull request an unattended run opens shall name the run that
-  opened it.
-- **R62** — Every unattended agent step shall run without a token that can
-  write to the repository.
-- **R65** — Every unattended agent step shall run with no permission beyond
-  what the repository's committed agent settings grant.
-- **R67** — Every unattended agent step shall run without a tool that executes
-  commands.
 - **R73** — The lifecycle shall not count a change to the backlog as evidence
   for a stage advance.
 - **R74** — The lifecycle shall match a stage run's changed path against the
   paths it refuses after folding case, Unicode normalisation and format
   characters, granting an exception to those paths on the exact path alone.
-- **R80** — The CI build template shall interpolate no `${{ }}` expression
-  into a `run:` script.
+- **R106** — The lifecycle shall keep every published view read-only with
+  respect to the spec.
+- **R107** — The lifecycle shall make every check declare what it must have
+  examined for its pass to count.
+- **R108** — The lifecycle shall make every check tool carry a self-test that
+  reaches each exit code it can return.
+- **R109** — The lifecycle shall make every commit record name each path that
+  commit's diff touches.
+- **R110** — The lifecycle shall grant every reviewer agent no tool that can
+  write a file.
+- **R111** — The lifecycle shall make every pull request an unattended run
+  opens name the run that opened it.
+- **R112** — The lifecycle shall run every unattended agent step with no token
+  that can write to the repository.
+- **R113** — The lifecycle shall run every unattended agent step with no
+  permission beyond what the repository's committed agent settings grant.
+- **R114** — The lifecycle shall run every unattended agent step with no tool
+  that executes commands.
+- **R115** — The lifecycle shall interpolate no `${{ }}` expression into a
+  `run:` script of the CI build template.
 
-**When something arrives.** Twenty-seven things happen on a discrete trigger:
+**When something arrives.** Twenty-eight things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -840,8 +841,6 @@ happening:
   risk tier of each path it touches and the rule that decided it.
 - **R47** — When a check declaration moves between a base and the working
   tree, the lifecycle shall report which declaration moved and what it was.
-- **R49** — When a published view draws a state, the lifecycle shall make that
-  state distinguishable from every other state without colour.
 - **R58** — When the Build stage starts, the lifecycle shall hand it the
   spec's diff against the base it builds from.
 - **R59** — When an unattended run produces a change, the lifecycle shall
@@ -854,19 +853,6 @@ happening:
   agent's own job, the lifecycle shall give that shell no environment setting,
   from the agent or alterable by it, that names a file for the shell to
   source.
-- **R78** — When the agent's job reads the flags prepared for an unattended
-  run, the CI build template shall pass the agent only lines it has matched
-  against the fixed shapes `build-dispatch.sh prepare` writes, a last line
-  with no newline included.
-- **R82** — When the stderr-suppression check scans a YAML file, the check
-  shall examine only `run:` values.
-- **R85** — When the lifecycle renders a pull request body, the body shall
-  name only artifacts that exist in the repository it is rendered in.
-- **R86** — When a check does not pass, the checks stage shall print the last
-  20 lines of its own output beneath its row.
-- **R87** — When the CI replay runs a workflow step, the replay shall run it
-  with no system or global git configuration and with git's default branch set
-  to master.
 - **R88** — When a classification is recorded with a root given, the lifecycle
   shall write the record under that root, whatever the working directory.
 - **R92** — When the import marking is examined, the lifecycle shall count a
@@ -874,17 +860,35 @@ happening:
   also introduced requirements.
 - **R93** — When a change adds a line to the backlog, the lifecycle shall
   resolve every requirement id on that line against the spec.
-- **R94** — When the view builder embeds repository-derived text in the page,
-  the view builder shall encode the capability object's name so that it does
-  not appear verbatim as an identifier.
 - **R95** — When an acceptance row cites a path or a script, the lifecycle
   shall resolve it in the exact case its directory lists.
+- **R104** — When a published view draws a state, the lifecycle shall give it
+  a glyph and a state word unique among the states of its kind, on the plain
+  page and under `forced-colors: active` and `prefers-contrast: more`.
+- **R116** — When the agent's job reads the flags prepared for an unattended
+  run, the lifecycle shall make the CI build template pass the agent only
+  lines it has matched against the fixed shapes `build-dispatch.sh prepare`
+  writes, a last line with no newline included.
+- **R117** — When the stderr-suppression check scans a YAML file, the
+  lifecycle shall make it examine only `run:` values.
+- **R118** — When the lifecycle renders a pull request body, the lifecycle
+  shall name in it only artifacts that exist in the repository it is rendered
+  in.
+- **R119** — When a check does not pass, the lifecycle shall print the last 20
+  lines of the check's own output beneath its row in the checks stage.
+- **R120** — When the CI replay runs a workflow step, the lifecycle shall run
+  it with no system or global git configuration and with git's default branch
+  set to master.
+- **R121** — When the view builder embeds repository-derived text in the page,
+  the lifecycle shall encode the capability object's name so that it does not
+  appear verbatim as an identifier.
+- **R125** — When a stage advance to design is judged without `--unattended`,
+  the lifecycle shall permit its change to modify the requirement index and to
+  add classification records.
 
 **For as long as a state lasts.** Seven requirements are true for the duration
 of a state, not at a moment inside it:
 
-- **R12** — While a contradiction is unruled, the lifecycle shall merge no
-  spec change that depends on it.
 - **R13** — While a check tool named by the configuration is absent, the
   lifecycle shall report that check as missing rather than skipped.
 - **R38** — While a failing check is overridden, the lifecycle shall render it
@@ -894,21 +898,20 @@ of a state, not at a moment inside it:
 - **R71** — While an unattended run holds a token that can write to the
   repository, the lifecycle shall execute no code from the repository it is
   writing to.
-- **R81** — While PRODUCTIZER_SHA is the all-zero placeholder, the CI build
-  template shall refuse to run before checking anything out, naming the
-  command that prints a release's commit id.
 - **R91** — While a stage run is judged under `--unattended`, the lifecycle
   shall refuse that run's change to a path that holds a character outside
   ASCII or has a component that begins with a dot, except the backlog, the
   plan in plan mode and the spec outside build mode on their exact paths.
+- **R103** — While a contradiction is unruled, the lifecycle shall merge no
+  spec change that adds, refines or supersedes a requirement named in that
+  contradiction.
+- **R122** — While PRODUCTIZER_SHA is the forty-`0` placeholder, the lifecycle
+  shall make the CI build template refuse to run before checking anything out,
+  naming the command that prints a release's commit id.
 
-**When something goes wrong.** Thirty-five defences, written as `If … then`
+**When something goes wrong.** Thirty-nine defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
-- **R15** — If a check exits zero having examined less than it declared, then
-  the lifecycle shall report it as hollow and treat it as a failure.
-- **R17** — If a command would publish or deploy, then the gate shall block it
-  until a person approves.
 - **R18** — If a configured command names a shell or an interpreter with an
   inline program, then the lifecycle shall refuse to run it.
 - **R19** — If the spec home is unreachable, then the lifecycle shall stop
@@ -921,13 +924,8 @@ because a designed path and a defended one are not the same thing:
   it as unmeasured.
 - **R26** — If a value could not be measured, then the lifecycle shall not
   record it as zero.
-- **R29** — If a configured command would let the repository being examined
-  select an executable in any argv position, then the lifecycle shall refuse
-  to run it.
 - **R31** — If a published view declares a capability that can publish new
   versions of itself, then the lifecycle shall refuse to publish it.
-- **R33** — If an intent contradicts an active requirement, then the lifecycle
-  shall stop.
 - **R34** — If an intent contradicts an active requirement, then the lifecycle
   shall ask which wins.
 - **R41** — If an active requirement's sentence was rewritten in place, then
@@ -939,9 +937,6 @@ because a designed path and a defended one are not the same thing:
   not report that path as a risk tier.
 - **R46** — If a change's complexity was not measured, then the lifecycle
   shall not derive it from that change's risk tier.
-- **R50** — If a check is declared blocking, then the lifecycle shall record
-  its fire rate over merged history, the number of commits that returned a
-  verdict, and a person's ruling on every fire in that window.
 - **R51** — If a check's fire rate over merged history could not be measured,
   then the lifecycle shall record that its severity was never calibrated.
 - **R52** — If a change adds a citation of a requirement id that the spec does
@@ -975,9 +970,6 @@ because a designed path and a defended one are not the same thing:
   change.
 - **R77** — If a build-mode stage run's change removes or rewrites an existing
   line of the backlog, then the lifecycle shall refuse to deliver that change.
-- **R79** — If a flag line prepared for an unattended run is outside the fixed
-  shapes `build-dispatch.sh prepare` writes, repeats a flag, or the prepared
-  flags lack the Bash deny, then the CI build template shall refuse the run.
 - **R83** — If an unattended stage run's change touches the lifecycle's checks
   result, then the lifecycle shall refuse to deliver that change.
 - **R84** — If the repository has no solver probe, then the lifecycle shall
@@ -988,6 +980,29 @@ because a designed path and a defended one are not the same thing:
   either has a component that begins with a dot or, read with each such
   character as any character, is a path the lifecycle refuses, then the
   lifecycle shall refuse to deliver that change.
+- **R96** — If a check exits zero having examined less than it declared, then
+  the lifecycle shall report it as hollow.
+- **R97** — If a check exits zero having examined less than it declared, then
+  the lifecycle shall treat it as a failure.
+- **R98** — If a check is declared blocking, then the lifecycle shall record
+  its fire rate over merged history.
+- **R99** — If a check is declared blocking, then the lifecycle shall record
+  how many commits returned a verdict in the window its fire rate covers.
+- **R100** — If a check is declared blocking, then the lifecycle shall record
+  a person's ruling on every fire in the window its fire rate covers.
+- **R101** — If an intent contradicts an active requirement, then the
+  lifecycle shall stop that intent until a person rules on the contradiction.
+- **R102** — If a configured command would let the repository being examined
+  select an executable in any argv position, and the configuration has not
+  opted in to repository-declared check tools, then the lifecycle shall refuse
+  to run it.
+- **R105** — If the user guide cannot be regenerated, then the lifecycle shall
+  not prepare the release.
+- **R123** — If a command would publish or deploy, then the lifecycle shall
+  not run it until a person approves.
+- **R124** — If a flag line prepared for an unattended run is outside the
+  fixed shapes `build-dispatch.sh prepare` writes, repeats a flag, or the
+  prepared flags lack the Bash deny, then the lifecycle shall refuse the run.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

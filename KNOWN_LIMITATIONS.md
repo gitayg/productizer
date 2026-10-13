@@ -339,7 +339,7 @@ anyone asks it. Searched 2026-10-10: outside its own file it is invoked only by
 Part A is deterministic. Part B hands the checklist to a clean-context reviewer
 agent, and it has **never been dispatched live**: the checklist was walked once
 by hand over this spec (B102), so what Part B finds, misses and invents is not
-known. R57 holds that a reviewer agent is granted no tool that can write a
+known. R110 holds that a reviewer agent is granted no tool that can write a
 file, and `check-frontmatter.py` asserts it on the frontmatter `name` only. A
 reviewer that writes through Bash or an MCP tool passes.
 
@@ -387,7 +387,7 @@ was never pushed.
 ### 16 · Whether the action honours committed permissions is unmeasured
 
 The CI template gives the agent the repository's committed Claude Code settings
-and lets the dispatcher narrow them, never widen them (R65). Measured locally on
+and lets the dispatcher narrow them, never widen them (R113). Measured locally on
 2026-10-10, `claude -p` 2.1.295 in a workspace it had not been told to trust
 **ignored** a committed `permissions.allow` entry and a committed
 `defaultMode: bypassPermissions`, while it honoured committed deny rules and a
@@ -518,3 +518,38 @@ lines were fixed by hand); a `$( ... )` inside an unquoted here-document body;
 backtick substitution, read as plain code; and, in a file without errexit, a
 function whose last pipeline ends in a reader and whose caller tests it, an `if
 x="$(a | head -1)"`, and a group or subshell tested from outside.
+
+## Added in v4.71.0
+
+### 26 · `jira.status_map` has never been run against a real Jira
+
+The eleven-state mapping from Jira workflow states to backlog statuses in
+`plugins/productizer/skills/spec/templates/config.json` has never been run
+against a real Jira instance. It was checked on 2026-09-06 against Atlassian's
+published documentation only (`references/backlog.md`, "The status map is
+unverified"), and nothing in the repository reads it. The maintainer ruled on
+2026-10-13 to keep it and not test it now (B4): it ships as a starting point,
+and the template's own `_note` key says the same. Edit it against your
+project's statuses before relying on it.
+
+### 27 · A plugin manifest is refused only when no person is at the keyboard
+
+`stage-advance.sh` refuses a change to a `.claude-plugin/` manifest only under
+`--unattended`, where any path with a component beginning with a dot is outside
+the allowlist (the `unattended-shape-46` case). Attended, the named forbidden
+set does not list it, so a manifest edit is allowed: version bumps edit it, and
+refusing it attended would refuse 22 of this repository's own version bumps
+(measured at v4.69.1, B135). A manifest declares hooks and MCP servers, so an
+attended stage run can still change what steers an agent there; a person sees
+that change.
+
+### 28 · A design move's requirement-index exception is on the path, not the bytes
+
+Since `stage-advance.sh` 1.5 an attended move to design may MODIFY
+`.claude/productizer/requirement-index.md` (B112). The exception is granted on
+the exact path and git's status `M`. The stage guard does not check that the
+new content is what `build-requirement-index.sh` writes; the
+`requirement-index-current` check does, when the checks run, so a hand-edited
+index passes the guard and fails the checks. Under `--unattended` the index
+stays refused.
+

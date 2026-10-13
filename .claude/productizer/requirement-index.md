@@ -29,42 +29,42 @@ marker, because a table left there would be one nothing writes or checks.
 | R1 | ubiquitous | active | `spec-home` |
 | R2 | ubiquitous | active | no check cited |
 | R3 | ubiquitous | active | `superseded-text` |
-| R4 | ubiquitous | active | `view-read-only` |
-| R5 | ubiquitous | active | no check cited |
+| R4 | ubiquitous | superseded by R106 | `view-read-only` |
+| R5 | ubiquitous | superseded by R107 | no check cited |
 | R6 | event | active | `classification-provenance` |
 | R7 | event | superseded by R32 | — |
 | R8 | event | superseded by R35 | `acceptance-rows` |
 | R9 | event | active | `guide-current` |
 | R10 | event | active | `import-marking` |
-| R11 | event | active | no check cited |
-| R12 | state | active | `pending-ruling-scope` |
+| R11 | event | active | `unmeasured-report` |
+| R12 | state | superseded by R103 | `pending-ruling-scope` |
 | R13 | state | active | `missing-tool-reported` |
-| R14 | unwanted | superseded by R33 | — |
-| R15 | unwanted | active | no check cited |
+| R14 | unwanted | superseded by R101 | — |
+| R15 | unwanted | superseded by R96 | no check cited |
 | R16 | unwanted | superseded by R25 | — |
-| R17 | unwanted | active | no check cited |
+| R17 | unwanted | superseded by R123 | no check cited |
 | R18 | unwanted | active | no check cited |
 | R19 | unwanted | active | `spec-home-stop` |
 | R20 | unwanted | active | no check cited |
 | R21 | optional | superseded by R27 | — |
 | R22 | optional | active | no check cited |
-| R23 | unwanted | superseded by R33 | `ruling-requested` |
+| R23 | unwanted | superseded by R101 | `ruling-requested` |
 | R24 | unwanted | active | `nothing-merged` |
 | R25 | unwanted | active | no check cited |
 | R26 | unwanted | active | `no-fabricated-zero` |
 | R27 | optional | active | `jira-unbound` |
 | R28 | optional | active | `jira-unbound` |
-| R29 | unwanted | active | no check cited |
+| R29 | unwanted | superseded by R102 | no check cited |
 | R30 | optional | active | no check cited |
 | R31 | unwanted | active | `view-read-only` |
 | R32 | event | active | no check cited |
-| R33 | unwanted | active | `solver-corpus` |
+| R33 | unwanted | superseded by R101 | `solver-corpus` |
 | R34 | unwanted | active | `ruling-requested` |
 | R35 | event | active | `spec-integrity` |
 | R36 | event | active | `acceptance-rows` |
 | R37 | event | active | `waiver-rendering` |
 | R38 | state | active | `waiver-rendering` |
-| R39 | ubiquitous | active | `selftest-coverage` |
+| R39 | ubiquitous | superseded by R108 | `selftest-coverage` |
 | R40 | event | active | `selftest-coverage` |
 | R41 | unwanted | active | no check cited |
 | R42 | event | active | `risk-tier-classified` |
@@ -73,26 +73,26 @@ marker, because a table left there would be one nothing writes or checks.
 | R45 | state | active | `risk-tier-classified` |
 | R46 | unwanted | active | `risk-tier-classified` |
 | R47 | event | active | `governance-weakening`, `governance-self-footing` |
-| R48 | ubiquitous | active | `diff-paths-named` |
-| R49 | event | active | `view-rendered` |
-| R50 | unwanted | active | `calibration-recorded` |
+| R48 | ubiquitous | superseded by R109 | `diff-paths-named` |
+| R49 | event | superseded by R104 | `view-rendered` |
+| R50 | unwanted | superseded by R98 | `calibration-recorded` |
 | R51 | unwanted | active | `calibration-recorded` |
 | R52 | unwanted | active | `dangling-citations` |
 | R53 | unwanted | active | `dangling-citations` |
 | R54 | unwanted | active | `stage-advance-guard` |
 | R55 | unwanted | active | `stage-advance-guard` |
 | R56 | unwanted | superseded by R63 | `stage-advance-guard` |
-| R57 | ubiquitous | active | `template-frontmatter` |
+| R57 | ubiquitous | superseded by R110 | `template-frontmatter` |
 | R58 | event | active | `build-dispatch` |
 | R59 | event | active | `build-dispatch` |
 | R60 | unwanted | active | `build-dispatch` |
-| R61 | ubiquitous | active | `build-dispatch` |
-| R62 | ubiquitous | active | `ci-template-safe` |
+| R61 | ubiquitous | superseded by R111 | `build-dispatch` |
+| R62 | ubiquitous | superseded by R112 | `ci-template-safe` |
 | R63 | unwanted | active | `stage-advance-guard` |
 | R64 | event | active | `build-dispatch` |
-| R65 | ubiquitous | active | `ci-template-safe` |
+| R65 | ubiquitous | superseded by R113 | `ci-template-safe` |
 | R66 | unwanted | active | `stage-advance-guard` |
-| R67 | ubiquitous | active | `ci-template-safe` |
+| R67 | ubiquitous | superseded by R114 | `ci-template-safe` |
 | R68 | event | active | `build-dispatch` |
 | R69 | event | active | `ci-template-safe` |
 | R70 | unwanted | active | `build-dispatch` |
@@ -103,22 +103,52 @@ marker, because a table left there would be one nothing writes or checks.
 | R75 | unwanted | active | `stage-advance-guard` |
 | R76 | unwanted | active | `stage-advance-guard` |
 | R77 | unwanted | active | `stage-advance-guard` |
-| R78 | event | active | `ci-template-safe` |
-| R79 | unwanted | active | `ci-template-safe` |
-| R80 | ubiquitous | active | `ci-template-safe` |
-| R81 | state | active | `ci-template-safe` |
-| R82 | event | active | `stderr-suppression` |
+| R78 | event | superseded by R116 | `ci-template-safe` |
+| R79 | unwanted | superseded by R124 | `ci-template-safe` |
+| R80 | ubiquitous | superseded by R115 | `ci-template-safe` |
+| R81 | state | superseded by R122 | `ci-template-safe` |
+| R82 | event | superseded by R117 | `stderr-suppression` |
 | R83 | unwanted | active | `stage-advance-guard`, `build-dispatch` |
 | R84 | unwanted | active | `build-dispatch`, `pr-body-renderer` |
-| R85 | event | active | `pr-body-renderer` |
-| R86 | event | active | `checks-stage-runner` |
-| R87 | event | active | `ci-replay` |
+| R85 | event | superseded by R118 | `pr-body-renderer` |
+| R86 | event | superseded by R119 | `checks-stage-runner` |
+| R87 | event | superseded by R120 | `ci-replay` |
 | R88 | event | active | `classification-recorder` |
 | R89 | unwanted | active | `classification-recorder` |
 | R90 | unwanted | active | `stage-advance-guard` |
 | R91 | state | active | `stage-advance-guard` |
 | R92 | event | active | `import-marking` |
 | R93 | event | active | `dangling-citations` |
-| R94 | event | active | `view-builder` |
+| R94 | event | superseded by R121 | `view-builder` |
 | R95 | event | active | `acceptance-rows` |
+| R96 | unwanted | active | `declared-scope` |
+| R97 | unwanted | active | `declared-scope` |
+| R98 | unwanted | active | `calibration-recorded` |
+| R99 | unwanted | active | `calibration-recorded` |
+| R100 | unwanted | active | `calibration-recorded` |
+| R101 | unwanted | active | `solver-corpus`, `pending-ruling-scope` |
+| R102 | unwanted | active | `untrusted-execution` |
+| R103 | state | active | `pending-ruling-scope` |
+| R104 | event | active | `view-rendered` |
+| R105 | unwanted | active | `guide-current` |
+| R106 | ubiquitous | active | `view-read-only` |
+| R107 | ubiquitous | active | `declared-scope` |
+| R108 | ubiquitous | active | `selftest-coverage` |
+| R109 | ubiquitous | active | `diff-paths-named` |
+| R110 | ubiquitous | active | `template-frontmatter` |
+| R111 | ubiquitous | active | `build-dispatch` |
+| R112 | ubiquitous | active | `ci-template-safe` |
+| R113 | ubiquitous | active | `ci-template-safe` |
+| R114 | ubiquitous | active | `ci-template-safe` |
+| R115 | ubiquitous | active | `ci-template-safe` |
+| R116 | event | active | `ci-template-safe` |
+| R117 | event | active | `stderr-suppression` |
+| R118 | event | active | `pr-body-renderer` |
+| R119 | event | active | `checks-stage-runner` |
+| R120 | event | active | `ci-replay` |
+| R121 | event | active | `view-builder` |
+| R122 | state | active | `ci-template-safe` |
+| R123 | unwanted | active | `untrusted-execution` |
+| R124 | unwanted | active | `ci-template-safe` |
+| R125 | event | active | `stage-advance-guard` |
 <!-- productizer:requirement-index:end -->

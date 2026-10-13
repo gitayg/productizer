@@ -58,8 +58,14 @@
 #                                          (checks.yaml, calibration.yaml,
 #                                          constitution.md, config.json, ...)
 #                                          EXCEPT the bookkeeping below,
-#                                          .claude/productizer/backlog.md, and
-#                                          the spec outside build mode
+#                                          .claude/productizer/backlog.md, the
+#                                          spec outside build mode, and in a
+#                                          move to design, attended only,
+#                                          .claude/productizer/requirement-index.md
+#                                          MODIFIED (B112): a design move
+#                                          regenerates it from the spec, and
+#                                          a classification it records is
+#                                          bookkeeping ADDED, already inert
 #                   */.claude/**           a nested .claude directory, no
 #                                          exceptions
 #                   CLAUDE.md CLAUDE.local.md AGENTS.md .mcp.json
@@ -182,7 +188,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.4"
+VERSION="stage-advance 1.5"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -761,6 +767,80 @@ JSON
   drive malformed-config 4 "cannot read the stage order" \
     "$R" --from design --to build --mode build --base base
 
+  # --- B112. A DESIGN MOVE may also MODIFY the requirement index and ADD a
+  # classification record, on exact bytes; 1.4 refused the index under the
+  # .claude default-deny. Governance files stay refused at design, the index
+  # stays refused at every other stage, and an ADDED index or a variant
+  # spelling of it is not the exception. Under --unattended the exception
+  # does not hold: R91 lists the unattended exceptions, and the index is not
+  # among them.
+  local IX=".claude/productizer/requirement-index.md"
+  newrepo dz; R="$WORK/dz"
+  mkdir -p "$R/.claude/productizer/classifications"
+  printf '| R1 |\n' > "$R/$IX"
+  printf 'checks: []\n' > "$R/.claude/productizer/checks.yaml"
+  printf 'x: 1\n' > "$R/.claude/productizer/calibration.yaml"
+  printf '# P\n' > "$R/.claude/productizer/constitution.md"
+  commit "$R"; G "$R" tag dz-base
+  local dz_spec='diff --git a/.claude/productizer/spec.md b/.claude/productizer/spec.md\n--- a/.claude/productizer/spec.md\n+++ b/.claude/productizer/spec.md\n@@ -5 +5,2 @@\n - **R1** \342\200\224 The tool shall greet.\n+- **R2** \342\200\224 The tool shall wave.\n'
+  local dz_ix='diff --git a/.claude/productizer/requirement-index.md b/.claude/productizer/requirement-index.md\n--- a/.claude/productizer/requirement-index.md\n+++ b/.claude/productizer/requirement-index.md\n@@ -1 +1,2 @@\n | R1 |\n+| R2 |\n'
+  local dz_cl='diff --git a/.claude/productizer/classifications/B2.md b/.claude/productizer/classifications/B2.md\nnew file mode 100644\n--- /dev/null\n+++ b/.claude/productizer/classifications/B2.md\n@@ -0,0 +1 @@\n+Intent: B2\n'
+  local dz_cl_mod='diff --git a/.claude/productizer/classifications/B1.md b/.claude/productizer/classifications/B1.md\n--- a/.claude/productizer/classifications/B1.md\n+++ b/.claude/productizer/classifications/B1.md\n@@ -1 +1 @@\n-Intent: B1\n+Intent: B9\n'
+  # shellcheck disable=SC2059  # the format strings are the patch fixtures
+  {
+    printf "$dz_spec$dz_ix" > "$WORK/dz-ix.patch"
+    printf "$dz_spec$dz_ix$dz_cl" > "$WORK/dz-ix-cl.patch"
+    printf "$dz_spec$dz_cl" > "$WORK/dz-cl.patch"
+    printf "$dz_ix" > "$WORK/dz-ix-only.patch"
+    printf 'diff --git a/src/app.sh b/src/app.sh\n--- a/src/app.sh\n+++ b/src/app.sh\n@@ -1 +1 @@\n-echo hi\n+echo bye\n'"$dz_ix" > "$WORK/dz-ix-build.patch"
+    for p in checks.yaml calibration.yaml constitution.md; do
+      printf "$dz_spec"'diff --git a/.claude/productizer/%s b/.claude/productizer/%s\n--- a/.claude/productizer/%s\n+++ b/.claude/productizer/%s\n@@ -1 +1 @@\n-%s\n+changed\n' \
+        "$p" "$p" "$p" "$p" "$(cat "$R/.claude/productizer/$p")" > "$WORK/dz-$p.patch"
+    done
+  }
+  printf '{}\n' > "$R/.claude/productizer/config.json"
+  # shellcheck disable=SC2059  # the format string is the patch fixture
+  { printf "$dz_spec"; G "$R" diff; } > "$WORK/dz-config.json.patch"
+  G "$R" restore -- .claude/productizer/config.json
+  drive design-index-modified 0 "advance allowed: intent -> design: R2 added" \
+    "$R" --from intent --to design --patch "$WORK/dz-ix.patch"
+  drive design-index-and-classification 0 "advance allowed: intent -> design: R2 added" \
+    "$R" --from intent --to design --patch "$WORK/dz-ix-cl.patch"
+  drive design-classification-added 0 "advance allowed: intent -> design: R2 added" \
+    "$R" --from intent --to design --patch "$WORK/dz-cl.patch"
+  drive design-index-only-not-evidence 1 "no requirement id was added, refined, superseded or withdrawn" \
+    "$R" --from intent --to design --patch "$WORK/dz-ix-only.patch"
+  drive design-index-unattended-refused 3 "forbidden for design: $IX" \
+    "$R" --from intent --to design --unattended --patch "$WORK/dz-ix.patch"
+  drive build-index-modified-refused 3 "forbidden for test: $IX" \
+    "$R" --from build --to test --mode build --patch "$WORK/dz-ix-build.patch"
+  for p in checks.yaml calibration.yaml constitution.md config.json; do
+    drive "design-$p-refused" 3 "forbidden for design: .claude/productizer/$p" \
+      "$R" --from intent --to design --patch "$WORK/dz-$p.patch"
+  done
+  # Added, not modified: the exception is a regeneration, not a new file.
+  G "$R" rm --quiet "$IX"; commit "$R"; G "$R" tag dz-no-index
+  printf "$dz_spec"'diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+| R1 |\n' \
+    "$IX" "$IX" "$IX" > "$WORK/dz-ix-added.patch"
+  drive design-index-added-refused 3 "forbidden for design: $IX" \
+    "$R" --from intent --to design --patch "$WORK/dz-ix-added.patch"
+  # A variant spelling, modified: committed straight into the index, so a
+  # case-insensitive disk never folds it onto the real name.
+  local VX=".claude/productizer/Requirement-Index.md"
+  G "$R" update-index --add --cacheinfo "100644,$(printf '| R1 |\n' | G "$R" hash-object -w --stdin),$VX"
+  G "$R" commit --quiet -m variant
+  printf "$dz_spec"'diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1 +1,2 @@\n | R1 |\n+| R2 |\n' \
+    "$VX" "$VX" "$VX" "$VX" > "$WORK/dz-variant.patch"
+  drive design-index-variant-refused 3 "forbidden for design: $VX" \
+    "$R" --from intent --to design --patch "$WORK/dz-variant.patch"
+  # Modify and delete of a classification stay refused at design (R76, R66).
+  G "$R" rm --quiet --cached "$VX"
+  printf 'Intent: B1\n' > "$R/.claude/productizer/classifications/B1.md"; commit "$R"
+  # shellcheck disable=SC2059  # the format string is the patch fixture
+  printf "$dz_spec$dz_cl_mod" > "$WORK/dz-cl-mod.patch"
+  drive design-classification-modified-refused 3 "a stage run may not alter an audit record" \
+    "$R" --from intent --to design --patch "$WORK/dz-cl-mod.patch"
+
   drive version 0 "stage-advance 1." --version
 
   printf '\n%s of %s cases held\n' "$HELD" "$CASES"
@@ -768,7 +848,7 @@ JSON
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script, a script checks.yaml runs); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); a bookkeeping record ADDED under --unattended, which stays inert.\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script, a script checks.yaml runs); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); a bookkeeping record ADDED under --unattended, which stays inert; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -1075,6 +1155,7 @@ ART_KEY_RE="^$(ere_escape "$ART_KEY" | sed 's/<[^>]*>/[^\/]+/g')/"
 PLAN_RE="${ART_RE}plan\\.md\$"
 BACKLOG=".claude/productizer/backlog.md"
 CHECKS_RESULT=".claude/productizer/checks-result.json"
+REQ_INDEX=".claude/productizer/requirement-index.md"
 
 is_bookkeeping() {
   case "$1" in
@@ -1126,6 +1207,16 @@ is_exact_exception() {
   [ "$MODE" = "plan" ] && [[ "$1" =~ $PLAN_RE ]] && return 0
   return 1
 }
+# THE DESIGN WRITE (B112). A move to design regenerates the requirement index
+# from the spec it changes, so the index MODIFIED (git status M) is allowed in
+# that move alone, on the exact bytes, attended only: under --unattended R91
+# lists the exceptions to the allowlist, and the index is not one of them.
+# Added, deleted or retyped, at any other stage, or spelled any other way, it
+# stays under the .claude default-deny. A classification record ADDED needs no
+# exception here: bookkeeping added is already "nothing" at every stage.
+is_design_write() {
+  [ "$TO_KEY" = design ] && [ "$UNATTENDED" = 0 ] && [ "$2" = M ] && [ "$1" = "$REQ_INDEX" ]
+}
 # has_dot_component <folded key>: a component begins with a dot.
 has_dot_component() { case "/$1" in */.*) return 0 ;; esac; return 1; }
 # is_forbidden <path> <folded key>
@@ -1173,6 +1264,7 @@ while IFS=$'\t' read -r st om nm p k a c; do
   fi
   [ "$p" = "$BACKLOG" ] && BACKLOG_ST="$st"
   REAL="$REAL$st"$'\t'"$p"$'\t'"$k"$'\n'
+  is_design_write "$p" "$st" && continue
   if is_forbidden "$p" "$k"; then FORBIDDEN="$FORBIDDEN$p"$'\n'; continue; fi
   is_exact_exception "$p" && continue
   # A HOMOGLYPH, any mode: a path whose bytes are not ASCII is refused when a

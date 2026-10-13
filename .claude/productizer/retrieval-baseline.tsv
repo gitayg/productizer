@@ -3,15 +3,15 @@
 # calibration: 3.79-4.31 bytes/token on candidate runs, 2026-09-05, evals/token-calibration.sh
 # fields: id, characters (compared against the band), mix percent (recorded, never compared)
 # spec: .claude/productizer/spec.md
-# spec-bytes: 85462
-# spec-sha256: 1ff0adb88231b7811c9c129dff16840334266e9f7803069d1970947740206a7a
-# signed off: by the maintainer, 2026-10-12 - this re-record (v4.68.0, ab74c5a), which reset all ten budgets against the 85462-byte spec above after three prompts had gone over band
-hollow-check	1624	19
+# spec-bytes: 126936
+# spec-sha256: f07b87d2e036a6dc4e6299fd27988836326dc4c7aad3edd944bde45e5edd3f07
+# signed off: by the maintainer, 2026-10-13 - this re-record (v4.71.0), which reset all ten budgets against the 126936-byte spec above after missing-tool (2289 vs <=1759) and hollow-check (2645 vs <=1948) went over band: superseded text is kept, and the 19 subject normalisations put 'check' into four requirements ahead of R13 and R15. Rewording was tried first and could not clear it. The previous sign-off was 2026-10-12, for v4.68.0
+hollow-check	2645	24
 id-permanence	1141	29
-merge-nothing	1679	0
-missing-tool	1466	27
+merge-nothing	1930	0
+missing-tool	2289	23
 override-record	153	0
-superseded-r14	994	0
+superseded-r14	1160	0
 unmeasured-zero	783	0
 unruled-merge	579	0
 view-read-only	212	0
