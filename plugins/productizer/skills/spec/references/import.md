@@ -194,11 +194,12 @@ guards against is not drafting from weak evidence — that is the point of the t
    paths, then config-gated behaviour. Every one carries a citation.
 5. **Write the refusals down as gaps**, in the same pass - the same commit as
    the draft. The list of what could not be inferred is worth more than the
-   draft, because it is the list of questions only a person can answer. A
-   backlog line naming `Stage 0c` counts as a record of the import only in the
-   commit that drafted the requirements it names (`check-import-marking.sh`
-   1.2): anyone may append a backlog line later, so a later one is not
-   evidence.
+   draft, because it is the list of questions only a person can answer. Write
+   each gap as a backlog row whose item opens with the stage -
+   `| B<n> | Stage 0c could not infer ... |`. Only a row of that shape, written
+   new in the commit that drafted the requirements, counts as a record of the
+   import (`check-import-marking.sh` 1.3); prose that mentions the stage, or a
+   row appended or edited later, does not.
 6. **Raise contested behaviour under *Areas of concern***, not as a corrected
    requirement.
 7. **Confirm in batches of about ten**, in the session, by id.

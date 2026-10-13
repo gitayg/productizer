@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # stage-advance.sh [repo-root] --from STAGE --to STAGE
 #                  (--patch FILE | --base REF [--head REF])
-#                  [--mode plan|build] [--unattended] [--format text|json]
-#                  [--selftest] [--version] [--help]
+#                  [--mode plan|build] [--unattended [--protected FILE]]
+#                  [--format text|json]
+# stage-advance.sh [repo-root] --print-protected --base REF
+# stage-advance.sh --selftest | --version | --help
 #
 # MAY THIS WORK ITEM'S STAGE MOVE FROM --from TO --to, ON THE EVIDENCE OF THIS
 # CHANGE? A pure decider: it reads the repository and the change, answers with
@@ -26,7 +28,8 @@
 #        .claude/productizer/snapshots/**        (stage-snapshot.sh)
 #        .claude/productizer/checks-result.json  (run-checks.sh output)
 #        .claude/productizer/classifications/**  (record-classification.sh)
-#      Bookkeeping ADDED is "nothing"; bookkeeping DELETED is refusal 3, not 1.
+#      Bookkeeping ADDED is "nothing" (under --unattended it is refusal 3, see
+#      UNATTENDED below); bookkeeping DELETED is refusal 3, not 1.
 #      These records are an audit trail the governance checks read, and a run
 #      that erases one can flip a check from a finding to clean, so a stage run
 #      - the wrong actor to edit the rules it is judged by - may not delete
@@ -111,6 +114,52 @@
 # measurement (maintainer ruling 2026-10-12, B126). Without the flag nothing
 # changes: a person's run legitimately rewrites the file every time it runs
 # run-checks.sh, so attended, its addition or modification stays "nothing".
+# The same holds for the write-once records (B137): under --unattended a
+# classification or a stage snapshot ADDED is refusal 3 as well, not
+# "nothing". Nothing in an unattended pipeline classifies an intent or
+# snapshots a stage (build-dispatch.sh and the CI template name neither, and
+# the agent is told to write nothing under .claude/), so a record added there
+# is the run's own, and a forged classification would pass for a decision a
+# person made. Attended, an added record stays "nothing".
+#
+# THE FILES checks.yaml RUNS (B136). Under --unattended a change to a file
+# that a declared check executes is refusal 3: rewriting the script a check
+# runs neuters that check as surely as editing checks.yaml would. The set is
+# read from .claude/productizer/checks.yaml AT THE BASE - the tree the change
+# applies to, never the changed tree or the work tree - so the change cannot
+# redefine what is protected. Of every check, in `command`, `version_command`,
+# `coverage.command` and `coverage.rules_command`: the program (element 0),
+# and, after an element that names an interpreter, its first operand that
+# does not begin with `-` - the same program positions run-checks.sh gates -
+# with `python3 -m pkg.mod` also protecting `pkg/**` and `pkg.py`; and every
+# `requires` entry. Each is taken as a path from the repository root, with
+# its subtree, and matched on the folded key, so a case variant is refused
+# too. A bare tool name (`shellcheck`) is protected as a root file of that
+# name, which costs nothing and holds should PATH ever reach the work tree.
+# No checks.yaml at the base: nothing extra is protected. One that cannot be
+# read - no PyYAML, not YAML, `checks` not a list, an argv that is not a list
+# of strings, a placeholder in a program position - is exit 4, never a guess.
+# PyYAML is read with python3 -I, which keeps the work tree and PYTHONPATH off
+# sys.path so a module the change planted is never imported; -I also hides the
+# user site, so that one directory is appended LAST, as a plain path whose .pth
+# files do not run. Attended, none of this is read and nothing changes.
+#
+# THE PROTECTED LIST (maintainer ruling 2026-10-13, "read it before the AI").
+# A job that holds a write token must not parse YAML or install a package, so
+# the reading above is done EARLIER, by the caller, in a job with no write
+# token that runs before the agent: `--print-protected --base REF` prints the
+# path of every file checks.yaml at REF runs, one per line, sorted (exit 0; an
+# empty list, and a line on stderr saying so, when REF has no checks.yaml), or
+# exits 4 when it cannot be read or names a path that is not printable ASCII.
+# The caller hands that list back with `--protected FILE` (under --unattended
+# only; attended it is a usage error). The decider then uses the list and
+# neither reads checks.yaml nor imports PyYAML. The list is DATA: anything but
+# a regular file of at most 262144 bytes, holding no NUL, whose every line is
+# a non-empty printable-ASCII repository path with no leading or trailing
+# slash and no empty, . or .. component, is exit 4. An empty file is a list
+# that protects nothing; build-dispatch.sh refuses to deliver without one when
+# HEAD has a checks.yaml. ASCII folds by lower case alone, so a list path is
+# matched on its lower case, as the folded key matches a path read from YAML.
 #
 # THE UNATTENDED ALLOWLIST (B125). Under --unattended a changed path is also
 # refused (3) unless it has the shape a build's own output takes: its bytes
@@ -184,11 +233,12 @@
 #   3  produced a change the target stage forbids
 #   4  cannot determine
 #   5  not a forward move
+# --print-protected exits 0 with the list, 2 on usage, 4 when it cannot read it.
 # --selftest exits 0 when every case held, 1 when one did not.
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.5"
+VERSION="stage-advance 1.6"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -197,18 +247,27 @@ die_usage() { printf 'stage-advance: %s\n' "$1" >&2; exit 2; }
 usage() {
   printf 'usage: stage-advance.sh [repo-root] --from STAGE --to STAGE\n'
   printf '                        (--patch FILE | --base REF [--head REF])\n'
-  printf '                        [--mode plan|build] [--unattended] [--format text|json]\n'
+  printf '                        [--mode plan|build] [--unattended [--protected FILE]]\n'
+  printf '                        [--format text|json]\n'
+  printf '       stage-advance.sh [repo-root] --print-protected --base REF\n'
   printf '       stage-advance.sh --selftest | --version | --help\n'
   printf '  --unattended  no person is at the keyboard: any change to\n'
   printf '                .claude/productizer/checks-result.json is refused (exit 3),\n'
   printf '                and so is any path that is not ASCII or has a component\n'
-  printf '                beginning with a dot (bar the backlog, the plan, the spec)\n'
+  printf '                beginning with a dot (bar the backlog, the plan, the spec),\n'
+  printf '                any classification or snapshot record added, and any file\n'
+  printf '                .claude/productizer/checks.yaml at the base runs\n'
+  printf '  --protected FILE  under --unattended: the files checks.yaml runs, one\n'
+  printf '                repository path per line, as --print-protected wrote them;\n'
+  printf '                checks.yaml is then not read and PyYAML is not needed\n'
+  printf '  --print-protected  print the files checks.yaml at --base REF runs, one per\n'
+  printf '                line (exit 0), or exit 4 when it cannot be read\n'
   printf 'exit: 0 advance allowed, 1 produced nothing, 2 usage, 3 forbidden path,\n'
   printf '      4 cannot determine, 5 not a forward move\n'
 }
 
 ROOT=""; FROM=""; TO=""; PATCH=""; BASE=""; HEAD_REF=""; MODE=""; FORMAT="text"
-SELFTEST=0; UNATTENDED=0
+SELFTEST=0; UNATTENDED=0; PROTECTED=""; PRINT_PROTECTED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
@@ -229,6 +288,9 @@ while [ $# -gt 0 ]; do
     --format) [ $# -ge 2 ] || die_usage "--format needs text or json"; FORMAT="$2"; shift 2 ;;
     --format=*) FORMAT="${1#--format=}"; shift ;;
     --unattended) UNATTENDED=1; shift ;;
+    --protected) [ $# -ge 2 ] || die_usage "--protected needs a file"; PROTECTED="$2"; shift 2 ;;
+    --protected=*) PROTECTED="${1#--protected=}"; [ -n "$PROTECTED" ] || die_usage "--protected needs a file"; shift ;;
+    --print-protected) PRINT_PROTECTED=1; shift ;;
     -*) die_usage "unknown option: $1. Run with --help for the contract." ;;
     *)  [ -z "$ROOT" ] || die_usage "only one repo-root; got a second: $1"; ROOT="$1"; shift ;;
   esac
@@ -841,6 +903,150 @@ JSON
   drive design-classification-modified-refused 3 "a stage run may not alter an audit record" \
     "$R" --from intent --to design --patch "$WORK/dz-cl-mod.patch"
 
+  # --- B137. UNATTENDED, a classification or a snapshot ADDED is refused; 1.5
+  # held it inert, so a forged classification beside real code passed.
+  # Attended, an added record stays inert (bookkeeping-only, exit 1, and
+  # design-classification-added, exit 0, above).
+  drive unattended-bookkeeping-added-base-mode 3 "Added: .claude/productizer/classifications/12.md" \
+    "$WORK/bookkeeping" --from design --to build --mode build --unattended --base base
+  R="$WORK/rules"
+  # shellcheck disable=SC2059  # the format string is the patch fixture
+  printf 'diff --git a/.claude/productizer/classifications/12.md b/.claude/productizer/classifications/12.md\nnew file mode 100644\n--- /dev/null\n+++ b/.claude/productizer/classifications/12.md\n@@ -0,0 +1 @@\n+Classification: extend\n'"$app_mod" > "$WORK/cl-code.patch"
+  drive unattended-classification-added-beside-code 3 "a record added there is the run's own" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cl-code.patch"
+  drive attended-classification-added-beside-code 0 "src/app.sh" \
+    "$R" --from build --to test --mode build --patch "$WORK/cl-code.patch"
+  drive unattended-design-classification-added 3 "Added: .claude/productizer/classifications/B2.md" \
+    "$WORK/dz" --from intent --to design --unattended --patch "$WORK/dz-cl.patch"
+
+  # --- B136. UNATTENDED, a file checks.yaml at the base runs. 1.5 allowed each
+  # with exit 0: the program, the version command, the script an interpreter
+  # is handed, a requires entry, a coverage command, a module run with -m, and
+  # a case variant of the program. A data operand stays allowed, and so does
+  # every one of them attended.
+  newrepo cy; R="$WORK/cy"
+  mkdir -p "$R/tools" "$R/gatepkg" "$R/docs"
+  for p in lint.sh ver.sh helper.sh cov.sh; do printf 'exit 0\n' > "$R/tools/$p"; done
+  printf 'pass\n' > "$R/tools/gate.py"; printf 'pass\n' > "$R/gatepkg/main.py"; printf 'x\n' > "$R/docs/data.txt"
+  cat > "$R/.claude/productizer/checks.yaml" <<'YAML'
+version: 1
+checks:
+  - id: lint
+    command: [./tools/lint.sh, docs/data.txt]
+    version_command: [./tools/ver.sh, --version]
+  - id: gate
+    requires:
+      - python3
+      - tools/helper.sh
+    command: [python3, -u, tools/gate.py, src/app.sh]
+    coverage:
+      from: command
+      command: [./tools/cov.sh]
+  - id: mod
+    command: [python3, -m, gatepkg.main]
+YAML
+  commit "$R"; G "$R" tag cy-base
+  cymod() { printf 'echo planted\n' >> "$R/$1"; G "$R" add -A; G "$R" diff --cached > "$WORK/cy-$2.patch"; G "$R" reset --quiet --hard; }
+  cymod tools/lint.sh lint; cymod tools/ver.sh ver; cymod tools/gate.py gate; cymod tools/helper.sh helper
+  cymod tools/cov.sh cov; cymod gatepkg/__init__.py mod; cymod docs/data.txt data
+  local CY="(unattended: .claude/productizer/checks.yaml at the base runs it, as"
+  drive unattended-checks-program 3 "tools/lint.sh $CY the program in command of check lint)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-lint.patch"
+  drive attended-checks-program-allowed 0 "tools/lint.sh" \
+    "$R" --from build --to test --mode build --patch "$WORK/cy-lint.patch"
+  drive unattended-checks-version-command 3 "tools/ver.sh $CY the program in version_command of check lint)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-ver.patch"
+  drive unattended-checks-interpreter-script 3 "tools/gate.py $CY the script an interpreter is handed in command of check gate)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-gate.patch"
+  drive unattended-checks-requires 3 "tools/helper.sh $CY a requires entry of check gate)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-helper.patch"
+  drive unattended-checks-coverage-command 3 "tools/cov.sh $CY the program in coverage.command of check gate)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-cov.patch"
+  drive unattended-checks-module-added 3 "gatepkg/__init__.py $CY the script an interpreter is handed in command of check mod)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-mod.patch"
+  drive unattended-checks-data-operand-allowed 0 "docs/data.txt" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-data.patch"
+  drive unattended-checks-operand-after-script-allowed 0 "src/app.sh" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-code.patch"
+  # Written as text: a case-insensitive disk would fold it onto tools/lint.sh.
+  addpatch Tools/Lint.sh "$WORK/cy-variant.patch"
+  drive unattended-checks-case-variant 3 "Tools/Lint.sh $CY the program in command of check lint)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-variant.patch"
+  # The work tree's checks.yaml is not read: emptied there, the base still holds.
+  cp "$R/.claude/productizer/checks.yaml" "$WORK/cy-checks.yaml"
+  printf 'version: 1\nchecks: []\n' > "$R/.claude/productizer/checks.yaml"
+  drive unattended-checks-work-tree-not-read 3 "tools/lint.sh $CY the program in command of check lint)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-lint.patch"
+  cp "$WORK/cy-checks.yaml" "$R/.claude/productizer/checks.yaml"
+
+  # --- THE PROTECTED LIST. --print-protected prints the reading above, one
+  # path per line; --protected hands it back, so the decider needs neither
+  # checks.yaml nor PyYAML. A python3 that cannot reach PyYAML (no site
+  # directories, a HOME with no user site) stands in for a runner without it.
+  mkdir -p "$WORK/noyaml" "$WORK/noyaml-home"
+  printf '#!/usr/bin/env bash\nHOME=%q exec %q -S "$@"\n' "$WORK/noyaml-home" "$(command -v python3)" > "$WORK/noyaml/python3"
+  chmod +x "$WORK/noyaml/python3"
+  drive print-protected-lists-the-set 0 "9 path(s) that .claude/productizer/checks.yaml at cy-base runs" \
+    "$R" --print-protected --base cy-base
+  local PL="$WORK/print-protected-lists-the-set.out"
+  CASES=$((CASES + 1)); CODES="$CODES 0"
+  if printf 'gatepkg\ngatepkg.main\ngatepkg.py\npython3\ntools/cov.sh\ntools/gate.py\ntools/helper.sh\ntools/lint.sh\ntools/ver.sh\n' | cmp -s - "$PL"; then
+    HELD=$((HELD + 1)); printf '  ok    %-44s exit 0\n' "print-protected-exact-set"
+  else
+    printf '  FAIL  %-44s the printed list is not the nine paths the fixture runs\n' "print-protected-exact-set"
+    sed 's/^/          stdout: /' "$PL"
+  fi
+  drive print-protected-no-checks-yaml 0 "nothing is protected; the list is empty" \
+    "$WORK/un-cr" --print-protected --base base
+  drive print-protected-needs-base 2 "--print-protected needs --base REF" "$R" --print-protected
+  drive protected-needs-unattended 2 "--protected goes with --unattended" \
+    "$R" --from build --to test --mode build --protected "$PL" --patch "$WORK/cy-lint.patch"
+  local CL="$CY a path in the protected list computed from it)"
+  drive unattended-protected-list-refuses 3 "tools/lint.sh $CL" \
+    "$R" --from build --to test --mode build --unattended --protected "$PL" --patch "$WORK/cy-lint.patch"
+  drive unattended-protected-list-case-variant 3 "Tools/Lint.sh $CL" \
+    "$R" --from build --to test --mode build --unattended --protected "$PL" --patch "$WORK/cy-variant.patch"
+  drive unattended-protected-list-allows-code 0 "src/app.sh" \
+    "$R" --from build --to test --mode build --unattended --protected "$PL" --patch "$WORK/un-code.patch"
+  : > "$WORK/empty-list"
+  drive unattended-protected-empty-list-replaces-the-read 0 "tools/lint.sh" \
+    "$R" --from build --to test --mode build --unattended --protected "$WORK/empty-list" --patch "$WORK/cy-lint.patch"
+  PATH="$WORK/noyaml:$PATH" drive unattended-no-pyyaml-without-list 4 "python3 has no yaml module (PyYAML)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-lint.patch"
+  PATH="$WORK/noyaml:$PATH" drive unattended-no-pyyaml-with-list 3 "tools/lint.sh $CL" \
+    "$R" --from build --to test --mode build --unattended --protected "$PL" --patch "$WORK/cy-lint.patch"
+  # A list that is not normalised printable ASCII paths in a capped regular
+  # file is exit 4, never read as fewer paths.
+  printf '/etc/passwd\n' > "$WORK/pl-abs"; printf 'tools/../x\n' > "$WORK/pl-dotdot"
+  printf 'tools/caf\303\251.sh\n' > "$WORK/pl-nonascii"; printf 'tools/lint.sh\n\n' > "$WORK/pl-blank"
+  printf 'tools/lint.sh\000x\n' > "$WORK/pl-nul"; head -c 262145 /dev/zero | tr '\0' 'x' > "$WORK/pl-big"
+  ln -s "$PL" "$WORK/pl-link"
+  for u in 'abs=an absolute path' 'dotdot=an empty, . or .. component' 'nonascii=not printable ASCII' \
+           'blank=a line is empty' 'nul=it holds a NUL byte' 'big=over the 262144-byte cap' \
+           'link=it is not a regular file' 'missing=it is not a regular file'; do
+    drive "unattended-protected-list-${u%%=*}" 4 "${u#*=}" \
+      "$R" --from build --to test --mode build --unattended --protected "$WORK/pl-${u%%=*}" --patch "$WORK/un-code.patch"
+  done
+  printf 'echo planted\n' >> "$R/tools/lint.sh"; commit "$R"
+  drive unattended-checks-base-mode 3 "tools/lint.sh $CY the program in command of check lint)" \
+    "$R" --from build --to test --mode build --unattended --base cy-base
+  # A checks.yaml that cannot be read is exit 4 unattended, never a guess,
+  # and is not read at all attended.
+  newrepo cy-bad; R="$WORK/cy-bad"
+  printf 'checks: [\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
+  drive unattended-checks-unreadable 4 "cannot determine which files .claude/productizer/checks.yaml runs" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-code.patch"
+  drive attended-checks-unreadable-not-read 0 "src/app.sh" \
+    "$R" --from build --to test --mode build --patch "$WORK/un-code.patch"
+  drive print-protected-unreadable 4 "cannot determine which files .claude/productizer/checks.yaml runs" \
+    "$R" --print-protected --base HEAD
+  printf 'checks: lint\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
+  drive unattended-checks-not-a-list 4 "\`checks\` is not a list" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-code.patch"
+  printf 'checks:\n  - id: x\n    command: ["{file}"]\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
+  drive unattended-checks-placeholder-program 4 "holds a placeholder, so the change itself would choose what runs" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/un-code.patch"
+
   drive version 0 "stage-advance 1." --version
 
   printf '\n%s of %s cases held\n' "$HELD" "$CASES"
@@ -848,7 +1054,7 @@ JSON
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script, a script checks.yaml runs); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); a bookkeeping record ADDED under --unattended, which stays inert; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script, a file a check script calls or sources that checks.yaml does not name itself, such as a .py beside the .sh it runs); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); that a --protected list is the one --print-protected wrote for this base (the list is validated as data, not traced to its source; build-dispatch.sh checks the HEAD it was written for); a checks.yaml at the base that is not a regular file, or an argv in it that is not a list of strings; an absolute program path inside the repository; a checks.yaml other than .claude/productizer/checks.yaml (run-checks.sh --config); a check whose program is resolved through a PATH that reaches the work tree; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -863,6 +1069,11 @@ fi
 # ===========================================================================
 # THE DECISION
 # ===========================================================================
+if [ "$PRINT_PROTECTED" = 1 ]; then
+  [ -z "$FROM$TO$PATCH$HEAD_REF$MODE$PROTECTED" ] && [ "$UNATTENDED" = 0 ] && [ "$FORMAT" = text ] \
+    || die_usage "--print-protected takes only [repo-root] and --base REF"
+  [ -n "$BASE" ] || die_usage "--print-protected needs --base REF, the commit whose checks.yaml is read"
+else
 [ -n "$FROM" ] || die_usage "--from is required"
 [ -n "$TO" ]   || die_usage "--to is required"
 if [ -n "$PATCH" ] && [ -n "$BASE" ]; then die_usage "give one of --patch or --base, not both"; fi
@@ -870,6 +1081,9 @@ if [ -n "$PATCH" ] && [ -n "$BASE" ]; then die_usage "give one of --patch or --b
 [ -z "$HEAD_REF" ] || [ -n "$BASE" ] || die_usage "--head goes with --base"
 case "$MODE" in ""|plan|build) ;; *) die_usage "--mode is plan or build; got: $MODE" ;; esac
 case "$FORMAT" in text|json) ;; *) die_usage "--format is text or json; got: $FORMAT" ;; esac
+[ -z "$PROTECTED" ] || [ "$UNATTENDED" = 1 ] \
+  || die_usage "--protected goes with --unattended: an attended run protects no file checks.yaml runs"
+fi
 [ -n "$ROOT" ] || ROOT="."
 [ -d "$ROOT" ] || die_usage "no such directory: $ROOT"
 ROOT="$(cd "$ROOT" && pwd)"
@@ -904,6 +1118,170 @@ print(json.dumps({"verdict": verdict, "exit": int(code), "from": frm, "to": to,
   fi
   exit "$code"
 }
+
+# --- THE FILES checks.yaml RUNS (B136) ---------------------------------------
+# CHECKS_RUN holds one "path<TAB>folded key<TAB>what runs it" line per
+# protected path. It is filled, under --unattended only, from the caller's
+# --protected list when one is given, and otherwise from the checks.yaml of
+# the BASE tree - the tree the patch applies to, or the merge base under
+# --base; never the work tree, never the changed tree. --print-protected
+# prints the path column of the same reading, so the list a caller hands back
+# with --protected comes from this one reader.
+CHECKS_YAML=".claude/productizer/checks.yaml"
+CHECKS_RUN=""; CHECKS_YAML_FOUND=0
+PROTECTED_MAX_BYTES=262144
+BG() { if [ -n "$PATCH" ]; then SG "$@"; else git -C "$ROOT" "$@"; fi; }
+# read_checks_run <tree-ish>
+read_checks_run() {
+  local entry cy_mode cy_oid
+  [ -n "$TMP" ] || TMP="$(mktemp -d)" || finish 4 "cannot create a temporary directory to read $CHECKS_YAML in"
+  entry="$(BG ls-tree "$1" -- "$CHECKS_YAML")" \
+    || finish 4 "cannot determine which files $CHECKS_YAML runs: git ls-tree could not read the base tree"
+  [ -n "$entry" ] || return 0
+  CHECKS_YAML_FOUND=1
+  read -r cy_mode _ cy_oid _ <<< "$entry"
+  case "$cy_mode" in
+    100644|100755) ;;
+    *) finish 4 "cannot determine which files $CHECKS_YAML runs: at the base it is not a regular file (mode $cy_mode)" ;;
+  esac
+  BG cat-file blob "$cy_oid" > "$TMP/checks-base.yaml" \
+    || finish 4 "cannot determine which files $CHECKS_YAML runs: git cannot read it from the base tree"
+  CHECKS_RUN="$(python3 -I - "$TMP/checks-base.yaml" "$ROOT" 2> "$TMP/checks-run.err" <<'PY'
+import os, posixpath, re, site, sys, unicodedata
+# -I keeps the work tree and PYTHONPATH off sys.path, so a yaml.py the change
+# planted is never imported. It also hides the user site, where PyYAML may be
+# installed: that one directory is appended LAST, as a plain path, so the
+# standard library and site-packages win and no .pth file in it runs.
+sys.path.append(site.getusersitepackages())
+def fail(msg):
+    sys.stderr.write(msg + "\n")
+    sys.exit(4)
+try:
+    import yaml
+except ImportError:
+    fail("python3 has no yaml module (PyYAML), so the checks it declares cannot be read")
+path, root = sys.argv[1:3]
+try:
+    with open(path, encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+except (OSError, ValueError, yaml.YAMLError) as e:
+    fail("it is not readable YAML (%s)" % " ".join(str(e).split()))
+if not isinstance(doc, dict):
+    fail("its top level is not a mapping")
+checks = doc.get("checks")
+if not isinstance(checks, list):
+    fail("`checks` is not a list")
+# The same key the changed paths are folded to above.
+def key(s):
+    s = "".join(c for c in s if unicodedata.category(c) != "Cf")
+    return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", s).casefold())
+# The interpreters run-checks.sh gates the first operand of.
+INTERPRETERS = {"python", "python2", "python3", "perl", "ruby", "node", "deno", "bun",
+                "php", "lua", "luajit", "tclsh", "expect", "Rscript", "osascript",
+                "swift", "ghc", "runghc", "groovy", "jshell", "scala"}
+out = {}
+def protect(p, why):
+    if "{" in p:
+        fail("%s holds a placeholder, so the change itself would choose what runs" % why)
+    if os.path.isabs(p):
+        if not p.startswith(root.rstrip("/") + "/"):
+            return
+        p = p[len(root.rstrip("/")) + 1:]
+    rel = posixpath.normpath(p)
+    if rel in (".", "..") or rel.startswith("../") or re.search(r"[\x00-\x1f\x7f]", rel):
+        return
+    out.setdefault(key(rel), (rel, why))
+for i, chk in enumerate(checks):
+    if not isinstance(chk, dict):
+        fail("checks[%d] is not a mapping" % i)
+    cid = re.sub(r"[^\x21-\x7e]", "?", str(chk.get("id", "#%d" % i)))[:64]
+    cov = chk.get("coverage")
+    cov = cov if isinstance(cov, dict) else {}
+    for field, v in (("command", chk.get("command")), ("version_command", chk.get("version_command")),
+                     ("coverage.command", cov.get("command")),
+                     ("coverage.rules_command", cov.get("rules_command")), ("requires", chk.get("requires"))):
+        if v is None:
+            continue
+        if not isinstance(v, list) or not all(isinstance(x, str) and x for x in v):
+            fail("%s of check %s is not a list of non-empty strings" % (field, cid))
+        if field == "requires":
+            for x in v:
+                protect(x, "a requires entry of check %s" % cid)
+            continue
+        protect(v[0], "the program in %s of check %s" % (field, cid))
+        for j, x in enumerate(v):
+            if os.path.basename(x) not in INTERPRETERS:
+                continue
+            for k in range(j + 1, len(v)):
+                if v[k].startswith("-"):
+                    continue
+                why = "the script an interpreter is handed in %s of check %s" % (field, cid)
+                protect(v[k], why)
+                if "-m" in v[j + 1:k] and "/" not in v[k]:
+                    top = v[k].split(".")[0]
+                    protect(top, why)
+                    protect(top + ".py", why)
+                break
+w = sys.stdout.buffer
+for k in sorted(out):
+    rel, why = out[k]
+    w.write(rel.encode("utf-8", "surrogateescape") + b"\t" + k.encode("utf-8", "surrogateescape")
+            + b"\t" + why.encode("utf-8") + b"\n")
+PY
+)" || finish 4 "cannot determine which files $CHECKS_YAML runs, so an unattended change cannot be judged against them: at the base, $(head -n 1 "$TMP/checks-run.err")"
+}
+# load_protected: the caller's --protected list, validated, into CHECKS_RUN.
+# It was computed by --print-protected in a job that could read YAML; here it
+# is DATA, and anything but a regular, capped file of normalised printable
+# ASCII repository paths is exit 4. ASCII folds by lower case alone, which is
+# what the folded key does to an ASCII path.
+load_protected() {
+  local size
+  [ -f "$PROTECTED" ] && [ ! -L "$PROTECTED" ] \
+    || finish 4 "cannot use the protected list $PROTECTED: it is not a regular file"
+  size="$(wc -c < "$PROTECTED" | tr -d ' ')" || finish 4 "cannot read the protected list $PROTECTED"
+  [ "$size" -le "$PROTECTED_MAX_BYTES" ] \
+    || finish 4 "cannot use the protected list $PROTECTED: it is $size bytes, over the $PROTECTED_MAX_BYTES-byte cap"
+  [ "$(tr -d '\000' < "$PROTECTED" | wc -c | tr -d ' ')" = "$size" ] \
+    || finish 4 "cannot use the protected list $PROTECTED: it holds a NUL byte"
+  if grep -qvxE '[ -~]+' "$PROTECTED"; then
+    finish 4 "cannot use the protected list $PROTECTED: a line is empty or holds a byte that is not printable ASCII"
+  fi
+  if grep -qE '^/|/$|//|(^|/)[.]{1,2}(/|$)' "$PROTECTED"; then
+    finish 4 "cannot use the protected list $PROTECTED: a line is an absolute path, or has an empty, . or .. component"
+  fi
+  CHECKS_RUN="$(awk '{ print $0 "\t" tolower($0) "\ta path in the protected list computed from it" }' "$PROTECTED")" \
+    || finish 4 "cannot read the protected list $PROTECTED"
+}
+# checks_runs <folded key>: prints what runs the path, if a protected path is
+# the path or a directory above it.
+checks_runs() {
+  local e d
+  while IFS=$'\t' read -r _ e d; do
+    [ -n "$e" ] || continue
+    case "$1" in "$e"|"$e"/*) printf '%s' "$d"; return 0 ;; esac
+  done <<< "$CHECKS_RUN"
+  return 1
+}
+
+# --- --print-protected: the reading above, for a caller to hand back --------
+if [ "$PRINT_PROTECTED" = 1 ]; then
+  git -C "$ROOT" rev-parse --verify --quiet "$BASE^{commit}" > /dev/null \
+    || finish 4 "cannot print the protected list: --base $BASE does not resolve to a commit"
+  read_checks_run "$BASE"
+  PRINTED="$(printf '%s\n' "$CHECKS_RUN" | awk -F'\t' 'NF { print $1 }' | sort -u)"
+  if grep -q '[^ -~]' <<< "$PRINTED"; then
+    finish 4 "cannot print the protected list: $CHECKS_YAML at $BASE names a path that is not printable ASCII, which a protected list cannot carry"
+  fi
+  if [ "$CHECKS_YAML_FOUND" = 0 ]; then
+    printf 'stage-advance: no %s at %s, so nothing is protected; the list is empty\n' "$CHECKS_YAML" "$BASE" >&2
+  else
+    [ -z "$PRINTED" ] || printf '%s\n' "$PRINTED"
+    printf 'stage-advance: %s path(s) that %s at %s runs, one per line on stdout\n' \
+      "$(grep -c . <<< "$PRINTED")" "$CHECKS_YAML" "$BASE" >&2
+  fi
+  exit 0
+fi
 
 # --- config: stage order, spec path, artifacts path -------------------------
 CONF_OUT="$(python3 -I - "$ROOT/.claude/productizer/config.json" <<'PY'
@@ -953,9 +1331,12 @@ ART="$(printf '%s\n' "$CONF_OUT" | awk -F'\t' '$1=="ART"{print $2}')"
 
 # Rank of a stage given as a key or as its label. `intent` is rank 0, the
 # stage labels 1..n in config order. Prints nothing for an unknown stage.
+# A here-string, not a pipe: awk exits on its first match, and a printf still
+# writing into the pipe then dies of SIGPIPE, which pipefail turned into exit
+# 141 (seen once, for --from intent, the first line, on a loaded machine).
 rank_of() {
-  printf '%s\n' "$CONF_OUT" | awk -F'\t' -v s="$1" '
-    $1=="STAGE" { r++; if ($2==s || ($3!="" && $3==s)) { print (r-1) "\t" $2; exit } }'
+  awk -F'\t' -v s="$1" '
+    $1=="STAGE" { r++; if ($2==s || ($3!="" && $3==s)) { print (r-1) "\t" $2; exit } }' <<< "$CONF_OUT"
 }
 FROM_R="$(rank_of "$FROM")"; TO_R="$(rank_of "$TO")"
 [ -n "$FROM_R" ] || die_usage "unknown stage: $FROM (stage order from $ORDER_SOURCE)"
@@ -1227,8 +1608,17 @@ is_forbidden() {
   return 1
 }
 
-REAL=""; BK_DELETED=""; BK_REWRITTEN=""; BK_UNATTENDED=""; LINKS=""; BACKLOG_ST=""
-SHAPE_REFUSED=0
+# B136. Under --unattended, the files checks.yaml runs (see read_checks_run).
+if [ "$UNATTENDED" = 1 ]; then
+  if [ -n "$PROTECTED" ]; then
+    load_protected
+  elif [ -n "$CHANGES" ]; then
+    if [ -n "$PATCH" ]; then read_checks_run "$PT_BASE"; else read_checks_run "$MB"; fi
+  fi
+fi
+
+REAL=""; BK_DELETED=""; BK_REWRITTEN=""; BK_UNATTENDED=""; BK_ADDED_UNATTENDED=""; LINKS=""; BACKLOG_ST=""
+SHAPE_REFUSED=0; CHECKS_REFUSED=0
 while IFS=$'\t' read -r st om nm p k a c; do
   [ -n "$p" ] || continue
   # A LINK, any path, any mode. A symbolic link makes one name stand for
@@ -1259,6 +1649,9 @@ while IFS=$'\t' read -r st om nm p k a c; do
       BK_UNATTENDED="$BK_UNATTENDED$p ($w)"$'\n'
     elif [ "$st" = D ]; then BK_DELETED="$BK_DELETED$p"$'\n'
     elif [ "$st" != A ] && is_write_once "$p"; then BK_REWRITTEN="$BK_REWRITTEN$p"$'\n'
+    # B137. UNATTENDED, a classification or a snapshot ADDED is the run's own:
+    # nothing in an unattended pipeline classifies or snapshots.
+    elif [ "$UNATTENDED" = 1 ]; then BK_ADDED_UNATTENDED="$BK_ADDED_UNATTENDED$p"$'\n'
     fi
     continue
   fi
@@ -1266,6 +1659,11 @@ while IFS=$'\t' read -r st om nm p k a c; do
   REAL="$REAL$st"$'\t'"$p"$'\t'"$k"$'\n'
   is_design_write "$p" "$st" && continue
   if is_forbidden "$p" "$k"; then FORBIDDEN="$FORBIDDEN$p"$'\n'; continue; fi
+  # B136. UNATTENDED, a file checks.yaml at the base runs, before any exact
+  # exception: what a check executes is never a build's to rewrite.
+  if [ "$UNATTENDED" = 1 ] && [ -n "$CHECKS_RUN" ] && runs="$(checks_runs "$k")"; then
+    FORBIDDEN="$FORBIDDEN$p (unattended: $CHECKS_YAML at the base runs it, as $runs)"$'\n'; CHECKS_REFUSED=1; continue
+  fi
   is_exact_exception "$p" && continue
   # A HOMOGLYPH, any mode: a path whose bytes are not ASCII is refused when a
   # reading of it (see "the folded key") is a path the set above refuses, or
@@ -1307,6 +1705,10 @@ if [ -n "$BK_REWRITTEN" ]; then
   FORBIDDEN="$BK_REWRITTEN"
   finish 3 "the change rewrites lifecycle bookkeeping that is written once and never updated; a stage run may not alter an audit record (a stage snapshot or a classification), and its writer never would. Rewritten: $(printf '%s' "$BK_REWRITTEN" | tr '\n' ' ' | sed 's/ $//')"
 fi
+if [ -n "$BK_ADDED_UNATTENDED" ]; then
+  FORBIDDEN="$BK_ADDED_UNATTENDED"
+  finish 3 "the change adds a lifecycle record in an unattended run; nothing in an unattended pipeline classifies an intent or snapshots a stage, so a record added there is the run's own, and a forged one would pass for a decision a person made. Added: $(printf '%s' "$BK_ADDED_UNATTENDED" | tr '\n' ' ' | sed 's/ $//')"
+fi
 if [ -n "$LINKS" ]; then
   FORBIDDEN="$LINKS"
   finish 3 "the change creates or retargets a symbolic link, or adds, repoints or removes a gitlink (submodule entry); a link makes a name stand for another path or for code outside the change, which a decider that judges names cannot judge, so a stage run may not make one. Links: $(printf '%s' "$LINKS" | tr '\n' ' ' | sed 's/ $//')"
@@ -1317,6 +1719,7 @@ fi
 if [ -n "$FORBIDDEN" ]; then
   SHAPE_NOTE=""
   [ "$SHAPE_REFUSED" = 0 ] || SHAPE_NOTE="; under --unattended a path is allowed only when its bytes are ASCII and no component of it begins with a dot, bar the backlog, the plan in plan mode and the spec outside build mode on their exact bytes"
+  [ "$CHECKS_REFUSED" = 0 ] || SHAPE_NOTE="$SHAPE_NOTE; under --unattended a file that $CHECKS_YAML at the base runs - a check's program, the script an interpreter is handed, a requires entry - may not change, because rewriting it neuters the check that runs it"
   finish 3 "the change touches a path the target stage does not permit${MODE:+ in $MODE mode}; forbidden for $TO_KEY: $(printf '%s' "$FORBIDDEN" | tr '\n' ' ' | sed 's/ $//')$SHAPE_NOTE"
 fi
 

@@ -36,6 +36,15 @@
 # `.` writes a GUIDE.md into whatever directory the release happened to be run
 # from, and the real one stays stale while a run reports success.
 #
+# A RELATIVE --spec OR --guide IS READ UNDER THE ROOT, NEVER THE WORKING
+# DIRECTORY; an absolute one is used as given. --root itself, if relative, is
+# read from the working directory, once. Defaults: .claude/productizer/spec.md
+# and GUIDE.md, both under the root. Through 1.2 the two options were read from
+# the working directory while their defaults lived under the root, so the same
+# spelling named two different files depending on whether it was typed - and
+# write mode rewrote whichever GUIDE.md the working directory happened to hold
+# (B141, ruled "converge on repo root").
+#
 # <!-- EXAMPLE:BEGIN -->
 # --CHECK REGENERATES INTO MEMORY AND WRITES NOTHING, so a release can be gated
 # on the guide being current. It names the ids that drifted, because "GUIDE.md
@@ -162,10 +171,17 @@
 # next caller cannot find.
 set -euo pipefail
 
-VERSION="build-guide 1.2"
+VERSION="build-guide 1.3"
 
 usage() {
   printf 'usage: build-guide.sh [--root DIR] [--spec FILE] [--guide FILE] [--check] [--selftest] [--version] [--help]\n'
+  printf '  --root DIR    the repo work tree. Defaults to the git top level, never to\n'
+  printf '                the working directory.\n'
+  printf '  --spec FILE   the spec (default <root>/.claude/productizer/spec.md)\n'
+  printf '  --guide FILE  the guide to write or check (default <root>/GUIDE.md)\n'
+  printf '  A relative --spec or --guide is read under the ROOT, NOT the working\n'
+  printf '  directory. An absolute one is used as given. A relative --root is read\n'
+  printf '  from the working directory.\n'
 }
 
 ROOT=""; SPEC=""; GUIDE=""; MODE="write"
@@ -260,11 +276,13 @@ FIXTURE_GUIDE
   # The exit code is captured into a variable on the SAME LINE as the command.
   # A command substitution in an argument list resets $?, so reading the status
   # inside the call below would report the status of the call.
-  record() { # <case> <expected> <observed> <what the case is>
+  # An optional fifth argument of `no` marks a case whose asserted line did
+  # not appear: NOT HELD, with the code it really exited with still reached.
+  record() { # <case> <expected> <observed> <what the case is> [line held]
     SELF_CASES=$((SELF_CASES + 1))
     CODES="$CODES$3
 "
-    if [ "$3" = "$2" ]; then
+    if [ "$3" = "$2" ] && [ "${5:-yes}" = "yes" ]; then
       SELF_UPHELD=$((SELF_UPHELD + 1)); verdict="held"
     else
       verdict="NOT HELD"
@@ -362,6 +380,34 @@ STRIP_MARKERS
     > "$SELF_TMP/emptyspec.out" 2> "$SELF_TMP/emptyspec.err" || got=$?
   record spec-has-no-section 3 "$got" "no requirement was read, which is unmeasured and not a spec with none"
 
+  # B141: a RELATIVE --spec or --guide is read under the root. Each case runs
+  # from a working directory holding a decoy of the same name - a spec with no
+  # requirements (exit 3 if read) and a guide with no markers (exit 2 if read) -
+  # and must also print the repo-relative name of the file it read. Through
+  # 1.2 both read the decoy.
+  record_says() { # <case> <expected> <observed> <out file> <exact line> <what>
+    if grep -qxF -- "$5" "$4"; then
+      record "$1" "$2" "$3" "$6" yes
+    else
+      record "$1" "$2" "$3" "$6" no
+      printf '        the line it had to print: %s\n' "$5"
+    fi
+  }
+  SELF_ABS="$(cd "$(dirname "$0")" && pwd)/${0##*/}"
+  mkdir -p "$SELF_TMP/decoy-cwd/.claude/productizer"
+  printf 'a decoy with no requirements section\n' > "$SELF_TMP/decoy-cwd/.claude/productizer/spec.md"
+  printf '# a decoy guide with no markers\n' > "$SELF_TMP/decoy-cwd/GUIDE.md"
+  got=0
+  ( cd "$SELF_TMP/decoy-cwd" && bash "$SELF_ABS" --root "$CASE_ROOT" --spec .claude/productizer/spec.md --check ) \
+    > "$SELF_TMP/relspec.out" 2> "$SELF_TMP/relspec.err" || got=$?
+  record_says relative-spec-under-root 0 "$got" "$SELF_TMP/relspec.out" ".claude/productizer/spec.md" \
+    "a relative --spec is read under the root, never the working directory"
+  got=0
+  ( cd "$SELF_TMP/decoy-cwd" && bash "$SELF_ABS" --root "$CASE_ROOT" --guide GUIDE.md --check ) \
+    > "$SELF_TMP/relguide.out" 2> "$SELF_TMP/relguide.err" || got=$?
+  record_says relative-guide-under-root 0 "$got" "$SELF_TMP/relguide.out" "GUIDE.md" \
+    "a relative --guide is read under the root, never the working directory"
+
   if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
   printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
@@ -374,7 +420,7 @@ STRIP_MARKERS
     grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
-  printf '    NOT ASSERTED: the CONTENT of the generated section. The corpus drives the exit code, so a renderer producing different but self-consistent prose in both modes would pass every case above; what the section says is asserted by R9.a against the committed guide, and read by a person.\n'
+  printf '    NOT ASSERTED: the CONTENT of the generated section. The corpus drives the exit code (the two relative-path cases also assert the name of the file read), so a renderer producing different but self-consistent prose in both modes would pass every case above; what the section says is asserted by R9.a against the committed guide, and read by a person.\n'
   [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
   if [ -n "$MISSING" ]; then
     printf 'build-guide: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
@@ -394,8 +440,16 @@ if [ -z "$ROOT" ]; then
 fi
 [ -d "$ROOT" ] || { printf 'build-guide: no such directory: %s\n' "$ROOT" >&2; exit 2; }
 
-[ -n "$SPEC" ]  || SPEC="$ROOT/.claude/productizer/spec.md"
-[ -n "$GUIDE" ] || GUIDE="$ROOT/GUIDE.md"
+# Relative is joined to the root, absolute is used as given. The printed names
+# are the python half's `disp`, which already shortens a path inside the root.
+under_root() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s' "$ROOT/$1" ;;
+  esac
+}
+SPEC="$(under_root "${SPEC:-.claude/productizer/spec.md}")"
+GUIDE="$(under_root "${GUIDE:-GUIDE.md}")"
 
 command -v python3 >/dev/null 2>&1 || {
   printf 'build-guide: python3 is not installed, so the spec was never parsed. Missing, not clean.\n' >&2

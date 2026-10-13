@@ -46,6 +46,22 @@
 # NOT count. A `by` that names an agent (claude, gpt, bot, agent, assistant, ...,
 # word-boundaried) does not count either.
 #
+# PATH OPTIONS.
+#   --root DIR          the repo work tree; a relative one is read from the
+#                       working directory, once. Default: the git top level.
+#                       Outside a work tree with no --root this REFUSES, exit 2.
+#   --checks FILE       default .claude/productizer/checks.yaml
+#   --calibration FILE  default .claude/productizer/calibration.yaml
+# A relative --checks or --calibration is read under the ROOT, NOT the working
+# directory; an absolute one is used as given. A file inside the root is
+# printed by its repo-relative name, never by a path naming a home directory.
+#
+# Through 1.0 (B141, ruled "converge on repo root") the two options were read
+# from the working directory while their defaults lived under the root; outside
+# a work tree the root silently fell back to the working directory, which then
+# answered for a repository nobody named; and the first line printed both
+# files absolute, so a clean run put the home directory into its output.
+#
 # EXIT CODES ARE THE CONTRACT.
 #
 #   0  every enabled blocking check has a measured record with every fire ruled
@@ -55,7 +71,8 @@
 #      measured_by), a fire with no ruling, a `pending` ruling, a ruling by an
 #      agent, or two records for one check. Each names the check and what is
 #      missing
-#   2  could not run - bad usage, no python3 or PyYAML, or either file unreadable
+#   2  could not run - bad usage, no work tree and no --root, no python3 or
+#      PyYAML, or either file unreadable
 #      or unparseable. Nothing examined is nothing upheld: unmeasured, not clean
 #
 # A record for a check that does not exist, is disabled or is not blocking is a
@@ -74,7 +91,7 @@
 #   - that a ruled commit lies inside the recorded window. No git is read.
 set -euo pipefail
 
-VERSION="check-calibration-recorded 1.0"
+VERSION="check-calibration-recorded 1.1"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPER="$HERE/calibration-recorded.py"
@@ -106,11 +123,39 @@ python3 -c 'import yaml' \
 [ -f "$HELPER" ] || die_unmeasured "its helper $HELPER is missing"
 
 if [ "$MODE" = "check" ]; then
+  # The work tree or nothing. Through 1.0 a failed lookup fell back to the
+  # working directory and the check answered for whatever directory the caller
+  # stood in. git speaks for itself on stderr.
   if [ -z "$ROOT" ]; then
-    ROOT="$(git rev-parse --show-toplevel)" || ROOT="$PWD"
+    ROOT="$(git rev-parse --show-toplevel)" \
+      || die_unmeasured "no git work tree here, and --root was not given. Refusing rather than reading the working directory, which is not a repository anyone named - unmeasured, not clean."
   fi
-  [ -n "$CHECKS" ] || CHECKS="$ROOT/$CHECKS_REL"
-  [ -n "$CAL" ] || CAL="$ROOT/$CAL_REL"
+  [ -d "$ROOT" ] || die_unmeasured "--root $ROOT is not a directory"
+  ROOT="$(cd "$ROOT" && pwd -P)"
+  # Relative is joined to the root, absolute is used as given. The helper is
+  # run FROM the root and handed each file by its shortest honest name - repo-
+  # relative inside the root, as written outside it - so the names it prints
+  # are the names it read, and no home directory reaches the output.
+  under_root() {
+    case "$1" in
+      /*) printf '%s' "$1" ;;
+      *)  printf '%s' "$ROOT/$1" ;;
+    esac
+  }
+  shown() {
+    local p="$1" d
+    d="$(dirname "$p")"
+    if [ -d "$d" ] && d="$(cd "$d" && pwd -P)"; then
+      p="$d/$(basename "$p")"
+    fi
+    case "$p" in
+      "$ROOT"/*) printf '%s' "${p#"$ROOT"/}" ;;
+      *)         printf '%s' "$1" ;;
+    esac
+  }
+  CHECKS="$(shown "$(under_root "${CHECKS:-$CHECKS_REL}")")"
+  CAL="$(shown "$(under_root "${CAL:-$CAL_REL}")")"
+  cd "$ROOT"
   exec python3 "$HELPER" "$CHECKS" "$CAL"
 fi
 
@@ -124,6 +169,8 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/check-calibration-recorded.XXXXXX")" \
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 
 CASES=0; FAILS=0; CODES=""
+SELF_ABS="$HERE/${SELF##*/}"
+DRIVE_CWD=""
 
 # A config: `alpha` blocks by its own key, `beta` blocks only by the default,
 # `gamma` is advisory, `delta` blocks and is disabled.
@@ -162,10 +209,13 @@ rec_beta() {
 
 case_run() {
   # case_run <name> <want-rc> <want-sentence> <checks-file> <cal-file> [extra args]
+  # --root is the case directory unless the extra args name another (the last
+  # --root wins). DRIVE_CWD, when set, is the working directory it runs from.
   local name="$1" want="$2" sentence="$3" ck="$4" cal="$5" rc=0
   shift 5
   CASES=$((CASES + 1))
-  bash "$SELF" --checks "$ck" --calibration "$cal" "$@" >"$WORK/out" 2>"$WORK/err" || rc=$?
+  ( cd "${DRIVE_CWD:-.}" && bash "$SELF_ABS" --root "$WORK" --checks "$ck" --calibration "$cal" "$@" ) \
+    >"$WORK/out" 2>"$WORK/err" || rc=$?
   CODES="$CODES $rc"
   if [ "$rc" -eq "$want" ] && grep -qF -- "$sentence" "$WORK/out" "$WORK/err"; then
     printf '  ok    %-58s exit %s\n' "$name" "$rc"
@@ -249,6 +299,54 @@ case_run "enabled that is not a boolean" 2 \
   "enabled must be true or false" "$WORK/checks-bad-enabled.yaml" "$WORK/good.yaml"
 case_run "an option this check does not know" 2 \
   "unknown option: --nonsense" "$C" "$WORK/good.yaml" --nonsense
+
+# B141: PATHS. A relative --checks or --calibration is read under the root -
+# run from a working directory holding an unparseable decoy of each, which read
+# by mistake would exit 2 - and the first line names both repo-relative.
+mkdir -p "$WORK/repo/.claude/productizer" "$WORK/decoy-cwd/.claude/productizer"
+cp "$WORK/checks.yaml" "$WORK/repo/.claude/productizer/checks.yaml"
+cp "$WORK/good.yaml" "$WORK/repo/.claude/productizer/calibration.yaml"
+cp "$WORK/unparseable.yaml" "$WORK/decoy-cwd/.claude/productizer/checks.yaml"
+cp "$WORK/unparseable.yaml" "$WORK/decoy-cwd/.claude/productizer/calibration.yaml"
+REPO_LINE="declared in .claude/productizer/checks.yaml; records read from .claude/productizer/calibration.yaml"
+DRIVE_CWD="$WORK/decoy-cwd"
+case_run "relative --checks and --calibration are read under the root" 0 \
+  "$REPO_LINE" .claude/productizer/checks.yaml .claude/productizer/calibration.yaml --root "$WORK/repo"
+DRIVE_CWD=""
+case_run "absolute paths inside the root are printed repo-relative" 0 \
+  "$REPO_LINE" "$WORK/repo/.claude/productizer/checks.yaml" "$WORK/repo/.claude/productizer/calibration.yaml" \
+  --root "$WORK/repo"
+
+# The defaults, run with only --root: under the root, and printed
+# repo-relative - through 1.0 this line carried both absolute paths.
+CASES=$((CASES + 1)); rc=0
+bash "$SELF_ABS" --root "$WORK/repo" >"$WORK/out" 2>"$WORK/err" || rc=$?
+CODES="$CODES $rc"
+if [ "$rc" -eq 0 ] && grep -qF -- "$REPO_LINE" "$WORK/out"; then
+  printf '  ok    %-58s exit %s\n' "the defaults are read under the root, printed repo-relative" "$rc"
+else
+  FAILS=$((FAILS + 1))
+  printf '  FAIL  %-58s exit %s (wanted 0), sentence %s\n' "the defaults are read under the root, printed repo-relative" "$rc" "$REPO_LINE"
+  sed 's/^/          | /' "$WORK/out" "$WORK/err"
+fi
+
+# No work tree and no --root: refused, never answered from the working
+# directory. The working directory holds VALID files, so the 1.0 fallback
+# would have read them and exited 0. GIT_CEILING_DIRECTORIES keeps git from
+# finding a repository above the temporary directory.
+mkdir -p "$WORK/nogit/.claude/productizer"
+cp "$WORK/checks.yaml" "$WORK/nogit/.claude/productizer/checks.yaml"
+cp "$WORK/good.yaml" "$WORK/nogit/.claude/productizer/calibration.yaml"
+CASES=$((CASES + 1)); rc=0
+( cd "$WORK/nogit" && GIT_CEILING_DIRECTORIES="$WORK" bash "$SELF_ABS" ) >"$WORK/out" 2>"$WORK/err" || rc=$?
+CODES="$CODES $rc"
+if [ "$rc" -eq 2 ] && grep -qF -- "no git work tree here, and --root was not given" "$WORK/err"; then
+  printf '  ok    %-58s exit %s\n' "no work tree and no --root is refused, not read from cwd" "$rc"
+else
+  FAILS=$((FAILS + 1))
+  printf '  FAIL  %-58s exit %s (wanted 2)\n' "no work tree and no --root is refused, not read from cwd" "$rc"
+  sed 's/^/          | /' "$WORK/out" "$WORK/err"
+fi
 
 printf '\n%s of %s cases held\n' "$((CASES - FAILS))" "$CASES"
 REACHED="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"

@@ -52,8 +52,10 @@
 # keeps shipping: an honest gap converted into a false assurance. So the mode
 # builds six little installations under `mktemp -d`, each differing from the
 # clean one in exactly one way, runs THIS script against each, and compares
-# the exit code with the one the case declares. Nothing is written into the
-# repository being checked, on any exit path, signal included.
+# the exit code with the one the case declares. Two more (1.1) give --hooks and
+# --templates relative, from a working directory holding a drifted decoy of
+# each, and must also print the repo-relative path they compared. Nothing is
+# written into the repository being checked, on any exit path, signal included.
 #
 # Under --selftest the three codes mean: every case produced the code it
 # declares (0), at least one did not (1), and the cases could not be built or
@@ -62,9 +64,21 @@
 #
 # WHAT IT PRINTS. One BARE repo-relative path per file examined, which the
 # runner parses as coverage. Findings and notes are INDENTED.
+#
+# PATH OPTIONS.
+#   --root DIR       the repo work tree; a relative one is read from the
+#                    working directory, once. Default: the git top level,
+#                    never the working directory.
+#   --templates DIR  default: the plugin's own templates/ beside this script
+#                    (<script dir>/../templates) - NOT under the root
+#   --hooks DIR      default .claude/hooks under the root
+# A relative --templates or --hooks is read under the ROOT, NOT the working
+# directory; an absolute one is used as given. Only the --templates DEFAULT
+# lives beside the script. Through 1.0 a relative option was read from the
+# working directory (B141, ruled "converge on repo root").
 set -euo pipefail
 
-VERSION="check-installed-copies 1.0"
+VERSION="check-installed-copies 1.1"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT=""; TEMPLATES=""; HOOKS=""; MODE="measure"
@@ -119,16 +133,29 @@ if [ "$MODE" = "selftest" ]; then
   # `|| GOT=$?` on the same line as the command. A `$(...)` in an argument list
   # and a pipeline both RESET `$?`, and reading the status one line later is
   # how a self-test comes to report a pass it never observed.
+  # DRIVE_CWD, when set, is the working directory the case runs from. SAYS,
+  # when set, is one exact line the case must also print: a matching code
+  # without it is NOT HELD, so the case cannot pass for another reason.
+  SELF_ABS="$(cd "$(dirname "$0")" && pwd)/${0##*/}"
+  DRIVE_CWD=""; SAYS=""
   drive() {
     NAME="$1"; WANT="$2"; WHY="$3"; shift 3
     GOT=0
-    bash "$0" "$@" > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
+    ( cd "${DRIVE_CWD:-.}" && bash "$SELF_ABS" "$@" ) > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
     CASES=$((CASES + 1))
-    if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+    if [ "$GOT" = "$WANT" ] && { [ -z "$SAYS" ] || grep -qxF -- "$SAYS" "$WORK/$NAME.out"; }; then
+      UPHELD=$((UPHELD + 1)); V="held"
+    else
+      V="NOT HELD"
+    fi
     CODES="$CODES$GOT
 "
     REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
 "
+    if [ "$V" = "NOT HELD" ] && [ -n "$SAYS" ]; then
+      REPORT="$REPORT        the line it had to print: $SAYS
+"
+    fi
   }
 
   # 0 - the clean case. Without it every failing case below proves only that
@@ -173,6 +200,26 @@ if [ "$MODE" = "selftest" ]; then
   drive bad-usage 2 "an option this script does not take" \
     --root "$WORK/bad-usage" --frobnicate
 
+  # B141: a RELATIVE --hooks or --templates is read under the root. Each runs
+  # from a working directory holding a DRIFTED copy of the same name, which
+  # read by mistake would exit 1, and must print the repo-relative path of the
+  # copy it compared. Through 1.0 both read the decoy.
+  build relative
+  cp "$WORK/relative/templates/publish-gate.sh" "$WORK/relative/hooks/publish-gate.sh"
+  chmod +x "$WORK/relative/hooks/publish-gate.sh"
+  mkdir -p "$WORK/decoy-cwd/hooks" "$WORK/decoy-cwd/templates"
+  printf '#!/usr/bin/env bash\n# a drifted decoy\nexit 1\n' > "$WORK/decoy-cwd/hooks/publish-gate.sh"
+  cp "$WORK/decoy-cwd/hooks/publish-gate.sh" "$WORK/decoy-cwd/templates/publish-gate.sh"
+  chmod +x "$WORK/decoy-cwd/hooks/publish-gate.sh"
+  DRIVE_CWD="$WORK/decoy-cwd"
+  SAYS="hooks/publish-gate.sh"
+  drive relative-hooks 0 "a relative --hooks is read under the root, never the working directory" \
+    --root "$WORK/relative" --templates "$WORK/relative/templates" --hooks hooks
+  SAYS="templates/publish-gate.sh"
+  drive relative-templates 0 "a relative --templates is read under the root, never the working directory" \
+    --root "$WORK/relative" --templates templates --hooks "$WORK/relative/hooks"
+  DRIVE_CWD=""; SAYS=""
+
   printf '    selftest cases driven: %d\n' "$CASES"
   printf '%s' "$REPORT"
   if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
@@ -187,7 +234,7 @@ if [ "$MODE" = "selftest" ]; then
     grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '    NOT ASSERTED: the cases compare the exit CODE and never the wording of a finding, so a case that went red for the wrong reason is invisible here and is read off its captured output by hand\n'
+  printf '    NOT ASSERTED: the first six cases compare the exit CODE only, so one that went red for the wrong reason is invisible here and is read off its captured output by hand; only the two path-option cases also assert a line of output\n'
   [ "$CASES" = "$UPHELD" ] || exit 1
   # A documented code nothing drove is the gap R39.b exists to make visible, so
   # it ends the run rather than being printed past.
@@ -205,8 +252,16 @@ fi
 [ -d "$ROOT" ] || die_unmeasured "--root $ROOT is not a directory"
 ROOT="$(cd "$ROOT" && pwd -P)"
 
-[ -n "$TEMPLATES" ] || TEMPLATES="$HERE/../templates"
-[ -n "$HOOKS" ]     || HOOKS="$ROOT/.claude/hooks"
+# A given option: relative is joined to the root, absolute is used as given.
+# The names printed are rel()'s below, which already shorten inside the root.
+under_root() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s' "$ROOT/$1" ;;
+  esac
+}
+if [ -n "$TEMPLATES" ]; then TEMPLATES="$(under_root "$TEMPLATES")"; else TEMPLATES="$HERE/../templates"; fi
+HOOKS="$(under_root "${HOOKS:-.claude/hooks}")"
 [ -d "$TEMPLATES" ] || die_unmeasured "no templates directory, so there is nothing to compare against"
 [ -d "$HOOKS" ]     || die_unmeasured "no hooks directory at the path given; whether an installed copy drifted is UNKNOWN, which is not the same as no drift"
 TEMPLATES="$(cd "$TEMPLATES" && pwd -P)"

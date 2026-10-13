@@ -115,8 +115,10 @@ while [ $# -gt 0 ]; do
     --arch=*) MODE=arch; ARCH_FILE="${1#--arch=}"; shift ;;
     --selftest|--self-test) MODE=selftest; shift ;;
     # Added in v4.70.0 so the check running this builder's self-test can
-    # record which builder it ran (B115, B130).
-    --version) echo "build-view 1.0"; exit 0 ;;
+    # record which builder it ran (B115, B130). 1.1 (B139): a link built from
+    # the origin remote, a tracked path or jira.site is an escaped http(s) URL
+    # or no link at all.
+    --version) echo "build-view 1.1"; exit 0 ;;
     # The graph assertion suite. Driven by --selftest as one of its cases and
     # separately runnable, because when it goes red the first question is which
     # of A1..A16 went red and that answer is on its own stdout.
@@ -260,6 +262,87 @@ PYEMB
     FAILED=$((FAILED + 1))
   fi
 
+  # B139 - a link built from configuration is an https link or no link. Two git
+  # roots differ in their origin remote and their jira.site: one is a real
+  # GitHub owner/name and an https site, the other a remote holding a double
+  # quote that closes the href and opens an event attribute, and a
+  # `javascript:` site. The plain root also tracks a file whose NAME holds that
+  # quote, because a valid remote still writes the path into the href. The
+  # plain page must link, that file intact among them (otherwise "no bad link"
+  # is just "no link"); no link on either page may carry an event attribute;
+  # the crafted page may add no non-http href; and the crafted remote is not a
+  # GitHub repository, so it appears nowhere on its page - not in an href, and
+  # not in the data block the page script turns into hrefs.
+  LNK="$(mktemp -d "${TMPDIR:-/tmp}/build-view-links.XXXXXX")"
+  for _v in plain crafted; do
+    mkdir -p "$LNK/$_v/.claude/productizer"
+    { printf '# Backlog\n\n## Items\n\n'
+      printf '| Id | What is wanted | Status | Jira | Raised | Notes |\n'
+      printf '|---|---|---|---|---|---|\n'
+      # shellcheck disable=SC2016
+      printf '%s\n' '| B1 | A linked item | `todo` | ABC-1 | selftest | A plain note. |'
+    } > "$LNK/$_v/.claude/productizer/backlog.md"
+    if [ "$_v" = plain ]; then
+      _site='https://example.invalid'; _remote='https://github.com/acme/widget.git'
+      printf 'quoted\n' > "$LNK/$_v/.claude/productizer/q\"onmouseover=\"alert(1).md"
+    else
+      _site='javascript:alert(1)//'; _remote='https://github.com/a"onmouseover="alert(1)/b.git'
+    fi
+    printf '{"jira": {"site": "%s", "project": "ABC"}}\n' "$_site" \
+      > "$LNK/$_v/.claude/productizer/config.json"
+    git -C "$LNK/$_v" init -q
+    git -C "$LNK/$_v" -c user.email=selftest@example.invalid -c user.name=selftest add .claude
+    git -C "$LNK/$_v" -c user.email=selftest@example.invalid -c user.name=selftest commit -q -m fixture
+    git -C "$LNK/$_v" remote add origin "$_remote"
+  done
+  _rc=0
+  _out="$( { bash "$SELF" "$LNK/plain" --out "$LNK/plain.html" \
+             && bash "$SELF" "$LNK/crafted" --out "$LNK/crafted.html" \
+             && python3 -I - "$LNK/plain.html" "$LNK/crafted.html" <<'PYLNK'
+import sys
+from html.parser import HTMLParser
+
+class Attrs(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.on, self.hrefs = 0, []
+    def handle_starttag(self, tag, attrs):
+        for k, v in attrs:
+            self.on += tag == 'a' and k.lower().startswith('on')
+            if k.lower() == 'href':
+                self.hrefs.append(v or '')
+
+def read(p):
+    a = Attrs()
+    a.raw = open(p, encoding='utf-8').read()
+    a.feed(a.raw)
+    return a
+
+plain, crafted = read(sys.argv[1]), read(sys.argv[2])
+odd = lambda a: [h for h in a.hrefs if not h.startswith(('#', 'https://', 'http://'))]
+gh = ('https://github.com/acme/widget/blob/HEAD/.claude/productizer/q"onmouseover="alert(1).md'
+      in plain.hrefs)
+jira = 'https://example.invalid/browse/ABC-1' in plain.hrefs
+print('the plain root %s its quoted file name and %s its Jira key; the links carry %d event '
+      'attribute(s); the crafted root added %d non-http href(s) and carries its remote %d time(s)'
+      % ('linked' if gh else 'DID NOT LINK', 'linked' if jira else 'DID NOT LINK',
+         plain.on + crafted.on, len(odd(crafted)) - len(odd(plain)),
+         crafted.raw.count('onmouseover')))
+PYLNK
+           } 2>&1)" || _rc=$?
+  rm -rf "$LNK"
+  DRIVEN=$((DRIVEN + 1))
+  CODES="$CODES$_rc
+"
+  _need='the plain root linked its quoted file name and linked its Jira key; the links carry 0 event attribute(s); the crafted root added 0 non-http href(s) and carries its remote 0 time(s)'
+  if [ "$_rc" -eq 0 ] && grep -qF -- "$_need" <<<"$_out"; then
+    printf '  ok   %-20s exit 0, and it said: %s\n' config-links "$_need"
+  else
+    printf '  FAIL %-20s exit %s; wanted it to say: %s\n' config-links "$_rc" "$_need"
+    printf '%s\n' "$_out" | awk -v t="$LNK" '{ while ((i = index($0, t)) > 0) $0 = substr($0, 1, i - 1) "<tmp>" substr($0, i + length(t)); print "         " $0 }' | tail -8
+    FAILED=$((FAILED + 1))
+  fi
+
   REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   MISSING=""
   for want in 0 2; do
@@ -281,9 +364,11 @@ PYEMB
     exit 2
   fi
   printf '  NOT ASSERTED: the rendered page. --selftest drives the VZ_ARCH graph, the\n'
-  printf '  argument contract, and the BYTES of two built pages (embedded-name); no browser\n'
-  printf '  draws them here. That the HTML around it is well formed is asserted by\n'
-  printf '  check-view-readonly.sh and check-view-publish-refused.sh over a real build.\n'
+  printf '  argument contract, and the BYTES of four built pages (embedded-name,\n'
+  printf '  config-links); no browser draws them here, so the escaping the page script\n'
+  printf '  applies to a stage file link is not run. That the HTML around it is well formed\n'
+  printf '  is asserted by check-view-readonly.sh and check-view-publish-refused.sh over a\n'
+  printf '  real build.\n'
   exit 0
 fi
 
@@ -398,6 +483,10 @@ def dig(obj, *keys):
 PRODUCT = dig(cfg, 'product', 'name') or os.path.basename(ROOT)
 SPEC_REPO = dig(cfg, 'product', 'spec_repo')
 JIRA_SITE = (dig(cfg, 'jira', 'site') or '').rstrip('/')
+# jira.site is committed configuration and becomes the start of an href, so a
+# `javascript:` site would be a link that runs code when clicked. Only an
+# http(s) site is linked (B139).
+JIRA_HTTP = bool(re.match(r'^https?://', JIRA_SITE, re.I))
 
 # --- git ------------------------------------------------------------------
 IS_GIT = os.path.exists(os.path.join(TMP, 'is-git'))
@@ -408,7 +497,11 @@ SPEC_DATE = (tmpf('spec-date') or '').strip()
 remote = (tmpf('remote') or '').strip()
 GH = None
 m = re.match(r'^(?:https://github\.com/|git@github\.com:)([^/]+/[^/]+?)(?:\.git)?$', remote)
-if m:
+# The remote is local configuration and its owner/name pair lands in hrefs on
+# this page and in the page's data block. GitHub's own names are letters,
+# digits, dot, dash and underscore, so anything else - a quote that closes the
+# attribute, above all - is not a GitHub repository and gets no link (B139).
+if m and re.match(r'^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$', m.group(1)):
     GH = m.group(1)
 
 tracked = []
@@ -2824,7 +2917,7 @@ for p in paths:
         date = ('<td class="fdate none" data-sort="" title="on disk, never committed">'
                 '—</td>')
     url = blob(p)
-    name = ('<a class="fname" href="%s" target="_blank" rel="noopener">%s%s</a>' % (url, esc(p), EXTLINK)) \
+    name = ('<a class="fname" href="%s" target="_blank" rel="noopener">%s%s</a>' % (escu(url), esc(p), EXTLINK)) \
         if url else ('<span class="fname" style="color:var(--muted)">%s</span>' % esc(p))
     rows.append('<tr><td class="fcat">%s</td><td>%s</td>%s%s</tr>' % (esc(cat), name, desc, date))
 
@@ -2891,10 +2984,13 @@ else:
             _done_hidden += 1
             continue
         cls = re.sub(r'[^a-z-]', '-', it['status'].lower())
-        if JIRA_SITE and it['jira']:
+        if JIRA_SITE and JIRA_HTTP and it['jira']:
             j = ('<a class="bk-jira" href="%s/browse/%s" target="_blank" rel="noopener" '
                  'title="Status is read from Jira and never written back">%s</a>'
                  % (escu(JIRA_SITE), escu(it['jira']), esc(it['jira'])))
+        elif it['jira'] and JIRA_SITE:
+            j = ('<span class="bk-j mono" title="jira.site in %s is not an http(s) URL, so this key '
+                 'cannot be linked">%s</span>' % (esc(CFG_PATH), esc(it['jira'])))
         elif it['jira']:
             j = ('<span class="bk-j mono" title="no jira.site in %s, so this key cannot be linked">%s</span>'
                  % (esc(CFG_PATH), esc(it['jira'])))

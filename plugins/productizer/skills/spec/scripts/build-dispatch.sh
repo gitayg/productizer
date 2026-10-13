@@ -8,7 +8,8 @@
 # build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE
 # build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
 #                           --patch FILE --body DIR --run-id ID
-#                           --default-branch NAME [--spec-base SHA] [--dry-run]
+#                           --default-branch NAME [--spec-base SHA]
+#                           [--protected FILE] [--dry-run]
 # build-dispatch.sh --selftest | --version | --help
 #
 # THE TWO ENDS OF AN UNATTENDED RUN. `templates/build-from-spec.yml` is a
@@ -28,6 +29,13 @@
 #            The probe is REQUIRED (maintainer ruling 2026-10-12, B129): with
 #            no evals/solver-probe.py, --body-out refuses the run (exit 3)
 #            rather than render a body that says it is partial.
+#            Beside the body it writes protected.txt - the files
+#            .claude/productizer/checks.yaml at HEAD runs, one path per line,
+#            from `stage-advance.sh --print-protected` - and protected-head,
+#            the HEAD it was read at. Reading YAML needs PyYAML, and this is
+#            the job that may have it: "read it before the AI" (maintainer
+#            ruling 2026-10-13, B136). A checks.yaml that cannot be read
+#            refuses the run here (exit 3), before any model is called.
 #   agent-args runs BEFORE the model, in the agent's job. It re-reads the
 #            claude-args prepare wrote (now an artifact the agent's job
 #            fetched) and refuses it unless every line is one of the fixed
@@ -63,7 +71,13 @@
 #            `git apply --index` actually staged, never on the patch text.
 #            Both asks pass --unattended, so any change to the lifecycle's
 #            checks result is refused: nothing in this pipeline writes it, and
-#            a forged one would be read as a verdict (B126).
+#            a forged one would be read as a verdict (B126). Both pass
+#            --protected FILE, the list prepare wrote, so a change to a file
+#            checks.yaml runs is refused WITHOUT this job reading YAML or
+#            installing a package (B136). The list must have been written for
+#            this HEAD (a protected-head beside it); with no list at all while
+#            HEAD has a checks.yaml, deliver refuses (exit 6): a missing list
+#            never means that nothing is protected.
 #            Only then does it push the branch and open a DRAFT pull request.
 #            A refusal at either point is exit 6, and the branch is deleted.
 #            It EXECUTES NO REPOSITORY CODE: it renders no body (it reads the one
@@ -149,14 +163,16 @@
 #   3  the repository cannot be read as needed: not a work tree, a shallow
 #      clone, an unreadable config, HEAD is not the default-branch tip,
 #      (prepare --body-out) there is no evals/solver-probe.py, which the
-#      body requires, or the body could not be rendered, or
+#      body requires, or the body could not be rendered, or the files
+#      checks.yaml runs could not be listed, or
 #      (stash-git/capture) the git-dir could not be moved or read, or
 #      (agent-args) the prepared claude-args are missing, hold a line that is
 #      not a shape prepare writes or a repeated flag, or lack the Bash deny
 #   4  the spec is unchanged against the base; no model call should follow
 #   5  build mode, and no plan is committed at the plan path
 #   6  refused by stage-advance.sh, on the patch or on the commit made from
-#      it; its reason is relayed verbatim
+#      it; its reason is relayed verbatim. Also: no --protected list while
+#      HEAD has a checks.yaml, or a list written for another HEAD
 #   7  delivery failed after the decision: the body (missing, rendered for
 #      another HEAD, or over the size cap), the branch, the commit, the push
 #      or gh - the step is named
@@ -166,7 +182,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="build-dispatch 1.1"
+VERSION="build-dispatch 1.2"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$HERE/$(basename -- "${BASH_SOURCE[0]}")"
 
@@ -192,16 +208,17 @@ usage() {
   printf '       build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE\n'
   printf '       build-dispatch.sh deliver [repo-root] --mode plan|build --issue N\n'
   printf '                         --patch FILE --body DIR --run-id ID --default-branch NAME\n'
-  printf '                         [--spec-base SHA] [--dry-run]\n'
+  printf '                         [--spec-base SHA] [--protected FILE] [--dry-run]\n'
   printf '       build-dispatch.sh --selftest | --version | --help\n'
   printf 'exit: 0 ok, 2 usage, 3 repository not usable, HEAD not the default-branch tip,\n'
   printf '      (prepare --body-out) no evals/solver-probe.py, which the body requires,\n'
   printf '      or (agent-args) the prepared claude-args refused,\n'
-  printf '      4 spec unchanged, 5 no committed plan, 6 refused by stage-advance.sh,\n'
+  printf '      4 spec unchanged, 5 no committed plan, 6 refused by stage-advance.sh\n'
+  printf '      (or no protected list for a HEAD with a checks.yaml),\n'
   printf '      7 delivery failed (named), 8 capture refused (the change touches .git)\n'
 }
 
-CMD=""; ROOT=""; MODE=""; ISSUE=""; SPEC_BASE=""; OUT=""; PATCH=""; RUN_ID=""; BODY_OUT=""; BODY_IN=""
+CMD=""; ROOT=""; MODE=""; ISSUE=""; SPEC_BASE=""; OUT=""; PATCH=""; RUN_ID=""; BODY_OUT=""; BODY_IN=""; PROTECTED=""
 DEFAULT=""; DRY_RUN=0; SELFTEST=0; PERMS=""; PERMS_SET=0; GITDIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -217,6 +234,7 @@ while [ $# -gt 0 ]; do
     --body-out) [ $# -ge 2 ] || die_usage "--body-out needs a directory"; BODY_OUT="$2"; shift 2 ;;
     --body)    [ $# -ge 2 ] || die_usage "--body needs the directory prepare --body-out wrote"; BODY_IN="$2"; shift 2 ;;
     --run-id)  [ $# -ge 2 ] || die_usage "--run-id needs the workflow run id"; RUN_ID="$2"; shift 2 ;;
+    --protected) [ $# -ge 2 ] || die_usage "--protected needs the protected.txt prepare --body-out wrote"; PROTECTED="$2"; shift 2 ;;
     --default-branch) [ $# -ge 2 ] || die_usage "--default-branch needs a branch name"; DEFAULT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --permissions) [ $# -ge 2 ] || die_usage "--permissions needs repo-settings or edits-only"; PERMS="$2"; PERMS_SET=1; shift 2 ;;
@@ -583,6 +601,60 @@ STUB
   also deliver-ran-no-repository-code "no deliver case ran the repository's probe" \
     test ! -e "$ST/PROBE_RAN_MARK"
 
+  # --- the protected list (B136) ----------------------------------------------
+  # prepare reads the files checks.yaml runs before the agent; deliver hands
+  # that list to both stage-advance.sh asks and reads no YAML itself. A python3
+  # that cannot reach PyYAML (no site directories, a HOME with no user site)
+  # stands in for a deliver runner without it.
+  # shellcheck disable=SC2016  # $1/$2 are expanded by the inner sh, on purpose
+  also prepare-wrote-an-empty-list-without-checks-yaml "no checks.yaml at HEAD: protected.txt is empty, protected-head names HEAD" \
+    sh -c 'test -f "$1/protected.txt" && test ! -s "$1/protected.txt" && test "$(cat "$1/protected-head")" = "$2"' _ "$ST/body-del" "$(G "$ST/del" rev-parse HEAD)"
+  newrepo prot; R="$ST/prot"
+  mkdir -p "$R/evals" "$R/tools"
+  printf 'print("  true positives   1")\n' > "$R/evals/solver-probe.py"
+  printf 'exit 0\n' > "$R/tools/lint.sh"
+  printf 'version: 1\nchecks:\n  - id: lint\n    command: [./tools/lint.sh]\n' > "$R/.claude/productizer/checks.yaml"
+  commit_push "$R" "a check and its script"
+  drive prepare-writes-the-protected-list 0 "rendered the pull request body for" \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-prot" \
+    --spec-base "$(G "$R" rev-parse HEAD~2)" --body-out "$ST/body-prot"
+  # shellcheck disable=SC2016  # $1/$2 are expanded by the inner sh, on purpose
+  also protected-list-names-the-check-script "protected.txt is exactly tools/lint.sh, read at HEAD" \
+    sh -c 'printf "tools/lint.sh\n" | cmp -s - "$1/protected.txt" && test "$(cat "$1/protected-head")" = "$2"' _ "$ST/body-prot" "$(G "$R" rev-parse HEAD)"
+  mkdir -p "$ST/noyaml" "$ST/noyaml-home"
+  # shellcheck disable=SC2016  # "$@" belongs to the stand-in python3
+  printf '#!/usr/bin/env bash\nHOME=%q exec %q -S "$@"\n' "$ST/noyaml-home" "$(command -v python3)" > "$ST/noyaml/python3"
+  chmod +x "$ST/noyaml/python3"
+  mkpatch "$R" "$ST/prot-lint.patch" tools/lint.sh 'echo neutered; exit 0'
+  mkpatch "$R" "$ST/prot-code.patch" src/new.sh 'echo new'
+  local PT="$ST/body-prot/protected.txt"
+  drive deliver-refuses-without-a-protected-list 6 "deliver was given no --protected list, and HEAD has .claude/productizer/checks.yaml" \
+    deliver "$R" --body "$ST/body-prot" --mode build --issue 7 --patch "$ST/prot-code.patch" --run-id 130 \
+    --default-branch main --dry-run
+  drive deliver-protected-refuses-a-check-script 6 "forbidden for test: tools/lint.sh (unattended:" \
+    deliver "$R" --body "$ST/body-prot" --protected "$PT" --mode build --issue 7 --patch "$ST/prot-lint.patch" \
+    --run-id 130 --default-branch main --dry-run
+  drive deliver-protected-allows-code 0 "DRY RUN: nothing was pushed and no pull request was opened" \
+    deliver "$R" --body "$ST/body-prot" --protected "$PT" --mode build --issue 7 --patch "$ST/prot-code.patch" \
+    --run-id 130 --default-branch main --dry-run
+  PATH="$ST/noyaml:$PATH" drive deliver-protected-no-pyyaml-allows-code 0 "DRY RUN: nothing was pushed and no pull request was opened" \
+    deliver "$R" --body "$ST/body-prot" --protected "$PT" --mode build --issue 7 --patch "$ST/prot-code.patch" \
+    --run-id 131 --default-branch main --dry-run
+  PATH="$ST/noyaml:$PATH" drive deliver-protected-no-pyyaml-refuses-a-check-script 6 "forbidden for test: tools/lint.sh (unattended:" \
+    deliver "$R" --body "$ST/body-prot" --protected "$PT" --mode build --issue 7 --patch "$ST/prot-lint.patch" \
+    --run-id 131 --default-branch main --dry-run
+  mkdir -p "$ST/prot-other"; cp "$PT" "$ST/prot-other/protected.txt"
+  G "$R" rev-parse HEAD~1 > "$ST/prot-other/protected-head"
+  drive deliver-protected-list-for-another-head 6 "the protected list was computed for" \
+    deliver "$R" --body "$ST/body-prot" --protected "$ST/prot-other/protected.txt" --mode build --issue 7 \
+    --patch "$ST/prot-code.patch" --run-id 130 --default-branch main --dry-run
+  drive prepare-refuses-protected 2 "--patch, --run-id, --body, --protected and --dry-run belong to deliver" \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-x" --protected "$PT"
+  printf 'checks: [\n' > "$R/.claude/productizer/checks.yaml"; commit_push "$R" "a broken checks.yaml"
+  drive prepare-refuses-an-unreadable-checks-yaml 3 "could not list the files .claude/productizer/checks.yaml runs" \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-x" \
+    --spec-base "$(G "$R" rev-parse HEAD~3)" --body-out "$ST/body-prot-bad"
+
   # --- stash-git and capture -------------------------------------------------
   # The two halves of taking the agent's edits without trusting a version-
   # control setting the agent could have written. A plain work tree, its real
@@ -708,7 +780,7 @@ STUB
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f&&/^#      /{next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: that the template hands deliver the body prepare rendered and not another (artifact names and paths are not among check-ci-template.py'"'"'s guards, and GitHub'"'"'s artifact immutability is not measured here); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing; the probe refusal when the spec was created in the root commit (the check comes before that branch, and no case drives it); that a probe which exists prints the counts the body reads (pr-spec-comment.sh renders NOT MEASURED for that, it does not refuse).\n'
+  printf '    NOT ASSERTED: that the template hands deliver the body and the protected list prepare wrote and not others (check-ci-template.py'"'"'s protected-list guard asserts deliver passes --protected and the agent job never downloads the body artifact, but not the artifact paths, and GitHub'"'"'s artifact immutability is not measured here); that a protected list beside a matching protected-head is the one prepare wrote (deliver checks the HEAD, and stage-advance.sh validates the list as data); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing; the probe refusal when the spec was created in the root commit (the check comes before that branch, and no case drives it); that a probe which exists prints the counts the body reads (pr-spec-comment.sh renders NOT MEASURED for that, it does not refuse).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -728,7 +800,7 @@ fi
 # newline, and what is emitted is the checked lines, never the file as it is.
 # ===========================================================================
 if [ "$CMD" = agent-args ]; then
-  [ -z "$MODE$ISSUE$SPEC_BASE$PATCH$RUN_ID$DEFAULT$BODY_OUT$BODY_IN$GITDIR" ] && [ "$DRY_RUN" = 0 ] && [ "$PERMS_SET" = 0 ] \
+  [ -z "$MODE$ISSUE$SPEC_BASE$PATCH$RUN_ID$DEFAULT$BODY_OUT$BODY_IN$GITDIR$PROTECTED" ] && [ "$DRY_RUN" = 0 ] && [ "$PERMS_SET" = 0 ] \
     || die_usage "agent-args takes only [repo-root] and --out"
   [ -n "$OUT" ] || die_usage "agent-args needs --out FILE, the step output file (\$GITHUB_OUTPUT) to append claude_args to"
   [ -n "$ROOT" ] || ROOT="."
@@ -766,7 +838,7 @@ fi
 # before the heavier repository checks below.
 # ===========================================================================
 if [ "$CMD" = stash-git ] || [ "$CMD" = capture ]; then
-  [ -z "$MODE$ISSUE$SPEC_BASE$PATCH$RUN_ID$DEFAULT$BODY_OUT$BODY_IN" ] && [ "$DRY_RUN" = 0 ] && [ "$PERMS_SET" = 0 ] \
+  [ -z "$MODE$ISSUE$SPEC_BASE$PATCH$RUN_ID$DEFAULT$BODY_OUT$BODY_IN$PROTECTED" ] && [ "$DRY_RUN" = 0 ] && [ "$PERMS_SET" = 0 ] \
     || die_usage "$CMD takes only [repo-root], --git-dir and (capture) --out"
   [ -n "$GITDIR" ] || die_usage "$CMD needs --git-dir DIR"
   [ -n "$ROOT" ] || ROOT="."
@@ -843,7 +915,7 @@ if [ -n "$SPEC_BASE" ] && ! [[ "$SPEC_BASE" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 if [ "$CMD" = prepare ]; then
   [ -n "$OUT" ] || die_usage "prepare needs --out DIR"
-  [ -z "$PATCH$RUN_ID$BODY_IN" ] && [ "$DRY_RUN" = 0 ] || die_usage "--patch, --run-id, --body and --dry-run belong to deliver"
+  [ -z "$PATCH$RUN_ID$BODY_IN$PROTECTED" ] && [ "$DRY_RUN" = 0 ] || die_usage "--patch, --run-id, --body, --protected and --dry-run belong to deliver"
   [ "$PERMS_SET" = 1 ] || PERMS="repo-settings"
   case "$PERMS" in
     repo-settings|edits-only) ;;
@@ -862,6 +934,10 @@ else
   [[ "$RUN_ID" =~ ^[0-9]{1,20}$ ]] || die_usage "--run-id must be digits, the workflow run id; got: ${RUN_ID:-nothing}"
   [ -z "$OUT" ] || die_usage "--out belongs to prepare"
   PATCH="$(cd "$(dirname "$PATCH")" && pwd)/$(basename "$PATCH")"
+  if [ -n "$PROTECTED" ]; then
+    [ -d "$(dirname "$PROTECTED")" ] || die_usage "--protected names a file in no directory: $PROTECTED"
+    PROTECTED="$(cd "$(dirname "$PROTECTED")" && pwd)/$(basename "$PROTECTED")"
+  fi
 fi
 
 # ===========================================================================
@@ -1034,6 +1110,14 @@ PY
       say "**NOT MEASURED.** The spec was created in the root commit, so there is no base to render its movement against." > "$BODY_OUT/body.md"
     fi
     printf '%s\n' "$HEAD_SHA" > "$BODY_OUT/body-head"
+    # THE PROTECTED LIST (B136): the files checks.yaml at HEAD runs, read
+    # HERE, where PyYAML may be installed and no write token is held, and
+    # handed to deliver beside the body, which deliver may not read YAML for.
+    PP_RC=0
+    bash "$HERE/stage-advance.sh" . --print-protected --base "$HEAD_SHA" > "$BODY_OUT/protected.txt" || PP_RC=$?
+    [ "$PP_RC" = 0 ] \
+      || fail 3 "could not list the files .claude/productizer/checks.yaml runs (stage-advance.sh --print-protected exited $PP_RC; its reason is above), so deliver could not protect them. Refusing the run before any model is called."
+    printf '%s\n' "$HEAD_SHA" > "$BODY_OUT/protected-head"
     say "build-dispatch: rendered the pull request body for ${HEAD_SHA:0:12} into $BODY_OUT ($(wc -c < "$BODY_OUT/body.md" | tr -d ' ') bytes)."
   fi
 
@@ -1057,11 +1141,32 @@ if [ "$MODE" = plan ]; then FROM="design"; TO="build"; else FROM="build"; TO="te
 BRANCH="productizer/$MODE-$ISSUE-$RUN_ID"
 [ "$BRANCH" != "$DEFAULT" ] || die_usage "the run branch would be the default branch; refusing"
 
+# 0. The protected list (B136). prepare read the files checks.yaml runs, in a
+#    job that may parse YAML; this job may not, so it hands the list to both
+#    asks below. It must be for this HEAD. With no list while HEAD has a
+#    checks.yaml, deliver refuses: a missing list never means "protect nothing".
+CHECKS_YAML_REL=".claude/productizer/checks.yaml"
+SA_PROTECTED=()
+if [ -n "$PROTECTED" ]; then
+  PROTECTED_HEAD="$(dirname "$PROTECTED")/protected-head"
+  [ -f "$PROTECTED_HEAD" ] && [ ! -L "$PROTECTED_HEAD" ] \
+    || fail 6 "the protected list $PROTECTED has no protected-head beside it, so the HEAD it was read at is unknown; refusing to judge the change against it. Nothing was committed, pushed or opened."
+  PROTECTED_AT="$(head -n 1 "$PROTECTED_HEAD")"
+  [ "$PROTECTED_AT" = "$HEAD_SHA" ] \
+    || fail 6 "the protected list was computed for ${PROTECTED_AT:0:12}, not for this HEAD ${HEAD_SHA:0:12}; a list for another commit is refused. Nothing was committed, pushed or opened."
+  SA_PROTECTED=(--protected "$PROTECTED")
+else
+  CY_AT_HEAD="$(git ls-tree HEAD -- "$CHECKS_YAML_REL")" || fail 3 "cannot read HEAD's tree"
+  [ -z "$CY_AT_HEAD" ] \
+    || fail 6 "deliver was given no --protected list, and HEAD has $CHECKS_YAML_REL: the files it runs would go unprotected, and this job does not read YAML to find them. Pass the protected.txt prepare --body-out wrote. Nothing was committed, pushed or opened."
+fi
+
 # 1. The decision. stage-advance.sh's reason goes to stderr as it wrote it.
 #    --unattended on this call and on the second one below: no person is at
-#    the keyboard, so a change to the checks result is refused (B126).
+#    the keyboard, so a change to the checks result is refused (B126), and so
+#    is a change to a file the protected list names (B136).
 SA_RC=0
-bash "$HERE/stage-advance.sh" "$ROOT" --from "$FROM" --to "$TO" --patch "$PATCH" --mode "$MODE" --unattended || SA_RC=$?
+bash "$HERE/stage-advance.sh" "$ROOT" --from "$FROM" --to "$TO" --patch "$PATCH" --mode "$MODE" --unattended ${SA_PROTECTED[@]+"${SA_PROTECTED[@]}"} || SA_RC=$?
 [ "$SA_RC" -eq 0 ] \
   || fail 6 "refused by stage-advance.sh (exit $SA_RC) for $FROM -> $TO in $MODE mode; its reason is the line above. Nothing was committed, pushed or opened."
 
@@ -1148,7 +1253,7 @@ COMMIT="$(git -C "$WT" rev-parse HEAD)"
 #     reads HEAD..COMMIT with git's own diff, against the config at HEAD in
 #     $ROOT, not the config in the commit being judged.
 SA2_RC=0
-bash "$HERE/stage-advance.sh" "$ROOT" --from "$FROM" --to "$TO" --base "$HEAD_SHA" --head "$COMMIT" --mode "$MODE" --unattended >&2 || SA2_RC=$?
+bash "$HERE/stage-advance.sh" "$ROOT" --from "$FROM" --to "$TO" --base "$HEAD_SHA" --head "$COMMIT" --mode "$MODE" --unattended ${SA_PROTECTED[@]+"${SA_PROTECTED[@]}"} >&2 || SA2_RC=$?
 if [ "$SA2_RC" -ne 0 ]; then
   REFUSED=1
   fail 6 "refused by stage-advance.sh (exit $SA2_RC) for $FROM -> $TO in $MODE mode on the commit git actually made from the patch, after it had allowed the patch itself; its reason is the line above. Nothing was pushed or opened, and the branch is deleted."

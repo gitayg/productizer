@@ -498,3 +498,7 @@ checks:
     fires: 0
     fire_rate: "0/27 = 0.0%"
     measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-12", config: "checks.yaml in the working tree, with view-builder declared", command: "measure-check-overfire.sh --check view-builder --commits 30 --history clone"}
+  - id: release-workflow-safe
+    status: uncalibrated
+    reason: "measured nothing - it triggered on 30 of the 30 commits and returned a verdict on none: 30 refused, 0 undeclared exit, 0 tool absent at that commit, 0 timed out. Every refusal is python3 finding no check-release-workflow.py, which did not exist before v4.72.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-13", config: "checks.yaml in the working tree, with release-workflow-safe declared", command: "measure-check-overfire.sh --check release-workflow-safe --commits 30 --history empty"}

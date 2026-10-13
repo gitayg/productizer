@@ -200,8 +200,8 @@ refuses (exit 5) unless the plan is committed there.
 
 | Mode | Asked | Evidence it needs | What it forbids |
 |---|---|---|---|
-| `plan` | `design -> build --mode plan --unattended` | a `plan.md` under `artifacts.path` | every path except the plan |
-| `build` | `build -> test --mode build --unattended` | a path outside `artifacts.path` (a plan alone is not a build), and never the backlog | the spec, the forbidden set below, and - unattended - any path that is not ASCII or has a component beginning with a dot, bar the backlog on its exact path |
+| `plan` | `design -> build --mode plan --unattended --protected FILE` | a `plan.md` under `artifacts.path` | every path except the plan |
+| `build` | `build -> test --mode build --unattended --protected FILE` | a path outside `artifacts.path` (a plan alone is not a build), and never the backlog | the spec, the forbidden set below, and - unattended - any path that is not ASCII or has a component beginning with a dot, bar the backlog on its exact path; a file `checks.yaml` runs; a classification or snapshot added |
 
 **The forbidden set, every mode.** Since `stage-advance.sh` 1.4 it is written
 once, as four lists - `FORBID_ROOT_TREES` (a name at the root and everything
@@ -304,6 +304,52 @@ checks. Self-tested in `stage-advance.sh` (`unattended-checks-result-*`, and
 the `attended-checks-result-*` cases that hold the attended behaviour) and in
 `build-dispatch.sh` (`deliver-refuses-a-checks-result-patch` on the patch,
 `deliver-recheck-refuses-a-checks-result` on the commit).
+
+**Unattended, a classification or a snapshot is never added** (B137). Under
+`--unattended` a classification record or a stage snapshot ADDED is refusal 3
+too, not "nothing". Nothing in this pipeline classifies an intent or snapshots
+a stage - `build-dispatch.sh` and the template name neither, and the agent is
+told to write nothing under `.claude/` - so a record added here is the agent's
+own, and a forged classification would pass for a decision a person made.
+Attended, an added record stays "nothing".
+
+**Unattended, a file `checks.yaml` runs is never changed** (B136). Rewriting the
+script a declared check runs neuters that check as surely as editing
+`checks.yaml`, and `checks.yaml` is already refused while the scripts it names
+usually sit at ordinary, allowed paths. So under `--unattended` a change to any
+file `.claude/productizer/checks.yaml` at the BASE runs is refusal 3: of every
+check, the program in `command`, `version_command`, `coverage.command` and
+`coverage.rules_command`, the first operand an interpreter is handed there
+(`python3 -m pkg.mod` protects `pkg/**` and `pkg.py`), and every `requires`
+entry, each with everything under it and on its folded key. The set is read at
+the base, never from the change, so the change cannot redefine it.
+
+**The protected list: read it before the AI** (maintainer ruling 2026-10-13).
+Reading that set means parsing YAML, and the job holding the write token must
+neither parse YAML nor install a package to do it: a package installed there is
+code fetched into the one job that can push, and a YAML reader there is one
+more parser beside the patch it is judging. So `prepare` - no write token,
+before the agent - installs PyYAML and runs `stage-advance.sh --print-protected
+--base HEAD`, which prints the path of every file `checks.yaml` runs, one per
+line, from the same reader the decider uses. It writes them to
+`protected.txt`, with `protected-head` naming the HEAD it read, beside the body
+in the `productizer-body` artifact, which the agent's job never downloads. A
+`checks.yaml` it cannot read refuses the run there, exit 3, before any model is
+called. `deliver` installs nothing and reads no YAML: it passes
+`--protected <that file>` to both `stage-advance.sh` asks, which then use the
+list - validated as data: a regular file under 256 KiB, no NUL, every line a
+non-empty printable-ASCII repository path with no leading or trailing slash
+and no empty, `.` or `..` component, else exit 4 - and never read
+`checks.yaml` or import PyYAML. `deliver` refuses (exit 6) a list whose
+`protected-head` is not the HEAD it delivers onto, and refuses (exit 6) to run
+with no list at all when HEAD has a `checks.yaml`: a missing list never means
+"protect nothing". Called without `--protected`, `stage-advance.sh` still reads
+`checks.yaml` at the base itself (with `python3 -I`, the user site appended
+last), and exits 4 when it cannot. `check-ci-template.py` holds the YAML half
+(`write-job-no-install`, `protected-list`). Self-tested in `build-dispatch.sh`
+(`deliver-protected-no-pyyaml-*` run `deliver` with a `python3` that cannot
+reach PyYAML) and in `stage-advance.sh` (`unattended-no-pyyaml-*`,
+`unattended-protected-list-*`, `print-protected-*`).
 
 **The patch text is never parsed.** `stage-advance.sh --patch` has git apply
 the patch to a scratch index read from `HEAD`, in a temporary object
@@ -448,7 +494,8 @@ build-dispatch.sh stash-git [repo-root] --git-dir DIR
 build-dispatch.sh capture [repo-root] --git-dir DIR --out FILE
 build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
                           --patch FILE --body DIR --run-id ID
-                          --default-branch NAME [--spec-base SHA] [--dry-run]
+                          --default-branch NAME [--spec-base SHA]
+                          [--protected FILE] [--dry-run]
 ```
 
 `agent-args` is the last check on the flags the agent runs with, in the
@@ -475,10 +522,10 @@ run in the `generate` job around the agent step.
 |---|---|
 | 0 | ok, or the dry run printed what it would have pushed and opened |
 | 2 | usage, including a `--spec-base` that is not 40 lower-case hex digits or does not resolve, and a `--permissions` value outside `repo-settings` and `edits-only` |
-| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, (`prepare --body-out`) no `evals/solver-probe.py`, which the body requires, or a body that could not be rendered, (`stash-git`/`capture`) the git-dir could not be moved or read, or (`agent-args`) the prepared `claude-args` are missing, hold a line outside the fixed shapes or a repeated flag, or lack the Bash deny |
+| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, (`prepare --body-out`) no `evals/solver-probe.py`, which the body requires, a body that could not be rendered, or a `checks.yaml` whose protected list could not be read, (`stash-git`/`capture`) the git-dir could not be moved or read, or (`agent-args`) the prepared `claude-args` are missing, hold a line outside the fixed shapes or a repeated flag, or lack the Bash deny |
 | 4 | the spec is unchanged against the base. The run stops before any model call |
 | 5 | build mode, and no plan is committed at the plan path |
-| 6 | refused by `stage-advance.sh`, on the patch or on the commit made from it, whose reason is relayed verbatim. The branch is deleted and nothing is pushed |
+| 6 | refused by `stage-advance.sh`, on the patch or on the commit made from it, whose reason is relayed verbatim. The branch is deleted and nothing is pushed. Also: no `--protected` list while `HEAD` has a `checks.yaml`, or a list read at another `HEAD` |
 | 7 | delivery failed after the decision. The step is named: the body (missing, rendered for another HEAD, or over the 60000-byte cap), the branch, the commit, the push or `gh` |
 | 8 | `capture` refused: a `.git` reappeared in the working tree after `stash-git` moved the real one out |
 
@@ -495,7 +542,9 @@ is called, naming the file (see "Adopting it"). `deliver` renders nothing; it
 reads that body as text (see "The job that can write runs no code from the
 repository it writes to" above). The body is that report, followed by the
 sentence saying the pull request is a proposal to be reviewed, and the line
-`Productizer-Run: <run id>`.
+`Productizer-Run: <run id>`. Beside the body, `prepare --body-out` writes
+`protected.txt` and `protected-head` (see "The protected list" above), which
+`deliver` takes as `--protected`.
 
 The commit carries `Productizer-Req:` with the requirement ids whose records
 differ between the spec at the base and the spec at `HEAD`, as read by
@@ -530,6 +579,16 @@ workflow given as a path:
   runs a script staged under `$RUNNER_TEMP` (`write-job-no-repo-code`). It reads
   the run: text, so an interpreter a staged script itself starts, or a command
   spelled through a variable, is not seen
+- a job holding any write permission installs nothing and reads no YAML for
+  itself: no `actions/setup-python`, and no run: naming a package installer
+  (pip, pip3, pipx, uv, poetry, conda, mamba, micromamba, apt, apt-get,
+  aptitude, dnf, yum, apk, brew, easy_install, gem, cargo) or a YAML library
+  (`write-job-no-install`, B136)
+- every run: in a write job that calls `build-dispatch.sh deliver` passes
+  `--protected` with a value, and the agent's job downloads neither the
+  `productizer-body` artifact nor any artifact by pattern or with no name
+  (`protected-list`, B136). It does not trace the path to prepare's artifact;
+  `deliver` refuses a list read at another HEAD at run time
 - every `uses:` is pinned to a full 40-character commit id
 - no `${{` expression of any context inside a `run:` (`run-injection`):
   `github.event` and `inputs`, and since B119 also `steps`, `needs`, `env`,
@@ -680,6 +739,12 @@ your copy after every edit.
   outside `artifacts.path` or changed only the backlog, so a run that rewrote
   only `plan.md` no longer opens a pull request. Any other path still counts,
   so a run that edited only a README does.
+- **The protected list covers what `checks.yaml` names, not what those files
+  call.** A file a check script sources or runs that `checks.yaml` does not
+  name itself (a `.py` beside the `.sh` it runs) is not protected, and a
+  `run-checks.sh --config` other than `.claude/productizer/checks.yaml` is not
+  read. `prepare` installs PyYAML from PyPI pinned by version, not by hash, in
+  the job with no write token.
 - **The agent cannot run your tests, by design.** The no-shell rule removes the
   Bash tool, so build mode edits code without running it. Your checks on the
   pull request are what verify it, and they run only once a person pushes
@@ -692,7 +757,7 @@ your copy after every edit.
   change made against an older tree. Dispatch the run again.
 - **It has never run end to end here.** This repository is public, holds no
   model secrets, and a run costs model spend. What is measured is the
-  template's static properties (`check-ci-template.py`, 14 of 14, actionlint
+  template's static properties (`check-ci-template.py`, 16 of 16, actionlint
   1.7.12 clean), and all of `build-dispatch.sh` - `prepare`, `stash-git`,
   `capture`, `deliver` - against local repositories with a stub `gh`. The
   action's real behaviour inside GitHub Actions, that it tolerates its `.git`

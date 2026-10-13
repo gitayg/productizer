@@ -773,8 +773,8 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**Ninety-three requirements are active**, and they are the whole of what has
-been agreed.
+**109 requirements are active**, and they are the whole of what has been
+agreed.
 
 Thirty-two more are superseded and none withdrawn, and neither kind is listed
 here. The spec keeps both forever with their text intact, so a citation
@@ -782,7 +782,7 @@ written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
 
-**Always, with no trigger.** Fifteen requirements hold whatever else is
+**Always, with no trigger.** Seventeen requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -815,8 +815,12 @@ happening:
   that executes commands.
 - **R115** — The lifecycle shall interpolate no `${{ }}` expression into a
   `run:` script of the CI build template.
+- **R129** — The lifecycle shall keep every package install and YAML read out
+  of the CI template's job that holds a write token.
+- **R130** — The lifecycle shall hand the CI template's deliver job the
+  protected list through an artifact the agent's job never downloads.
 
-**When something arrives.** Twenty-eight things happen on a discrete trigger:
+**When something arrives.** Thirty-seven things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -885,8 +889,34 @@ happening:
 - **R125** — When a stage advance to design is judged without `--unattended`,
   the lifecycle shall permit its change to modify the requirement index and to
   add classification records.
+- **R128** — When an unattended stage decision is handed a protected list, the
+  lifecycle shall judge the change against that list and read no YAML.
+- **R132** — When an unattended stage run adds a classification record or a
+  stage snapshot, the lifecycle shall refuse the stage move.
+- **R133** — When a workflow job's own permissions, or a new job's compared
+  against the workflow's default at the base, grant a scope at a higher level
+  than before, the lifecycle shall report that scope as a weakening of the
+  governance surface.
+- **R134** — When the lifecycle compares workflow steps between a base and the
+  working tree, the lifecycle shall match them by id, or else by name and the
+  action used with its ref ignored, and never by position.
+- **R135** — When the view builder or the page writes a link whose value
+  derives from the origin remote, a tracked path or jira.site, the lifecycle
+  shall write it as an attribute-escaped http(s) URL or write no link.
+- **R136** — When a version tag is pushed, the lifecycle shall attach to the
+  draft release a copy of the CI build template pinned to the tag's commit,
+  made by a job holding no write token.
+- **R139** — When the import marking is examined and the repository history
+  cannot be walked, the lifecycle shall refuse to report that no import is on
+  the record.
+- **R140** — When the import marking is examined, the lifecycle shall count a
+  backlog line as evidence of an import only where it is a new gap row whose
+  item opens with the import stage's id.
+- **R141** — When a lifecycle script is given a relative path option other
+  than its root, the lifecycle shall resolve it under the repository root
+  rather than the working directory.
 
-**For as long as a state lasts.** Seven requirements are true for the duration
+**For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
 
 - **R13** — While a check tool named by the configuration is absent, the
@@ -908,8 +938,12 @@ of a state, not at a moment inside it:
 - **R122** — While PRODUCTIZER_SHA is the forty-`0` placeholder, the lifecycle
   shall make the CI build template refuse to run before checking anything out,
   naming the command that prints a release's commit id.
+- **R137** — While the release-draft job holds a token that can write to the
+  repository, the lifecycle shall check out nothing in it.
+- **R138** — While the release-draft job holds a token that can write to the
+  repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Thirty-nine defences, written as `If … then`
+**When something goes wrong.** Forty-two defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1003,6 +1037,15 @@ because a designed path and a defended one are not the same thing:
 - **R124** — If a flag line prepared for an unattended run is outside the
   fixed shapes `build-dispatch.sh prepare` writes, repeats a flag, or the
   prepared flags lack the Bash deny, then the lifecycle shall refuse the run.
+- **R126** — If an unattended stage run changes a file that a check declared
+  in `.claude/productizer/checks.yaml` at the base executes, then the
+  lifecycle shall refuse the stage move.
+- **R127** — If an unattended stage run must read
+  `.claude/productizer/checks.yaml` at the base and cannot, then the lifecycle
+  shall refuse to decide the stage move.
+- **R131** — If the deliver job has no protected list for its HEAD while that
+  HEAD has a `.claude/productizer/checks.yaml`, then the lifecycle shall
+  refuse to deliver.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

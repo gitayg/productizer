@@ -440,6 +440,23 @@ checks:
             a guide that cannot be regenerated drafts no release. NOT asserted: that chain, which
             is workflow structure no check reads; a release prepared outside CI; and a failed write
             of the guide, which exits 1 uncaught and is driven by no case.
+        - id: R141
+          verdict: Partial
+          reason: >-
+            B140 and B141, ruled "converge on repo root". The declared check runs this script at
+            the repository root, where the working directory IS the root, so its own run proves
+            nothing about a relative option; the cases that drive one from another working
+            directory are the script's self-test, which the workflow runs and no declared check
+            does. Of the eight scripts changed under the ruling, seven are run by a declared check
+            (classification-provenance, jira-unbound, guide-current, requirement-index-current,
+            calibration-recorded, view-publish-refused, installed-copies) and graduate.sh by
+            none. `--root` itself, if relative, is read from the working directory, which the
+            requirement excepts; CLAUDE_TRANSCRIPTS, an environment variable graduate.sh reads, is
+            not root-resolved; and the lifecycle's other scripts were not swept.
+          evidence: >-
+            build-guide.sh 1.3 `--selftest`: `relative-spec-under-root` and
+            `relative-guide-under-root` read a relative --spec and --guide under the root, not the
+            working directory, and assert the name of the file read.
         - id: R9
           verdict: Partial
           reason: >-
@@ -723,7 +740,7 @@ checks:
     exit_codes:
       pass: [0]
       fail: [1]        # a requirement attributed to an import with no marking
-      refused: [2]     # an unparseable spec, or a git history that could not be walked, or a backlog naming Stage 0c whose history could not be read
+      refused: [2]     # an unparseable spec; a git history that could not be walked, whether or not anything else names an import; or a backlog gap row naming Stage 0c whose history could not be read
     coverage:
       spec_units:
         - id: R92
@@ -737,6 +754,26 @@ checks:
             exits 0 on a backlog naming the stage in the work tree only; `backlog-without-git`
             exits 2, a history that could not be read. Falsified 2026-10-12 with 1.1's reading of
             the backlog as it stands restored beside 1.2's: 12 of 13, `backlog-append-names-id` red.
+            Since 1.3 (B143, B144) the suite holds 18 cases; the five new ones are
+            `no-git-no-evidence` and `unborn-history` (B143), and `prose-in-the-import-commit`,
+            `gap-row-beside-prose` and `gap-answered-later` (B144).
+        - id: R139
+          verdict: Covered
+          evidence: >-
+            check-import-marking.sh 1.3 (B143). `no-git-no-evidence` exits 2: a root that is not a
+            git work tree, whose spec and backlog name no import, is refused rather than reported
+            as no import - 1.2 exited 0 there. `unborn-history` exits 0, so a repository with no
+            commits yet is read as having no history, not refused; `backlog-without-git` still
+            exits 2.
+        - id: R140
+          verdict: Covered
+          evidence: >-
+            check-import-marking.sh 1.3 (B144). `prose-in-the-import-commit` exits 0: a backlog
+            line naming the import stage in prose, in the commit that drafted requirements, is no
+            longer evidence; `gap-row-beside-prose` exits 1, a new gap row whose item opens with
+            the stage's id beside that prose; `gap-answered-later` exits 0 - a gap row answered in
+            a later commit that adds a requirement does not attribute that requirement to the
+            import.
         - id: R10
           verdict: n/a
           reason: >-
@@ -744,7 +781,9 @@ checks:
             happened here. Four independent sources are read every run and none records a Stage 0c
             import: the change log, the commit history, elsewhere in the spec, and a backlog line
             written by the commit that drafted requirements; the backlog as it stands is not
-            evidence (1.2). The
+            evidence (1.2), and since 1.3 only a new gap row whose item opens with the stage's id
+            counts; a history that cannot be walked is refused, exit 2, not read as no import
+            (1.3). The
             guard is shut, the same shape as `jira-unbound`, and this claim expires by itself -
             record an import and the premise holds, the other three assertions run, and a cohort
             with no markings becomes a finding under its own heading. What stays unreachable even
@@ -825,6 +864,24 @@ checks:
             nothing - a duplicate or a contradiction - writes no change-log row and no spec delta,
             so no artefact in this repository records it. Closing that needs Stage 2 to call
             record-classification.sh at the moment it settles on one of the four.
+        - id: R141
+          verdict: Partial
+          reason: >-
+            B140 and B141, ruled "converge on repo root". The declared check runs this script at
+            the repository root, where the working directory IS the root, so its own run proves
+            nothing about a relative option; the cases that drive one from another working
+            directory are the script's self-test, which the workflow runs and no declared check
+            does. Of the eight scripts changed under the ruling, seven are run by a declared check
+            (classification-provenance, jira-unbound, guide-current, requirement-index-current,
+            calibration-recorded, view-publish-refused, installed-copies) and graduate.sh by
+            none. `--root` itself, if relative, is read from the working directory, which the
+            requirement excepts; CLAUDE_TRANSCRIPTS, an environment variable graduate.sh reads, is
+            not root-resolved; and the lifecycle's other scripts were not swept.
+          evidence: >-
+            check-classification-provenance.sh 3.1 `--selftest`: `relative-store-under-root` is run
+            from a working directory holding a decoy and reads the root's store; `absolute-store`,
+            `absolute-spec-path` and `absolute-backlog` read an absolute path as given (through 3.0
+            it was joined to the root), and `absolute-store-outside` reads one outside the root.
       # Files actually opened, one per line. The spec is always one of them, so
       # a run that opened nothing is a bug rather than a repo with no records.
       # `must_cover` omitted deliberately: an `always` check taking no {files},
@@ -1058,6 +1115,24 @@ checks:
             backlog there is no Jira for the lifecycle to write back to, so the obligation
             not to write is unreachable rather than unimplemented. It returns to Missing the
             moment the guard can open.
+        - id: R141
+          verdict: Partial
+          reason: >-
+            B140 and B141, ruled "converge on repo root". The declared check runs this script at
+            the repository root, where the working directory IS the root, so its own run proves
+            nothing about a relative option; the cases that drive one from another working
+            directory are the script's self-test, which the workflow runs and no declared check
+            does. Of the eight scripts changed under the ruling, seven are run by a declared check
+            (classification-provenance, jira-unbound, guide-current, requirement-index-current,
+            calibration-recorded, view-publish-refused, installed-copies) and graduate.sh by
+            none. `--root` itself, if relative, is read from the working directory, which the
+            requirement excepts; CLAUDE_TRANSCRIPTS, an environment variable graduate.sh reads, is
+            not root-resolved; and the lifecycle's other scripts were not swept.
+          evidence: >-
+            check-jira-unbound.sh 1.1 `--selftest`: `rel-shut` joins a relative --config to the root
+            from another working directory; `abs-shut`, `abs-bound` and `abs-outside` read an
+            absolute --config or --backlog as given (through 1.0 a config that was there was
+            reported absent).
           evidence: .claude/productizer/config.json and .claude/productizer/backlog.md, read each run
     limitations:
       - It measures that the guard is SHUT. It says nothing whatever about what the lifecycle would do if it were open, because nothing here reads or writes Jira at all.
@@ -2198,9 +2273,50 @@ checks:
             constitution.md and config.json at design, and a classification MODIFIED. The first
             three exit 3 against 1.4; falsified 2026-10-13 with the exception removed, 139 of
             142, those three red.
+        - id: R126
+          verdict: Covered
+          evidence: >-
+            stage-advance.sh 1.6 (B136), 182 cases. Under --unattended, exit 3 on a change to a
+            file a check declared in checks.yaml at the base executes: `unattended-checks-program`,
+            `-version-command`, `-coverage-command`, `-requires`, `-interpreter-script`,
+            `-module-added`, `-case-variant` and `-base-mode` (the `unattended-checks-*` cases);
+            the set is read at the base, never from the change
+            (`unattended-checks-work-tree-not-read`). Attended, and on a data operand, exit 0:
+            `attended-checks-program-allowed`, `unattended-checks-data-operand-allowed`,
+            `unattended-checks-operand-after-script-allowed`. Falsified 2026-10-13 by the building
+            agent with the refusal made never to fire, at 162 cases: 153 of 162.
+        - id: R127
+          verdict: Covered
+          evidence: >-
+            Exit 4, never a guess, when checks.yaml at the base must be read and cannot be:
+            `unattended-checks-unreadable`, `unattended-checks-not-a-list`,
+            `unattended-checks-placeholder-program`, `unattended-no-pyyaml-without-list` (no PyYAML
+            and no list handed over) and `print-protected-unreadable`. Attended it is not read:
+            `attended-checks-unreadable-not-read` exits 0.
+        - id: R128
+          verdict: Covered
+          evidence: >-
+            Handed `--protected FILE`, the decider judges against the list and reads no YAML:
+            `unattended-protected-list-refuses` exits 3 and `-allows-code` exits 0, and
+            `unattended-no-pyyaml-with-list` exits 3 with a python3 that cannot import PyYAML;
+            the list is validated as data (`unattended-protected-list-abs`, `-big`, `-blank`,
+            `-dotdot`, `-link`, `-missing`, `-nonascii`, `-nul`, `-case-variant`); the
+            `print-protected-*` cases print the set the decider reads, sorted, one per line
+            (`print-protected-exact-set`, `-lists-the-set`, `-no-checks-yaml`, `-needs-base`).
+            Falsified 2026-10-13 by the building agent: 179 of 182.
+        - id: R132
+          verdict: Covered
+          evidence: >-
+            Exit 3 under --unattended when the run adds a classification record or a stage
+            snapshot (B137): `unattended-classification-added-beside-code`,
+            `unattended-design-classification-added`, and `unattended-bookkeeping-added-base-mode`,
+            which adds a stage snapshot beside a classification under --base. Attended the same
+            change stays inert: `attended-classification-added-beside-code` exits 0. Falsified
+            2026-10-13 by the building agent with the refusal made never to fire, at 162 cases:
+            159 of 162. NOT driven: a snapshot added alone.
     limitations:
       - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
-      - The forbidden set is a list, not a proof. Attended, nothing but the list applies; under --unattended an ASCII, dot-free file the list does not name (Jenkinsfile, GEMINI.md, a script checks.yaml runs) is still allowed. A homoglyph is read, not folded - one non-ASCII character as one to two characters - so a reading of three or more, and a homoglyph made of ASCII alone (rn for m), are not refused; and a legitimate non-ASCII name that reads as a rule file is refused attended too. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
+      - The forbidden set is a list, not a proof. Attended, nothing but the list applies; under --unattended an ASCII, dot-free file the list does not name (Jenkinsfile, GEMINI.md) is still allowed. Since 1.6 a file a check declared in checks.yaml runs is refused under --unattended (R126), but a file a check script calls or sources that checks.yaml does not name is not protected; a `run-checks.sh --config` other than the default is not read; PyYAML is pinned by version, not hash. A homoglyph is read, not folded - one non-ASCII character as one to two characters - so a reading of three or more, and a homoglyph made of ASCII alone (rn for m), are not refused; and a legitimate non-ASCII name that reads as a rule file is refused attended too. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
       - Default-deny over `.claude/**` refuses a design move's change to every `.claude/productizer/` file but the spec, the backlog, bookkeeping ADDED and, since 1.5, the requirement index MODIFIED in an attended design move (B112). An unattended design move may not write the index, because R91 lists the unattended exceptions and it is not among them.
       - A stage other than design or build with evidence of its own is driven by no case.
 
@@ -2401,6 +2517,23 @@ checks:
             `prepare-renders-body` still renders when the probe exists. Against 7e5b2c4 prepare
             rendered a partial body and exited 0. Falsified 2026-10-12 with the check made always
             true: 92 of 94, those two red.
+        - id: R131
+          verdict: Covered
+          evidence: >-
+            build-dispatch.sh 1.2 (B136), 105 cases. `deliver-refuses-without-a-protected-list` and
+            `deliver-protected-list-for-another-head` exit 6 - no list, or one whose
+            protected-head is not the HEAD delivered onto, when that HEAD has a checks.yaml;
+            `prepare-writes-the-protected-list` - prepare writes the list and the HEAD it read;
+            `prepare-refuses-an-unreadable-checks-yaml` exits 3 before any model is called.
+            Falsified 2026-10-13 by the building agent: 103 of 105 with the missing-list refusal
+            made never to fire, 104 of 105 with the HEAD comparison neutered.
+        - id: R128
+          verdict: Covered
+          evidence: >-
+            deliver passes the list and reads no YAML: `deliver-protected-no-pyyaml-allows-code`
+            exits 0 and `deliver-protected-no-pyyaml-refuses-a-check-script` exits 6 with a python3
+            that cannot import PyYAML, as do `deliver-protected-allows-code` and
+            `deliver-protected-refuses-a-check-script` with one that can.
     limitations:
       - The real gh, a real GitHub and the action itself are never exercised. gh is a stub and origin is a local bare repository.
       - That GitHub runs the template's calls of this script as written is not measured; check-ci-template.py's guards assert the call text (agent-args, stash-git, capture) and the agent-args cases drive the subcommand, but no case runs the YAML.
@@ -2419,11 +2552,11 @@ checks:
     timeout_seconds: 60
     exit_codes:
       pass: [0]
-      fail: [1]        # at least one of the fourteen assertions does not hold on the template
+      fail: [1]        # at least one of the sixteen assertions does not hold on the template
       refused: [2]     # usage, or a template that could not be read or parsed
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 14 assertions held'
+      pattern: '([0-9]+) of 16 assertions held'
       min_covered: 1
       spec_units:
         - id: R112
@@ -2547,9 +2680,120 @@ checks:
             tools-pin-unquoted.yml, tools-ref-moving.yml and guard-pin-refusal.yml exit 1.
             Falsified 2026-10-12 with tools-pin never checked: 37 of 40, its three fixtures red;
             guard-pin-refusal.yml went red with the guards never checked.
+        - id: R129
+          verdict: Partial
+          reason: >-
+            Static only, and over the run: text: a staged script that installs a package, or a
+            command spelled through a variable, is not seen, and that GitHub runs the job as written
+            is not measured (B121).
+          evidence: >-
+            check-ci-template.py 1.1 (B136), 45 self-test cases. `write-job-no-install` - a job
+            holding any write permission has no `uses:` of actions/setup-python and no run: naming
+            a package installer (pip, pip3, pipx, uv, poetry, apt, apk, brew, gem, cargo and the
+            rest) or PyYAML. Fixtures write-job-pip-install.yml and write-job-setup-python.yml
+            exit 1. Falsified 2026-10-13 with both new rules made never to fire: 42 of 45.
+        - id: R130
+          verdict: Partial
+          reason: >-
+            Static only: `protected-list` asserts that deliver is passed `--protected` with a value
+            and that the agent's job downloads no artifact named productizer-body. It does not
+            trace the --protected path to the artifact prepare uploaded, and GitHub's handling of
+            artifacts is not measured; deliver refuses a list read at another HEAD at run time
+            (build-dispatch, R131).
+          evidence: >-
+            `protected-list` - every write-job run: naming build-dispatch.sh and deliver passes
+            `--protected` with a value, and the agent's job downloads no productizer-body artifact.
+            Fixtures deliver-no-protected.yml, deliver-args-no-protected.yml and
+            agent-downloads-body.yml exit 1. Falsified 2026-10-13 with `--protected` removed from
+            the shipped template: 15 of 16 assertions held, `protected-list` red.
     limitations:
       - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
       - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.
+
+  # B142. A version tag runs two jobs in this repository's own workflow (B128):
+  # release-prep, whose token can only read, makes the notes and a copy of the
+  # CI build template pinned to the tag's commit; release-draft, the one job
+  # whose token can write, checks out nothing and runs no repository code. That
+  # split is a property of the YAML, and one edit removes it while every script
+  # stays green, so the file itself is read. Run with `python3`, not
+  # `python3 -I`: it needs PyYAML, which on some machines lives only in the
+  # user site.
+  - id: release-workflow-safe
+    why: the release job holds a token that can write to this repository, and a checkout or one interpreter call added "to read a file" would run repository code with it while every script stays green
+    when:
+      always: true
+    severity: block
+    requires: [python3]
+    version_command: [python3, ./plugins/productizer/skills/spec/scripts/check-release-workflow.py, --version]
+    mode: batch
+    command: [python3, ./plugins/productizer/skills/spec/scripts/check-release-workflow.py]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # at least one of the eight assertions does not hold on the workflow
+      refused: [2]     # usage, an unreadable or unparseable workflow, no PyYAML, check-ci-template.py not loadable, or no release-prep or release-draft job
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 8 assertions held'
+      min_covered: 1
+      spec_units:
+        - id: R136
+          verdict: Partial
+          reason: >-
+            Static only: it reads .github/workflows/checks.yml and runs nothing. That GitHub runs
+            the jobs as written, enforces the permissions they declare, and that a tag push
+            really attaches the copy is proven only by a real tag push. The lines that pin the
+            copy are matched in order, whitespace and comments ignored, not as control flow, so a
+            line made unreachable by an earlier exit is not seen.
+          evidence: >-
+            check-release-workflow.py 1.0 (B142), 21 self-test cases over exit codes 0 1 2.
+            `attach-pinned` - release-prep refuses a tag naming a commit other than GITHUB_SHA and
+            runs check-ci-template.py on the pinned copy with a note refused; release-draft refuses
+            a copy whose PRODUCTIZER_SHA is not GITHUB_SHA, then `gh release create --draft` and
+            `gh release upload` of the copy; `prep-read-only` - release-prep holds no write scope;
+            `draft-needs-prep` and `handover` - the copy reaches release-draft only as an artifact
+            a read-only job it needs uploaded. Fixtures attach-no-upload.yml,
+            attach-prep-no-sha-guard.yml, prep-write.yml, draft-needs-prep.yml,
+            handover-unnamed.yml and handover-unknown-artifact.yml each exit 1; the real workflow
+            holds 8 of 8.
+        - id: R137
+          verdict: Partial
+          reason: >-
+            Static only, over the run: text: a checkout spelled through a variable or an alias,
+            or one an action from another repository makes, is not seen.
+          evidence: >-
+            `write-job-no-checkout` - a job holding any write scope (its own permissions, else the
+            workflow's, else the repository default, read as a write scope) has no actions/checkout
+            step and no run: that clones, fetches, pulls, checks out, switches, adds a worktree or
+            sparse-checks-out, nor `gh repo clone`. Fixtures write-job-checkout.yml,
+            write-job-git-clone.yml and undeclared-permissions.yml exit 1.
+        - id: R138
+          verdict: Partial
+          reason: >-
+            Static only, by check-ci-template.py's lexical rule, loaded from that file: an
+            interpreter a system tool starts, or a command spelled through a variable or an
+            alias, is not seen; git and gh are allowed, and what they could run - hooks, aliases,
+            extensions - is not this rule's.
+          evidence: >-
+            `write-job-no-repo-code` - a write job has no local action, names no interpreter or
+            package runner, sources no file, runs no ./ path, and runs bash or sh on no file at
+            all, $RUNNER_TEMP included. Fixtures write-job-local-action.yml,
+            write-job-runs-python.yml and write-job-runs-staged-script.yml exit 1.
+        - id: R71
+          verdict: Partial
+          reason: >-
+            This repository's own release job, not an unattended run's: the release-draft job
+            holds `contents: write` and runs no code from the repository. Static only, as for
+            R138; the CI build template's write job is ci-template-safe's and build-dispatch's.
+          evidence: >-
+            `write-job-no-checkout` and `write-job-no-repo-code` hold on .github/workflows/checks.yml
+            (8 of 8 assertions); fixtures write-job-runs-python.yml and
+            write-job-runs-staged-script.yml exit 1.
+    limitations:
+      - It reads one file and runs nothing. Whether GitHub enforces the declared permissions, whether a pinned commit is the release its comment names, and whether the jobs ever ran are not measured.
+      - The repository-code rule is lexical and shared with check-ci-template.py, so the two drift together; it is stricter here in one place, refusing bash or sh on any file.
+      - The attach-pinned lines are matched in order with whitespace and comments ignored, not as control flow.
+      - It needs PyYAML, so it is run with `python3`, not `python3 -I`, which hides the user site where PyYAML may live.
 
   # --- a self-test that exists, and a self-test that runs ---------------------
   #
@@ -3204,6 +3448,26 @@ checks:
             checks[secret-scan].severity (effective) was 'block' is now 'advise'`. Over all 36
             commits that ever touched either governance file: 32 exit 0, 2 exit 1 (undecided moves,
             zero claimed weakenings), 2 exit 2 (a checks.yaml genuinely unparseable at that commit).
+        - id: R133
+          verdict: Covered
+          evidence: >-
+            check-governance-weakening.sh 1.1 with governance-weakening.py (B138), 75 self-test
+            cases. `job-token-raised` exits 1 naming the job and the scope - a scope added to an
+            existing job's own permissions block, which was never read before; `new-job-token`
+            exits 1 on a new job whose token holds a scope above the workflow's default at the
+            base, and reports the scope equal to the default as no weakening. Falsified
+            2026-10-13 by the building agent, each rule on its own. Its history sweep: only
+            5117f48 and ba343ed changed verdict, and both were real widenings that had been
+            missed.
+        - id: R134
+          verdict: Covered
+          evidence: >-
+            Steps are keyed by id, else by name and the action used with its ref ignored, never
+            by position: `step-replaced` exits 1 - an unnamed checkout replaced in place by an
+            unnamed download, which a positional key read as one step; `checkout-moved` exits 0
+            and reports the move to a read-only job as a tightening, as at ba343ed; `pin-bumped`
+            exits 0, a bumped @ref being the same step. Falsified 2026-10-13 by the building agent,
+            each rule on its own.
       from: stdout_paths
       pattern: '^(\S+)$'
       must_cover: none
@@ -3211,6 +3475,7 @@ checks:
     limitations:
       - It reports movement between a base and the work tree. A check that was never strict, and a whole governance surface weak from the day it was written, are invisible to it.
       - Four of its own falsifications came back GREEN on the first attempt, and each was reported as a finding about the test rather than quietly re-run.
+      - Since 1.1 a workflow job's own permissions and its steps are compared (R133, R134), but a step's body is not compared when its key is unchanged, nor a job's `if:` or `needs:`.
 
   - id: governance-self-footing
     why: a diff that deletes or switches off the check watching for switched-off checks is the one move that cannot be left to advice
@@ -3366,9 +3631,8 @@ checks:
 # guide-current, and blocking for the same reason: a table that looks
 # authoritative and is not is worse than no table.
 #
-# NO spec_units. No active requirement obliges the index to exist or be current;
-# twelve other declared checks here claim none either. If coverage is wanted, a
-# requirement comes first (next id R50).
+# No requirement obliges the index to exist or be current, so the only claim
+# here is R141, on the path options of the builder it runs (v4.72.0).
 
   - id: requirement-index-current
     why: the requirement index carried the template's three example rows while the spec held 43 active requirements, two of them stating a status the spec denies, and nothing compared the table with the requirements
@@ -3394,6 +3658,24 @@ checks:
       from: stdout_count
       pattern: '([0-9]+) requirement\(s\) indexed'
       min_covered: 1
+      spec_units:
+        - id: R141
+          verdict: Partial
+          reason: >-
+            B140 and B141, ruled "converge on repo root". The declared check runs this script at
+            the repository root, where the working directory IS the root, so its own run proves
+            nothing about a relative option; the cases that drive one from another working
+            directory are the script's self-test, which the workflow runs and no declared check
+            does. Of the eight scripts changed under the ruling, seven are run by a declared check
+            (classification-provenance, jira-unbound, guide-current, requirement-index-current,
+            calibration-recorded, view-publish-refused, installed-copies) and graduate.sh by
+            none. `--root` itself, if relative, is read from the working directory, which the
+            requirement excepts; CLAUDE_TRANSCRIPTS, an environment variable graduate.sh reads, is
+            not root-resolved; and the lifecycle's other scripts were not swept.
+          evidence: >-
+            build-requirement-index.sh 1.2 `--selftest`: `relative-spec-under-root` and
+            `relative-index-under-root` read a relative --spec and --index under the root, never
+            the working directory.
     limitations:
       - It compares the rows with the spec. It does not assert that a cited check is declared, enabled or claims the requirement - check-acceptance-rows.sh asserts that - nor that a requirement's pattern heading agrees with its sentence, which validate-spec.py reads.
       - The rule that picks check ids out of an acceptance row is a COPY of check-acceptance-rows.sh's rule, agreeing with it today on all 26 pairs. Nothing asserts that parity on every run, so if that rule changes the two drift apart silently.
@@ -3750,11 +4032,11 @@ checks:
       - An unreadable spec or store, a repository with no HEAD, two intent ids that slug to one filename and an interrupted run are driven by no case.
 
   - id: view-builder
-    why: the dashboard embeds repository text - backlog prose, commit subjects - and one row that names the capability object, or closes the data block's script element, turns prose into something the page can be read as running
+    why: the dashboard embeds repository text - backlog prose, commit subjects - and one row that names the capability object, or closes the data block's script element, turns prose into something the page can be read as running; and it builds links from the origin remote, a tracked path and jira.site, any of which can carry a quote or a script scheme into an attribute
     when:
       always: true
     severity: block
-    requires: [./plugins/productizer/skills/spec/scripts/build-view.sh, python3]
+    requires: [./plugins/productizer/skills/spec/scripts/build-view.sh, git, python3]
     version_command: [./plugins/productizer/skills/spec/scripts/build-view.sh, --version]
     mode: batch
     command: [./plugins/productizer/skills/spec/scripts/build-view.sh, --selftest]
@@ -3784,8 +4066,19 @@ checks:
             Falsified 2026-10-12 with the HTML encoder made the plain escape again: 7 of 8,
             `embedded-name` red, exit 2. check-view-readonly.sh's `prose-path` exits 0 on a backlog
             row naming the path and goes red against e540b84's builder (5 of 6).
+        - id: R135
+          verdict: Covered
+          evidence: >-
+            build-view.sh 1.1 with templates/view.html (B139), 9 cases. `config-links` builds a
+            plain root and a crafted one - an origin remote, a tracked file name and a jira.site
+            carrying a quote, an event attribute and a non-http scheme - and asserts the plain
+            root links its quoted file name and its Jira key, the links carry 0 event attributes,
+            the crafted root adds 0 non-http hrefs and carries its remote 0 times. Against
+            01dbd56's lines it fails - 3 event attributes, 1 non-http href, the remote seen 7
+            times - and each of the three fixes reverted alone goes red.
     limitations:
       - The builder's own code reaches the capability object; only what embedded text adds is counted, against a page built without that row.
+      - The page script's own escaping and scheme guard for a link it draws is not driven by a browser in the self-test; it was falsified by hand in puppeteer. A GitHub link is drawn only for a remote of the form github.com/<owner>/<name>.
 
 # --- a blocking check proves its alarms are real before it may block --------
 #

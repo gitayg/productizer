@@ -204,7 +204,15 @@
 # and that rule governs the backlog scan too: a corroborated line is reported
 # as a line number and a classification word, never as the item's text.
 # Paths are printed RELATIVE to the root, because an absolute one names
-# somebody's home directory and this output is committed.
+# somebody's home directory and this output is committed. A path option given
+# absolute is printed by its repo-relative spelling when it lies inside the
+# root, and as written only when it lies outside it.
+#
+# PATH OPTIONS. A relative --spec-path, --store or --backlog is joined to the
+# root, never to the working directory; an absolute one is used as given (3.1,
+# B140 - through 3.0 an absolute one was joined to the root too, and each of
+# the three then failed in its own wrong way). A relative --root is read from
+# the working directory, once.
 #
 # ONE LINE PER FILE EXAMINED, on stdout, unindented - the spec, the backlog
 # when it could be read, then every record read. The runner treats a check that
@@ -258,7 +266,7 @@ set -euo pipefail
 
 export LC_ALL=C
 
-VERSION="check-classification-provenance 3.0"
+VERSION="check-classification-provenance 3.1"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LIB="$HERE/classification-record.py"
@@ -293,14 +301,17 @@ usage() {
   printf '                                          [--backlog PATH]\n'
   printf '  --root DIR        the repo work tree to examine. Defaults to the git\n'
   printf '                    top level, never to the working directory.\n'
-  printf '  --spec-path PATH  spec location relative to the root\n'
-  printf '  --store DIR       record store relative to the root\n'
+  printf '  --spec-path PATH  spec location (default .claude/productizer/spec.md)\n'
+  printf '  --store DIR       record store (default .claude/productizer/classifications)\n'
   printf '  --selftest        build throwaway repositories in a temporary directory\n'
   printf '                    and drive every exit code this check can return.\n'
-  printf '  --backlog PATH    the file corroborating that classification happened,\n'
-  printf '                    relative to the root. An empty store is a FINDING when\n'
+  printf '  --backlog PATH    the file corroborating that classification happened\n'
+  printf '                    (default .claude/productizer/backlog.md). An empty store is a FINDING when\n'
   printf '                    this file records a classification and UNMEASURED when\n'
   printf '                    it does not - it is never a pass either way.\n'
+  printf '  A relative --spec-path, --store or --backlog is joined to the root, NOT to\n'
+  printf '  the working directory. An absolute one is used as given. --root itself, if\n'
+  printf '  relative, is read from the working directory.\n'
 }
 
 die_unmeasured() { printf 'check-classification-provenance: %s\n' "$1" >&2; exit 2; }
@@ -400,11 +411,14 @@ FIXTURE_BACKLOG
   # The exit code is captured into a variable on the SAME LINE as the command.
   # A command substitution in an argument list resets $?, so reading the status
   # inside the call below would report the status of the call.
-  record_case() { # <case> <expected> <observed> <what the case is>
+  # An optional fifth argument of `no` marks a case whose code matched and
+  # whose asserted line did not appear: NOT HELD, with the code it really
+  # exited with still counted as reached.
+  record_case() { # <case> <expected> <observed> <what the case is> [line held]
     SELF_CASES=$((SELF_CASES + 1))
     CODES="$CODES$3
 "
-    if [ "$3" = "$2" ]; then
+    if [ "$3" = "$2" ] && [ "${5:-yes}" = "yes" ]; then
       SELF_UPHELD=$((SELF_UPHELD + 1)); verdict="held"
     else
       verdict="NOT HELD"
@@ -497,6 +511,66 @@ BREAK_THE_COMMIT
   bash "$0" --not-a-real-option > "$SELF_TMP/badopt.out" 2> "$SELF_TMP/badopt.err" || got=$?
   record_case unknown-option 2 "$got" "bad usage is refused, never answered"
 
+  # B140: PATH OPTIONS. A relative one is joined to the root and an absolute
+  # one is used as given. Each case below also asserts one line of output, so
+  # it cannot go green for a reason other than the path it names. Through 3.0
+  # every one of the four absolute cases exited with the wrong code.
+  #
+  # record_says <case> <expected> <observed> <file> <exact line> <what>
+  record_says() {
+    if grep -qxF -- "$5" "$4"; then
+      record_case "$1" "$2" "$3" "$6" yes
+    else
+      record_case "$1" "$2" "$3" "$6" no
+      printf '        and this line never appeared: %s\n' "$5"
+    fi
+  }
+
+  got=0
+  bash "$0" --root "$BASE" --store "$BASE/.claude/productizer/classifications" \
+    > "$SELF_TMP/absstore.out" 2> "$SELF_TMP/absstore.err" || got=$?
+  record_says absolute-store 0 "$got" "$SELF_TMP/absstore.out" \
+    ".claude/productizer/classifications/1.md" \
+    "an absolute --store inside the root is read, and printed repo-relative"
+
+  got=0
+  bash "$0" --root "$BASE" --spec-path "$BASE/.claude/productizer/spec.md" \
+    > "$SELF_TMP/absspec.out" 2> "$SELF_TMP/absspec.err" || got=$?
+  record_says absolute-spec-path 0 "$got" "$SELF_TMP/absspec.out" \
+    ".claude/productizer/spec.md" \
+    "an absolute --spec-path inside the root is read, and printed repo-relative"
+
+  V="$(variant absbacklog)"
+  rm -rf "$V/.claude/productizer/classifications"
+  got=0
+  bash "$0" --root "$V" --backlog "$V/.claude/productizer/backlog.md" \
+    > "$SELF_TMP/absbacklog.out" 2> "$SELF_TMP/absbacklog.err" || got=$?
+  record_says absolute-backlog 1 "$got" "$SELF_TMP/absbacklog.out" \
+    "classifications corroborated in .claude/productizer/backlog.md: 1" \
+    "an absolute --backlog is read, so its corroborated line still finds the missing record"
+
+  mkdir "$SELF_TMP/outside-store"
+  cp "$BASE/.claude/productizer/classifications/1.md" "$SELF_TMP/outside-store/1.md"
+  got=0
+  bash "$0" --root "$BASE" --store "$SELF_TMP/outside-store" \
+    > "$SELF_TMP/outstore.out" 2> "$SELF_TMP/outstore.err" || got=$?
+  record_says absolute-store-outside 0 "$got" "$SELF_TMP/outstore.out" \
+    "$SELF_TMP/outside-store/1.md" \
+    "an absolute --store outside the root is read there, and printed as written"
+
+  # The relative half: joined to the root even when the working directory
+  # holds a directory of the same name - here an EMPTY one, which read by
+  # mistake would make the store look empty and exit 1.
+  V="$(variant relstore)"
+  mv "$V/.claude/productizer/classifications" "$V/alt-store"
+  mkdir "$SELF_TMP/decoy-cwd" "$SELF_TMP/decoy-cwd/alt-store"
+  got=0
+  ( cd "$SELF_TMP/decoy-cwd" && bash "$HERE/${0##*/}" --root "$V" --store alt-store ) \
+    > "$SELF_TMP/relstore.out" 2> "$SELF_TMP/relstore.err" || got=$?
+  record_says relative-store-under-root 0 "$got" "$SELF_TMP/relstore.out" \
+    "alt-store/1.md" \
+    "a relative --store is joined to the root, never the working directory"
+
   if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
   printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
@@ -509,7 +583,7 @@ BREAK_THE_COMMIT
     grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '    NOT ASSERTED: assertion 8, which reads the change log for cited intents. The fixture spec deliberately carries no change log, so no case above exercises it; and the corpus drives the exit code, never the wording of a finding.\n'
+  printf '    NOT ASSERTED: assertion 8, which reads the change log for cited intents. The fixture spec deliberately carries no change log, so no case above exercises it. The corpus drives the exit code; only the five path-option cases also assert a line of output, and no case asserts the wording of a finding.\n'
   [ "$SELF_CASES" = "$SELF_UPHELD" ] || exit 1
   if [ -n "$MISSING" ]; then
     printf 'check-classification-provenance: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
@@ -539,9 +613,45 @@ fi
 [ "$SHALLOW" != "true" ] ||
   die_unmeasured "this is a SHALLOW clone. The commit every record cites is unreachable here, so whether any classification was made against the whole spec is UNKNOWN - not yes, and not no. Fetch full history (fetch-depth: 0) and re-run."
 
-SPEC="$ROOT/$SPEC_REL"
-STORE="$ROOT/$STORE_REL"
-BACKLOG="$ROOT/$BACKLOG_REL"
+# A RELATIVE PATH OPTION IS JOINED TO THE ROOT; AN ABSOLUTE ONE IS USED AS
+# GIVEN. Through 3.0 all three were joined to the root unconditionally, so an
+# absolute path became `<root>/<root>/...`, a path that does not exist, and
+# each option failed differently - measured on this repository with its own
+# files named absolutely: `--store` exited 1 claiming the repo "holds
+# provenance for none" of its classifications, a false finding; `--spec-path`
+# exited 2 with "cannot read", a refusal whose reason was false; `--backlog`
+# exited 0 with assertion 7 at 0 upheld, 0 failed, 0 not asserted - a pass
+# that had read no backlog. The convention is record-classification.sh's 1.1.
+#
+# The name printed for an absolute path inside the root is its repo-relative
+# spelling, so the coverage lines and findings read the same however the path
+# was given, and no home directory reaches a committed result. One outside the
+# root is printed as the caller wrote it: there is no shorter honest spelling.
+ROOT_PHYS="$(cd "$ROOT" && pwd -P)"
+under_root() { # <path> -> the absolute path to read
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s' "$ROOT/$1" ;;
+  esac
+}
+shown() { # <path as given> -> the name to print
+  local p="$1" d
+  case "$p" in
+    /*) ;;
+    *) printf '%s' "$p"; return 0 ;;
+  esac
+  d="$(dirname "$p")"
+  if [ -d "$d" ] && d="$(cd "$d" && pwd -P)"; then
+    p="$d/$(basename "$p")"
+  fi
+  case "$p" in
+    "$ROOT_PHYS"/*) printf '%s' "${p#"$ROOT_PHYS"/}" ;;
+    *)              printf '%s' "$1" ;;
+  esac
+}
+SPEC="$(under_root "$SPEC_REL")";       SPEC_REL="$(shown "$SPEC_REL")"
+STORE="$(under_root "$STORE_REL")";     STORE_REL="$(shown "$STORE_REL")"
+BACKLOG="$(under_root "$BACKLOG_REL")"; BACKLOG_REL="$(shown "$BACKLOG_REL")"
 
 [ -f "$SPEC" ] && [ -r "$SPEC" ] ||
   die_unmeasured "cannot read $SPEC_REL under the given root. Without the spec there is no active set to compare a record against, and a check that cannot compare must not report a pass."

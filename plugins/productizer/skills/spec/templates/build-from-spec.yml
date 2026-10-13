@@ -27,6 +27,9 @@
 #             the repository's own code (pr-spec-comment.sh runs its solver
 #             probe) - here, with no write token and before the agent runs, and
 #             hands it on as a separate artifact the agent's job never fetches.
+#             Beside the body goes protected.txt: the files this repository's
+#             .claude/productizer/checks.yaml runs, read here with PyYAML,
+#             so the write job never parses YAML or installs a package.
 #   generate  contents: read. The agent edits the working tree, under the
 #             committed rules, with Bash ALWAYS denied (no shell in CI);
 #             the `permissions` input can only narrow further. Before the agent
@@ -41,9 +44,10 @@
 #             code from the repository it writes to: it runs git with hooks
 #             pinned off, gh, and the pinned productizer scripts, copied out of
 #             the workspace after their commit is verified. The body arrives as
-#             text. It asks stage-advance.sh whether the patch is a change this
-#             stage may make, commits it, asks again of that commit, then pushes
-#             a NEW branch and opens a DRAFT pull request.
+#             text, and so does the protected list. It asks stage-advance.sh
+#             whether the patch is a change this stage may make - never a file
+#             a declared check runs - commits it, asks again of that commit,
+#             then pushes a NEW branch and opens a DRAFT pull request.
 #
 # Every `uses:` is pinned to a full commit id, the tag beside it in a comment.
 # No `${{ }}` expression is interpolated into a `run:` script; every value
@@ -142,6 +146,21 @@ jobs:
           path: .productizer-tools
           persist-credentials: false
 
+      # PyYAML, for the one reading of .claude/productizer/checks.yaml this run
+      # makes: prepare lists the files its checks run, so deliver can refuse a
+      # change to one without reading YAML or installing anything itself. It is
+      # installed HERE, in the job with no write token, before the agent runs
+      # ("read it before the AI", maintainer ruling 2026-10-13).
+      - name: Python for reading checks.yaml
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: PyYAML, in the read-only job only
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+
       # Exit 4 (the spec is unchanged) and 5 (build mode, no committed plan)
       # fail the run HERE, before any model is called. The log says which.
       - name: Prepare the run - no model is called here
@@ -168,8 +187,10 @@ jobs:
           retention-days: 7
 
       # The pull request body, rendered above from HEAD and the spec delta in
-      # this read-only job. A SEPARATE artifact: the agent's job never downloads
-      # it, so nothing the agent does can reach the text deliver posts.
+      # this read-only job, and beside it protected.txt and protected-head: the
+      # files checks.yaml at HEAD runs, and the HEAD they were read at. A
+      # SEPARATE artifact: the agent's job never downloads it, so nothing the
+      # agent does can reach the text deliver posts or the list it protects.
       - name: Hand the pull request body to the deliver job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -339,7 +360,7 @@ jobs:
           name: productizer-patch
           path: ${{ runner.temp }}/productizer-patch
 
-      - name: Fetch the pull request body prepare rendered
+      - name: Fetch the pull request body and the protected list prepare wrote
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: productizer-body
@@ -368,6 +389,9 @@ jobs:
 
       # The body is TEXT: deliver refuses one rendered for another HEAD or over
       # its size cap, and hands it to gh as --body-file; nothing evaluates it.
+      # The protected list is DATA too: deliver refuses one read at another
+      # HEAD, and stage-advance.sh refuses a change to any file it names. This
+      # job reads no YAML and installs no package for it.
       # stage-advance.sh decides first on the patch, then again on the commit
       # git made from it; a refusal at either is exit 6 and nothing is
       # pushed. Then a NEW branch productizer/<mode>-<issue>-<run id>, a
@@ -387,6 +411,6 @@ jobs:
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           set -euo pipefail
-          args=(deliver . --mode "$MODE" --issue "$ISSUE" --patch "$RUNNER_TEMP/productizer-patch/productizer.patch" --body "$RUNNER_TEMP/productizer-body" --run-id "$RUN_ID" --default-branch "$DEFAULT_BRANCH")
+          args=(deliver . --mode "$MODE" --issue "$ISSUE" --patch "$RUNNER_TEMP/productizer-patch/productizer.patch" --body "$RUNNER_TEMP/productizer-body" --protected "$RUNNER_TEMP/productizer-body/protected.txt" --run-id "$RUN_ID" --default-branch "$DEFAULT_BRANCH")
           if [ -n "$SPEC_BASE" ]; then args+=(--spec-base "$SPEC_BASE"); fi
           bash "$RUNNER_TEMP/productizer-tools/build-dispatch.sh" "${args[@]}"

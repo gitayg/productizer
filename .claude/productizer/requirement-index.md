@@ -96,7 +96,7 @@ marker, because a table left there would be one nothing writes or checks.
 | R68 | event | active | `build-dispatch` |
 | R69 | event | active | `ci-template-safe` |
 | R70 | unwanted | active | `build-dispatch` |
-| R71 | state | active | `ci-template-safe` |
+| R71 | state | active | `ci-template-safe`, `release-workflow-safe` |
 | R72 | unwanted | active | `stage-advance-guard` |
 | R73 | ubiquitous | active | `stage-advance-guard` |
 | R74 | ubiquitous | active | `stage-advance-guard` |
@@ -151,4 +151,20 @@ marker, because a table left there would be one nothing writes or checks.
 | R123 | unwanted | active | `untrusted-execution` |
 | R124 | unwanted | active | `ci-template-safe` |
 | R125 | event | active | `stage-advance-guard` |
+| R126 | unwanted | active | `stage-advance-guard` |
+| R127 | unwanted | active | `stage-advance-guard` |
+| R128 | event | active | `stage-advance-guard`, `build-dispatch` |
+| R129 | ubiquitous | active | `ci-template-safe` |
+| R130 | ubiquitous | active | `ci-template-safe` |
+| R131 | unwanted | active | `build-dispatch` |
+| R132 | event | active | `stage-advance-guard` |
+| R133 | event | active | `governance-weakening` |
+| R134 | event | active | `governance-weakening` |
+| R135 | event | active | `view-builder` |
+| R136 | event | active | `release-workflow-safe` |
+| R137 | state | active | `release-workflow-safe` |
+| R138 | state | active | `release-workflow-safe` |
+| R139 | event | active | `import-marking` |
+| R140 | event | active | `import-marking` |
+| R141 | event | active | `requirement-index-current` |
 <!-- productizer:requirement-index:end -->

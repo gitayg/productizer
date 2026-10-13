@@ -394,6 +394,7 @@ jobs:
           python3 evals/solver-probe.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-ci-template.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
+          python3 plugins/productizer/skills/spec/scripts/check-release-workflow.py --selftest
           bash plugins/productizer/skills/help/scripts/list-commands.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-dispatch.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest
@@ -430,6 +431,7 @@ jobs:
           bash plugins/productizer/skills/spec/scripts/check-view-rendered.sh --selftest
           bash plugins/productizer/skills/spec/scripts/check-waiver-rendering.sh --selftest
           bash plugins/productizer/skills/spec/scripts/classify-change-risk.sh --selftest
+          bash plugins/productizer/skills/spec/scripts/graduate.sh --selftest
           bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh --selftest
           bash plugins/productizer/skills/spec/scripts/measure-check-underfire.sh --selftest
           bash plugins/productizer/skills/spec/scripts/pr-spec-comment.sh --selftest

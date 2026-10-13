@@ -1330,11 +1330,11 @@ function nodes(){
     // id="stage-N" so a card elsewhere on the page can name a stage. The ring
     // is drawn from S, so the id exists for every stage S has, always.
     h += '<button class="rnode '+s.actor+(s.live?" live":"")+'" data-i="'+i+'" '
-      +  'id="stage-'+s.n+'" '
+      +  'id="stage-'+esc(s.n)+'" '
       +  'style="left:'+(p.x/540*100)+'%;top:'+(p.y/540*100)+'%">'
-      +  '<span class="rsn">'+s.n+'</span>'
+      +  '<span class="rsn">'+esc(s.n)+'</span>'
       +  '<span class="rn'+(s.items?"":" zero")+'" title="cards this stage is holding, the same cards the Board draws">'+s.items+'</span>'
-      +  '<span class="rt">'+s.name+'</span>'
+      +  '<span class="rt">'+esc(s.name)+'</span>'
       +  '<span class="ract">'+(s.actor==="human"?"you":"agent")+'</span></button>';
   }
   document.getElementById("nodes").innerHTML=h;
@@ -1426,7 +1426,7 @@ function pick(i,m){
     + (s.gatedBy ? '<span class="gatedby">'+esc(s.gatedBy)+'</span>' : '');
   var sel=document.getElementById("dmod");
   sel.innerHTML=s.mods.map(function(md,k){
-    return '<option value="'+k+'"'+(k===CURM?" selected":"")+'>'+esc(md.id+" &middot; "+md.name)+'</option>';
+    return '<option value="'+k+'"'+(k===CURM?" selected":"")+'>'+esc(md.id)+" &middot; "+esc(md.name)+'</option>';
   }).join("");
   sel.style.display = s.mods.length>1 ? "" : "none";
   document.getElementById("dcmp").innerHTML =
@@ -1439,10 +1439,14 @@ function pick(i,m){
 function paintMod(md){
   document.getElementById("dwhat").textContent=md.what;
   document.getElementById("dfiles").innerHTML=md.files.map(function(f){
-    var nm=f[3]?'<a class="fn lk" href="'+f[3]+'" target="_blank" rel="noopener">'+esc(f[0])
+    // f[3] is a GitHub URL built from the origin remote, which is local
+    // configuration: escaped for the attribute, and only ever an https link to
+    // github.com, so no other scheme can reach the href (B139).
+    var url=/^https:\/\/github\.com\//.test(f[3]||"")?f[3]:"";
+    var nm=url?'<a class="fn lk" href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(f[0])
       +'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg></a>'
       :'<span class="fn">'+esc(f[0])+'</span>';
-    var cp=f[3]?{l:"copy path",t:f[0]}
+    var cp=url?{l:"copy path",t:f[0]}
       :{l:"copy prompt",t:"Open "+f[0]+" in "+PROD+" and walk me through what it does."};
     return '<div class="file">'+nm+'<span class="hint" style="flex:0 0 auto">'+esc(f[1])+'</span>'
       +'<span class="st '+(CH[f[2]]||"")+'">'+esc(f[2])+'</span>'

@@ -44,6 +44,27 @@ WHAT IT ASSERTS, each a separate finding:
                  a variable or an alias is not seen; git and gh are allowed, and
                  what they run - hooks, filters, extensions - is the scripts'
                  hardening, not this rule's
+  write-job-no-install
+                 a job holding any write permission installs nothing and reads
+                 no YAML for itself: no `uses:` of actions/setup-python, and no
+                 run: names a package installer (pip, pip3, pipx, uv, poetry,
+                 conda, mamba, micromamba, apt, apt-get, aptitude, dnf, yum,
+                 apk, brew, easy_install, gem, cargo) or PyYAML (pyyaml,
+                 python3-yaml, ruamel). What the write job needs from the
+                 repository's checks.yaml, prepare reads before the agent and
+                 hands over as data ("read it before the AI", maintainer ruling
+                 2026-10-13, B136). LIMITS: the same as write-job-no-repo-code
+                 - the run: text only, so a staged script that installs is not
+                 seen
+  protected-list every write-job run: that names build-dispatch.sh and the
+                 word deliver - the subcommand after the script, or in an argv
+                 array built first - passes `--protected` with a value, the list of files
+                 checks.yaml runs that prepare wrote; and the agent's job
+                 downloads no artifact named productizer-body - the body and
+                 the list travel there - nor any artifact by pattern or with
+                 no name, which would fetch every artifact. LIMITS: it does not
+                 trace the --protected path to the artifact prepare uploaded;
+                 deliver refuses a list read at another HEAD at run time
   pinned         every `uses:` is pinned to a full 40-character commit id
   run-injection  no `${{` expression of any context inside a run: - not only
                  github.event and inputs, but steps, needs, env, matrix,
@@ -107,7 +128,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-ci-template 1.0"
+VERSION = "check-ci-template 1.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(HERE, "..", "templates", "build-from-spec.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "ci-template")
@@ -152,6 +173,19 @@ VERIFY_GUARD = ('got="$(%s rev-parse HEAD)"' % VERIFY_GIT,
                 'cp -R "$TOOLS" "$RUNNER_TEMP/productizer-tools"',
                 "rm -rf .productizer-tools")
 STAGED_TOOLS = "$RUNNER_TEMP/productizer-tools"
+INSTALL_WORDS = ("pip", "pip3", "pipx", "uv", "poetry", "conda", "mamba", "micromamba",
+                 "apt", "apt-get", "aptitude", "dnf", "yum", "apk", "brew", "easy_install",
+                 "gem", "cargo")
+INSTALL_RX = re.compile(r"(?<![\w./$-])(%s)(?![\w.-])" % "|".join(re.escape(w) for w in INSTALL_WORDS))
+YAML_LIB_RX = re.compile(r"(?i)pyyaml|python3?-yaml|ruamel")
+# A run: that names build-dispatch.sh and the word deliver calls deliver,
+# whether the subcommand follows the script name or sits in an argv array
+# built first (`args=(deliver . ...)`, then `"${args[@]}"`), as the template's
+# own step does.
+DISPATCH_RX = re.compile(r"build-dispatch\.sh")
+DELIVER_WORD_RX = re.compile(r"(?<![\w-])deliver(?![\w-])")
+PROTECTED_ARG_RX = re.compile(r"(?<![\w-])--protected\s+\S")
+BODY_ARTIFACT = "productizer-body"
 SWALLOW = (("|| true", re.compile(r"\|\|\s*true\b")),
            ("2>/dev/null", re.compile(r"2>\s*/dev/null")))
 
@@ -475,6 +509,46 @@ def check(path):
                 if not target.startswith(TEMP_PREFIXES):
                     find("write-job-no-repo-code", where, "a job holding a write token runs "
                          "a shell script that is not staged under $RUNNER_TEMP: %s" % target)
+    for jname, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        steps = [s for s in (job.get("steps") or []) if isinstance(s, dict)]
+        if write_perms(job.get("permissions")):
+            for i, s in enumerate(steps):
+                where = "jobs.%s.steps[%d]" % (jname, i)
+                if str(s.get("uses", "")).split("@")[0] == "actions/setup-python":
+                    find("write-job-no-install", where, "a job holding a write token sets up "
+                         "Python; it must install nothing and read no YAML - prepare reads what "
+                         "it needs before the agent and hands it over as data")
+                if "run" not in s:
+                    continue
+                run = str(s["run"])
+                m = INSTALL_RX.search(run) or YAML_LIB_RX.search(run)
+                if m:
+                    find("write-job-no-install", where, "a job holding a write token installs "
+                         "a package or reaches for a YAML library (%s); it must install nothing "
+                         "and read no YAML" % m.group(0))
+                flat = " ".join(guard_lines(run))
+                if DISPATCH_RX.search(flat) and DELIVER_WORD_RX.search(flat) \
+                        and not PROTECTED_ARG_RX.search(flat):
+                    find("protected-list", where, "calls build-dispatch.sh deliver without "
+                         "--protected: the list of files checks.yaml runs, which prepare "
+                         "wrote, must reach both stage-advance.sh asks")
+        if any(is_agent(s) for s in steps):
+            for i, s in enumerate(steps):
+                if str(s.get("uses", "")).split("@")[0] != "actions/download-artifact":
+                    continue
+                w = s.get("with") or {}
+                name = str(w.get("name", "")).strip()
+                if not name or "pattern" in w:
+                    find("protected-list", "jobs.%s.steps[%d]" % (jname, i), "the agent job "
+                         "downloads artifacts by pattern or with no name, which fetches every "
+                         "artifact, %s included" % BODY_ARTIFACT)
+                elif name == BODY_ARTIFACT:
+                    find("protected-list", "jobs.%s.steps[%d]" % (jname, i), "the agent job "
+                         "downloads %s, which carries the pull request body and the protected "
+                         "list; it must reach deliver one way, never through the agent"
+                         % BODY_ARTIFACT)
     if not agent_jobs:
         die("no job in %s runs %s, so the agent job's assertions could not run. "
             "Unmeasured, not clean." % (path, AGENT_ACTION))
@@ -528,7 +602,8 @@ def check(path):
 
 
 ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "deny-bash",
-              "post-agent-env", "write-job-no-repo-code", "pinned", "run-injection", "swallow", "no-bypass",
+              "post-agent-env", "write-job-no-repo-code", "write-job-no-install",
+              "protected-list", "pinned", "run-injection", "swallow", "no-bypass",
               "perms-input", "tools-pin", "guards")
 
 
@@ -630,7 +705,10 @@ def selftest():
           "claude_args heredoc agent-args appends (build-dispatch.sh self-tests "
           "agent-args itself); an expression interpolated into a script that is not a "
           "run: - an actions/github-script `script:`, say - which run-injection does not "
-          "read.")
+          "read; that the --protected path deliver is given is the protected.txt prepare's "
+          "artifact carries (protected-list asserts the flag is passed, and deliver "
+          "refuses a list read at another HEAD at run time); that a staged script "
+          "installs nothing (write-job-no-install reads the run: text).")
     if got != doc:
         print("FAIL: reached and documented exit codes differ")
         return 1

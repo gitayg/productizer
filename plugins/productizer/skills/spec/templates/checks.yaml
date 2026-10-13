@@ -886,7 +886,7 @@ checks:
     exit_codes:
       pass: [0]
       fail: [1]        # a requirement attributed to an import with no marking
-      refused: [2]     # an unparseable spec, or a git history that could not be walked, or a backlog naming Stage 0c whose history could not be read
+      refused: [2]     # an unparseable spec; a git history that could not be walked, whether or not anything else names an import; or a backlog gap row naming Stage 0c whose history could not be read
     coverage:
       # Every requirement PARSED. Deliberately NOT the attribution count, which
       # is legitimately 0 on a repo that was never imported and would make every

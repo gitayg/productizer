@@ -36,3 +36,8 @@ guard-claude-args-wiring.yml	1	the agent's claude_args must read ${{ steps.args.
 guard-stash-missing.yml	1	no stash-git (between the args step and the agent) step
 guard-capture-from-checkout.yml	1	the capture (after the agent) step is missing the line: bash --noprofile --norc "$RUNNER_TEMP/build-dispatch.sh" capture
 guard-tools-verify.yml	1	the tools-verification step is missing the line: dirty="$(git
+deliver-no-protected.yml	1	calls build-dispatch.sh deliver without --protected
+write-job-pip-install.yml	1	a job holding a write token installs a package or reaches for a YAML library (pip)
+write-job-setup-python.yml	1	a job holding a write token sets up Python
+agent-downloads-body.yml	1	the agent job downloads productizer-body
+deliver-args-no-protected.yml	1	calls build-dispatch.sh deliver without --protected

@@ -348,9 +348,9 @@ reviewer that writes through Bash or an MCP tool passes.
 `templates/build-from-spec.yml` runs a stage unattended in an adopter's
 repository. It has **never run on GitHub**: this repository is public, holds no
 model secrets, and a run costs model spend. What is measured is its static
-properties (`check-ci-template.py`, 14 of 14) and both ends of
+properties (`check-ci-template.py`, 16 of 16) and both ends of
 `build-dispatch.sh` against local repositories, with `gh` stubbed and origin a
-local bare repository (94 of 94). Not measured: the action itself, a real
+local bare repository (105 of 105). Not measured: the action itself, a real
 `gh`, that a draft stays a draft, and that GitHub runs the template's calls of
 the script as written (check-ci-template.py asserts the call text since B118,
 not its execution). A pull request it opens with the workflow's
@@ -371,8 +371,11 @@ run). Since 1.3, under `--unattended` - which the CI template's `deliver` passes
 on both of its calls - any change to the checks result is refused, because
 nothing in an unattended pipeline writes it (maintainer ruling 2026-10-12,
 B126). Since 1.4 a homoglyph from another script is read rather than folded, and
-under `--unattended` an allowlist bounds the list (items 19 and 20). Attended,
-nothing shows the list is complete (B125).
+under `--unattended` an allowlist bounds the list (items 19 and 20). Since 1.6,
+under `--unattended`, a classification record or stage snapshot ADDED is refused
+(B137), and so is a change to any file a check declared in `checks.yaml` at the
+base runs (B136), though not a file such a script calls that `checks.yaml` does
+not name (item 20). Attended, nothing shows the list is complete (B125).
 
 The same default-deny refuses a design move that writes
 `.claude/productizer/` files such as `requirement-index.md`, which this
@@ -463,10 +466,16 @@ Under `--unattended` 1.4 allows only ASCII paths with no component beginning
 with a dot, bar the backlog, the plan and the spec on their exact paths, so
 most tools' configuration is refused without being named. What the allowlist
 still admits, and the named list must catch, is an ASCII, dot-free file:
-`Jenkinsfile`, `azure-pipelines.yml`, `GEMINI.md`, a `package.json` script, or
-a script `checks.yaml` runs - an unattended build may edit that last one and
-neuter the check that runs it. None of those is on the list. Attended runs
-apply the list alone. The plugin manifests under `.claude-plugin/` declare hooks
+`Jenkinsfile`, `azure-pipelines.yml`, `GEMINI.md` or a `package.json` script.
+None of those is on the list. Since 1.6 (v4.72.0, B136) a file a check declared
+in `checks.yaml` at the base runs - its program, `version_command`, coverage
+commands, an interpreter's first operand and every `requires` entry - is
+refused under `--unattended`; what is still admitted is the TRANSITIVE file: a
+file a check script calls or sources that `checks.yaml` does not name itself,
+such as a `.py` beside the `.sh` it runs, which an unattended build may edit to
+neuter the check that runs it. A `run-checks.sh --config` other than the
+default is not read, and PyYAML, installed in `prepare` to read the set, is
+pinned by version, not by hash. Attended runs apply the list alone. The plugin manifests under `.claude-plugin/` declare hooks
 and MCP servers and are refused unattended by their dot; attended they are not
 on the list, because adding them would refuse 22 of this repository's own
 version bumps, and that needs a ruling.
@@ -497,8 +506,9 @@ the release's commit. Releases before v4.70.0 carry no such asset; an adopter
 of one still pins by hand. Both jobs run only on a version-tag push, so until
 the v4.70.0 tag is pushed neither has run: whether `pull-requests: read` is
 enough for `build-release-notes.sh` to read the merged pull requests is
-unmeasured, and no declared check reads the release jobs at all, so the two
-requirements drafted for them were not added (backlog).
+unmeasured. Since v4.72.0 the `release-workflow-safe` check reads the release
+jobs statically (B142), and the requirements drafted for them are added as
+R136 to R138; see item 31 for what that check does not see.
 
 ### 24 · `check-acceptance-rows.sh` resolves a cited path on disk, not in git
 
@@ -553,3 +563,35 @@ new content is what `build-requirement-index.sh` writes; the
 index passes the guard and fails the checks. Under `--unattended` the index
 stays refused.
 
+## Added in v4.72.0
+
+### 29 · The view draws a GitHub link only for `github.com/<owner>/<name>`
+
+`build-view.sh` 1.1 builds a file or commit link from the `origin` remote only
+when it is `https://github.com/<owner>/<name>` or `git@github.com:<owner>/<name>`
+and both names are GitHub's own characters (letters, digits, `.`, `-`, `_`);
+any other remote - another host, a mirror, a quote in the name - gets no link
+rather than an escaped one (B139). A file path inside such a link is not
+percent-encoded, so a tracked path holding `#`, `?` or `%` links to the wrong
+place (backlog).
+
+### 30 · `CLAUDE_TRANSCRIPTS` is not resolved under the root
+
+Under the maintainer's ruling "converge on repo root" (B140, B141), a relative
+path option of the eight scripts it covers is read under the repository root
+rather than the working directory, and `--root` itself is read from the working
+directory once. `graduate.sh` also reads a default transcripts directory from
+the `CLAUDE_TRANSCRIPTS` environment variable; that is not a path option and is
+used as it reads, so a relative value there is still relative to the working
+directory. The lifecycle's other scripts were not swept for the same defect.
+
+### 31 · `check-release-workflow.py` is static
+
+It reads `.github/workflows/checks.yml` and runs nothing (B142). That GitHub
+enforces the permissions the file declares, that a pinned commit is the release
+its comment names, and that a tag push really attaches the pinned copy are
+proven only by a real tag push. Its repository-code rule is the lexical one
+`check-ci-template.py` uses, so a command spelled through a variable or an
+alias, or code a system tool or another repository's action runs, is not seen;
+the lines that pin the copy are matched in order, not as control flow. It needs
+PyYAML, so it runs with `python3`, not `python3 -I`, which hides the user site.

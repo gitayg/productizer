@@ -1,0 +1,18 @@
+# cases.tsv - three TAB-separated fields: fixture file, expected exit, a sentence the
+# output must contain. Each other fixture is good.yml with ONE change, named in its
+# first line, so a finding here can only come from that change.
+good.yml	0	8 of 8 assertions held
+write-job-checkout.yml	1	write-job-no-checkout jobs.release-draft.steps[0]: a job holding write on contents checks out the repository with actions/checkout
+write-job-git-clone.yml	1	write-job-no-checkout jobs.release-draft.steps[1]: a job holding write on contents runs git clone in a run:
+undeclared-permissions.yml	1	write-job-no-checkout jobs.checks.steps[0]: a job holding write on the repository's default token (no permissions declared) checks out
+write-job-runs-python.yml	1	write-job-no-repo-code jobs.release-draft.steps[1]: a job holding write on contents names python3 in a run:
+write-job-runs-staged-script.yml	1	runs a shell on "$RUNNER_TEMP/release-prep/check.sh"; nothing a release job holds is code to run
+write-job-local-action.yml	1	runs a local action, which is code from the repository: ./.github/actions/draft
+prep-write.yml	1	prep-read-only jobs.release-prep.permissions: holds write on contents
+draft-needs-prep.yml	1	draft-needs-prep jobs.release-draft.needs: does not list release-prep; found checks
+handover-unnamed.yml	1	handover jobs.release-draft.steps[0]: a job holding write on contents downloads every artifact of the run
+handover-unknown-artifact.yml	1	downloads the artifact 'other', which no read-only job it needs uploads
+attach-no-upload.yml	1	attach-pinned jobs.release-draft: no run: carries, in order, the line: gh release upload "$TAG" "$pinned"
+attach-prep-no-sha-guard.yml	1	attach-pinned jobs.release-prep: no run: carries, in order, the line: if [ "$sha" != "$GITHUB_SHA" ]; then
+unpinned-uses.yml	1	pinned jobs.release-draft.steps[0]: not pinned to a full commit id: actions/download-artifact@v8
+run-injection.yml	1	run-injection jobs.release-draft.steps[1]: an expression is interpolated into the script: ${{ github.ref_name }}

@@ -87,7 +87,13 @@ with write access, so nothing has reached an audience yet: the person publishing
 edits the evidence into prose, runs the checklist above, and presses Publish.
 The job never edits a release that already exists. This is the same split as
 the rest of the stage, with the typing moved into CI rather than into a command
-someone runs by hand. The notes are evidence, not the post.
+someone runs by hand. The notes are evidence, not the post. That split is read
+on the YAML by the blocking `release-workflow-safe` check
+(`check-release-workflow.py`, since v4.72.0, R136-R138): the write job checks
+out nothing and runs no repository code, `release-prep` holds no write scope,
+the copy reaches `release-draft` only as a named artifact a read-only job
+uploaded, and the lines that pin and attach it are present in order. It is
+static: whether GitHub runs the jobs as written is proven only by a tag push.
 
 **Screenshots come from the released build, in this session, with the version in
 the filename.** A screenshot from the previous release is a lie with a picture

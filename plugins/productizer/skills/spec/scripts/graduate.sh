@@ -11,9 +11,14 @@
 #   graduate.sh excerpts --id TAG        the raw messages behind one cluster
 #   graduate.sh apply    --id TAG --decide accept
 #   graduate.sh undo     --id TAG
+#   graduate.sh --selftest               drive every exit code in a throwaway root
 #
 #   --version          print the version and exit 0
 #   --help             print this header and exit 0
+#   --selftest         build a throwaway root under mktemp, drive each exit
+#                      code below and the path rules, and exit 0 if every case
+#                      held, 1 if one did not, 2 if the cases could not be
+#                      built. `--self-test` is an alias.
 #   --root DIR         repo the guidance is promoted into. Default: the git
 #                      work tree holding the working directory - NOT the
 #                      working directory itself. Defaulting to the CWD has
@@ -27,6 +32,14 @@
 #                      Default $CLAUDE_TRANSCRIPTS, else ~/.claude/projects
 #   --source LIST      comma list of transcripts,pr. Default transcripts
 #   --refresh-context  re-run detect-context.sh instead of using the cached probe
+#
+#   A relative --work or --transcripts is read under the ROOT, NOT the working
+#   directory, and a relative --work is created there; an absolute one is used
+#   as given. A relative --root is read from the working directory, once. The
+#   transcripts default ($CLAUDE_TRANSCRIPTS, else ~/.claude/projects) is not a
+#   path option and is used as it reads. Through 1.1 a relative --work was
+#   created under the working directory and a relative --transcripts read from
+#   it (B141, ruled "converge on repo root").
 #
 # THE HUMAN DECIDES. There is no auto-apply flag, defaulted on or otherwise.
 # `present` writes nothing outside --work. `apply` refuses without an explicit
@@ -96,7 +109,7 @@ set -euo pipefail
 export TZ=UTC
 export LC_ALL=C
 
-VERSION="graduate 1.1"
+VERSION="graduate 1.2"
 
 THRESHOLD_CONVERSATIONS=3
 RUNG_SCORE_SKILL=12
@@ -125,9 +138,149 @@ case "$1" in
   lexicon|harvest|present|excerpts|apply|undo) CMD="$1"; shift ;;
   -h|--help) show_help; exit 0 ;;
   --version) printf '%s\n' "$VERSION"; exit 0 ;;
+  --selftest|--self-test) CMD="selftest"; shift ;;
   -*) die_usage "unknown option before the subcommand: $1" ;;
   *)  die_usage "unknown subcommand: $1" ;;
 esac
+
+# --------------------------------------------------------------- --selftest
+#
+# R39: every exit code this file documents - 0 2 3 4 5 6 7 8 - is reached by
+# a case below, each driving THIS script as a child in a throwaway root under
+# mktemp, and each asserting a sentence of its output as well as its code. The
+# path rules are cases too: a relative --work and --transcripts are given from
+# a working directory holding a decoy of the same name, and must resolve under
+# the root.
+#
+# NO NETWORK. harvest runs detect-context.sh, which asks gh about the account,
+# only when its cached probe is missing - so every work directory is seeded
+# with a probe first. Nothing is written outside the temporary directory.
+if [ "$CMD" = "selftest" ]; then
+  [ $# -eq 0 ] || die_usage "--selftest takes no further arguments; got: $1"
+  command -v python3 >/dev/null ||
+    die_usage "python3 is not on PATH, so no case could be driven"
+  SELF_ABS="$HERE/${BASH_SOURCE[0]##*/}"
+  T="$(mktemp -d)" || die_usage "cannot create a temporary directory for the self-test"
+  trap 'rm -rf "$T"' EXIT HUP INT TERM
+  R="$T/root"
+  mkdir -p "$R/tx" "$R/tx-low" "$R/tx-zero" "$R/tx-bad" "$R/w" "$R/w-low" \
+           "$R/w-zero" "$R/w-bad" "$R/w-none" "$T/decoy/tx" "$T/decoy/w" ||
+    die_usage "could not lay out the self-test root"
+  for d in w w-low w-zero w-bad w-none; do
+    printf '{"detect_context":"selftest"}\n' > "$R/$d/context.json"
+  done
+  printf '{"detect_context":"selftest"}\n' > "$T/decoy/w/context.json"
+  # A session is the task, the agent's reply, then the person's correction.
+  session() { # <session id> <correction text>
+    printf '{"type":"user","sessionId":"%s","message":{"content":"write a page"}}\n' "$1"
+    printf '{"type":"assistant","sessionId":"%s","message":{"content":"done"}}\n' "$1"
+    printf '{"type":"user","sessionId":"%s","message":{"content":"%s"}}\n' "$1" "$2"
+  }
+  for i in 1 2 3; do session "s$i" "do not use emoji again" > "$R/tx/s$i.jsonl"; done
+  session s1 "do not use emoji again" > "$R/tx-low/s1.jsonl"
+  session s1 "thank you, that looks right" > "$R/tx-zero/s1.jsonl"
+  printf 'this is not json\n' > "$R/tx-bad/s1.jsonl"
+
+  CASES=0; UPHELD=0; CODES=""
+  # case <name> <want> <sentence> <what> -- <args...>. DRIVE_CWD, when set, is
+  # the working directory the child runs from.
+  DRIVE_CWD=""
+  self_case() {
+    local name="$1" want="$2" says="$3" what="$4" got=0 v="held"
+    shift 5
+    ( cd "${DRIVE_CWD:-$T}" && bash "$SELF_ABS" "$@" ) > "$T/$name.out" 2> "$T/$name.err" || got=$?
+    CASES=$((CASES + 1))
+    CODES="$CODES$got
+"
+    if [ "$got" != "$want" ]; then
+      v="NOT HELD"
+    elif ! grep -qF -- "$says" "$T/$name.out" "$T/$name.err"; then
+      v="NOT HELD (right code, missing: $says)"
+    fi
+    [ "$v" != "held" ] || UPHELD=$((UPHELD + 1))
+    printf '      %-28s expected %s  got %s  %s  %s\n' "$name" "$want" "$got" "$v" "$what"
+  }
+  # An assertion about the filesystem after a case, counted as its own case.
+  self_fact() { # <name> <what> <command...>
+    local name="$1" what="$2" v="held"
+    shift 2
+    CASES=$((CASES + 1))
+    if "$@"; then UPHELD=$((UPHELD + 1)); else v="NOT HELD"; fi
+    printf '      %-28s %-28s %s  %s\n' "$name" "(a file-system fact)" "$v" "$what"
+  }
+
+  printf '    selftest: %s\n' "$VERSION"
+  self_case lexicon 0 "promotion threshold: 3 distinct conversations" \
+    "the lexicons and thresholds print" -- lexicon --root "$R" --work "$R/w"
+  self_case bad-usage 2 "unknown option: --frobnicate" \
+    "an option this script does not take" -- harvest --root "$R" --frobnicate
+  self_case no-source 3 "NO SOURCE WAS AVAILABLE" \
+    "a transcripts directory that is not there - a scan that did not happen" \
+    -- harvest --root "$R" --work "$R/w-none" --transcripts "$R/nowhere"
+  self_case unparseable 4 "NOTHING PARSEABLE" \
+    "a transcript that is not JSON lines - no count, because none was measured" \
+    -- harvest --root "$R" --work "$R/w-bad" --transcripts "$R/tx-bad"
+  self_case measured-zero 5 "A MEASURED ZERO" \
+    "read, and no message is a correction - a real zero" \
+    -- harvest --root "$R" --work "$R/w-zero" --transcripts "$R/tx-zero"
+  self_case harvest-low 0 "harvested  1 correction(s)" \
+    "one correction, in one conversation" \
+    -- harvest --root "$R" --work "$R/w-low" --transcripts "$R/tx-low"
+  self_case below-threshold 6 "NOTHING REACHED THE THRESHOLD" \
+    "one conversation is below the three the threshold needs" \
+    -- present --root "$R" --work "$R/w-low"
+
+  # B141: the path rules. The decoy working directory holds an EMPTY tx/ (exit
+  # 3 if read) and its own w/; both relative options must resolve under the
+  # root. Through 1.1 both resolved here, in the decoy.
+  DRIVE_CWD="$T/decoy"
+  self_case relative-paths 0 "harvested  3 correction(s)" \
+    "a relative --transcripts and --work are read under the root, never the working directory" \
+    -- harvest --root "$R" --work w --transcripts tx
+  DRIVE_CWD=""
+  landed_under_root() { [ -f "$R/w/corrections.jsonl" ] && [ ! -e "$T/decoy/w/corrections.jsonl" ]; }
+  self_fact relative-work-under-root "the harvest landed in <root>/w, and nothing in the decoy w/" \
+    landed_under_root
+
+  self_case present 0 "1 cluster(s) reached the threshold" \
+    "three conversations reach the threshold, and nothing is written outside --work" \
+    -- present --root "$R" --work "$R/w"
+  printf 'somebody wrote this first\n' > "$R/CLAUDE.md"
+  self_case apply-refused 7 "PRECONDITION FAILED - NOTHING WAS WRITTEN" \
+    "the file the draft would create already exists" \
+    -- apply --root "$R" --work "$R/w" --id no-emoji --decide accept
+  rm -f "$R/CLAUDE.md"
+  self_case apply 0 "applied 1 operation(s)" \
+    "accepted by name, written under the root" \
+    -- apply --root "$R" --work "$R/w" --id no-emoji --decide accept
+  cp "$R/CLAUDE.md" "$T/as-applied.md"
+  printf 'an edit made after apply\n' >> "$R/CLAUDE.md"
+  self_case undo-refused 8 "UNDO REFUSED - NOTHING WAS RESTORED" \
+    "a file edited after apply is not restored over" \
+    -- undo --root "$R" --work "$R/w" --id no-emoji
+  cp "$T/as-applied.md" "$R/CLAUDE.md"
+  self_case undo 0 "removed  CLAUDE.md" \
+    "the file apply created is removed again" \
+    -- undo --root "$R" --work "$R/w" --id no-emoji
+
+  if [ "$CASES" = "$UPHELD" ]; then V="held"; else V="NOT HELD"; fi
+  printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
+    "selftest-cases-produce-declared-exit" "$CASES" "$UPHELD" "$V" \
+    "each case exits with the code this file's contract declares for it, for the reason it names"
+  REACHED="$(printf '%s' "$CODES" | sort -u | tr '\n' ' ' | sed 's/  *$//')"
+  MISSING=""
+  for want in 0 2 3 4 5 6 7 8; do
+    grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
+  done
+  printf '    exit codes reached: %s   documented: 0 2 3 4 5 6 7 8\n' "$REACHED"
+  printf '    NOT ASSERTED: the pr source, the hook and ci-gate rungs, excerpts, prune, and the content of a drafted rung; detect-context.sh is never run, so what harvest records about the repository is not exercised.\n'
+  [ "$CASES" = "$UPHELD" ] || exit 1
+  if [ -n "$MISSING" ]; then
+    printf 'graduate: documented exit code(s) no case reached:%s\n' "$MISSING" >&2
+    exit 1
+  fi
+  exit 0
+fi
 
 ROOT=""
 WORK=""
@@ -176,11 +329,23 @@ fi
 [ -d "$ROOT" ] || die_usage "no such directory: $ROOT"
 ROOT="$(cd "$ROOT" && pwd)"
 
-[ -n "$WORK" ] || WORK="$ROOT/.claude/productizer/graduation"
+# A path option is read under the root when relative and used as given when
+# absolute. Through 1.1 a relative --work was created under the working
+# directory - guidance state for one repo written into whatever directory the
+# operator stood in.
+under_root() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s' "$ROOT/$1" ;;
+  esac
+}
+WORK="$(under_root "${WORK:-.claude/productizer/graduation}")"
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 
-if [ -z "$TRANSCRIPTS" ]; then
+if [ -n "$TRANSCRIPTS" ]; then
+  TRANSCRIPTS="$(under_root "$TRANSCRIPTS")"
+else
   TRANSCRIPTS="${CLAUDE_TRANSCRIPTS:-$HOME/.claude/projects}"
 fi
 

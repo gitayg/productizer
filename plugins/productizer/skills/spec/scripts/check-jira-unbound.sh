@@ -45,6 +45,13 @@
 #   whole file exists to prevent. An exclusion list written before it was
 #   needed is a list of holes drilled in advance.
 #
+# PATH OPTIONS. A relative --config or --backlog is joined to the root, NOT to
+# the working directory; an absolute one is used as given (1.1, B140 - through
+# 1.0 an absolute one was joined to the root too, and a config that was there
+# was reported absent). A relative --root is read from the working directory.
+# Defaults: --config .claude/productizer/config.json, --backlog
+# .claude/productizer/backlog.md; --backlog may be given more than once.
+#
 # EXIT CODES ARE THE CONTRACT.
 #
 #   0  Jira is unbound and no backlog row names a key. R27 and R28 are out of
@@ -63,8 +70,10 @@
 # Seven cases are built under `mktemp -d`: the shut case, three separate ways
 # the guard OPENS (Jira bound, the key absent rather than null, a key-shaped
 # token in the backlog), and three ways the answer is UNKNOWN. Each runs THIS
-# script and its exit code is compared with the one the case declares. Nothing
-# is written into the repository being checked.
+# script and its exit code is compared with the one the case declares. Four
+# more (1.1) drive the path options - three absolute, one relative run from a
+# working directory holding a decoy - and each of those must also print one
+# named line. Nothing is written into the repository being checked.
 #
 # Under --selftest the three codes mean: every case produced the code it
 # declares (0), at least one did not (1), and the cases could not be built or
@@ -73,12 +82,14 @@
 #
 # WHAT IT PRINTS. One BARE repo-relative path per line for every file examined,
 # which is what the runner parses as coverage. Findings and notes are INDENTED.
-# Nothing absolute is ever printed - this output is tailed into a committed
-# result file, and an absolute path there is somebody's home directory
-# published to everyone who clones the repo.
+# Nothing absolute is printed for a file inside the root, however the path was
+# given - this output is tailed into a committed result file, and an absolute
+# path there is somebody's home directory published to everyone who clones the
+# repo. Only a path given absolute AND lying outside the root is printed as
+# written, because it has no shorter honest spelling.
 set -euo pipefail
 
-VERSION="check-jira-unbound 1.0"
+VERSION="check-jira-unbound 1.1"
 
 ROOT=""
 CONFIG_REL=""
@@ -111,6 +122,7 @@ done
 # way and differ only in the two files that decide the precondition.
 # ---------------------------------------------------------------------------
 if [ "$MODE" = "selftest" ]; then
+  SELF_ABS="$(cd "$(dirname "$0")" && pwd)/${0##*/}"
   WORK="$(mktemp -d)" \
     || die_unmeasured "cannot create a temporary directory to build the cases in; nothing was driven"
   # Removed on every exit path, signal included. Nothing is written into the
@@ -139,13 +151,24 @@ if [ "$MODE" = "selftest" ]; then
   drive() {
     NAME="$1"; WANT="$2"; WHY="$3"; shift 3
     GOT=0
-    bash "$0" "$@" > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
+    # DRIVE_CWD, when set, is the working directory the case runs from.
+    ( cd "${DRIVE_CWD:-.}" && bash "$SELF_ABS" "$@" ) > "$WORK/$NAME.out" 2> "$WORK/$NAME.err" || GOT=$?
     CASES=$((CASES + 1))
-    if [ "$GOT" = "$WANT" ]; then UPHELD=$((UPHELD + 1)); V="held"; else V="NOT HELD"; fi
+    # SAYS, when set, is one exact line the case must also print; a matching
+    # code without it is NOT HELD, so the case cannot pass for another reason.
+    if [ "$GOT" = "$WANT" ] && { [ -z "${SAYS:-}" ] || grep -qxF -- "$SAYS" "$WORK/$NAME.out"; }; then
+      UPHELD=$((UPHELD + 1)); V="held"
+    else
+      V="NOT HELD"
+    fi
     CODES="$CODES$GOT
 "
     REPORT="$REPORT      $NAME  expected $WANT  got $GOT  $V  $WHY
 "
+    if [ "$V" = "NOT HELD" ] && [ -n "${SAYS:-}" ]; then
+      REPORT="$REPORT        the line it had to print: $SAYS
+"
+    fi
   }
 
   # 0 - THE GUARD SHUT. `jira` null and nothing key-shaped in the backlog: the
@@ -189,6 +212,49 @@ if [ "$MODE" = "selftest" ]; then
   drive bad-usage 2 "an option this script does not take" \
     --root "$WORK/bad-usage" --frobnicate
 
+  # B140: PATH OPTIONS. Each of these also asserts one line of output, so a
+  # case cannot go green for a reason other than the path it names. Through
+  # 1.0 all three absolute cases exited 2, "no config at the path given".
+  #
+  # drive_says <name> <want> <exact line> <why> <args...>
+  drive_says() {
+    SAYS="$3"
+    drive "$1" "$2" "$4" "${@:5}"
+    SAYS=""
+  }
+
+  build abs-shut '{"jira": null}' '- an ordinary backlog item with no key in it'
+  drive_says abs-shut 0 "config.json" \
+    "absolute --config and --backlog inside the root are read, and printed repo-relative" \
+    --root "$WORK/abs-shut" --config "$WORK/abs-shut/config.json" --backlog "$WORK/abs-shut/backlog.md"
+
+  # The guard OPEN through an absolute path, so the path is proven READ and
+  # not merely found: a pass could come from a file nobody opened, a finding
+  # cannot.
+  build abs-bound '{"jira": {"project": "EXAMPLE"}}' '- an ordinary backlog item'
+  drive_says abs-bound 1 '  FINDING: `jira` is bound in the config. R27 and R28 are in force from here on, and nothing in this repository reads a Jira status or refuses a Jira write. They are not n/a; they are unimplemented.' \
+    "an absolute --config is read: the bound config it names is found bound" \
+    --root "$WORK/abs-bound" --config "$WORK/abs-bound/config.json" --backlog backlog.md
+
+  build abs-outside '{"jira": null}' '- an ordinary backlog item'
+  mkdir -p "$WORK/elsewhere"
+  printf '%s\n' '- migrate the importer, tracked as EXAMPLE-42' > "$WORK/elsewhere/backlog.md"
+  drive_says abs-outside 1 "$WORK/elsewhere/backlog.md" \
+    "an absolute --backlog outside the root is read there, and printed as written" \
+    --root "$WORK/abs-outside" --config config.json --backlog "$WORK/elsewhere/backlog.md"
+
+  # The relative half: joined to the root even when the working directory
+  # holds a file of the same name - here a BOUND config, which read by
+  # mistake would exit 1.
+  build rel-shut '{"jira": null}' '- an ordinary backlog item'
+  mkdir -p "$WORK/decoy-cwd"
+  printf '%s\n' '{"jira": {"project": "EXAMPLE"}}' > "$WORK/decoy-cwd/config.json"
+  DRIVE_CWD="$WORK/decoy-cwd"
+  drive_says rel-shut 0 '  `jira` is null - the recorded decision to run GitHub-only. Jira is not bound.' \
+    "a relative --config is joined to the root, never the working directory" \
+    --root "$WORK/rel-shut" --config config.json --backlog backlog.md
+  DRIVE_CWD=""
+
   printf '    selftest cases driven: %d\n' "$CASES"
   printf '%s' "$REPORT"
   if [ "$CASES" = "$UPHELD" ]; then SELF_VERDICT="held"; else SELF_VERDICT="NOT HELD"; fi
@@ -203,7 +269,7 @@ if [ "$MODE" = "selftest" ]; then
     grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '    NOT ASSERTED: the cases compare the exit CODE and never the wording of a finding, so a case that went red for the wrong reason is invisible here and is read off its captured output by hand\n'
+  printf '    NOT ASSERTED: the first seven cases compare the exit CODE only, so one that went red for the wrong reason is invisible here and is read off its captured output by hand; only the four path-option cases also assert a line of output\n'
   [ "$CASES" = "$UPHELD" ] || exit 1
   # A documented code nothing drove is the gap R39.b exists to make visible, so
   # it ends the run rather than being printed past.
@@ -227,16 +293,49 @@ ROOT="$(cd "$ROOT" && pwd -P)"
 [ -n "$CONFIG_REL" ] || CONFIG_REL=".claude/productizer/config.json"
 [ "${#BACKLOGS[@]}" -gt 0 ] || BACKLOGS=(".claude/productizer/backlog.md")
 
+# A RELATIVE PATH OPTION IS JOINED TO THE ROOT; AN ABSOLUTE ONE IS USED AS
+# GIVEN. Through 1.0 both were joined to the root unconditionally, so this
+# repository's own config named absolutely became `<root>/<root>/...` and the
+# run exited 2, "no config at the path given", about a file that was there.
+# The convention is record-classification.sh's 1.1.
+#
+# The name PRINTED for an absolute path inside the root is its repo-relative
+# spelling - the coverage line and every finding read the same however the
+# path was given, and no home directory reaches the committed result. One
+# outside the root is printed as the caller wrote it.
+under_root() { # <path> -> the path to read
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s' "$ROOT/$1" ;;
+  esac
+}
+shown() { # <path as given> -> the name to print
+  local p="$1" d
+  case "$p" in
+    /*) ;;
+    *) printf '%s' "$p"; return 0 ;;
+  esac
+  d="$(dirname "$p")"
+  if [ -d "$d" ] && d="$(cd "$d" && pwd -P)"; then
+    p="$d/$(basename "$p")"
+  fi
+  case "$p" in
+    "$ROOT"/*) printf '%s' "${p#"$ROOT"/}" ;;
+    *)         printf '%s' "$1" ;;
+  esac
+}
+
 command -v python3 >/dev/null 2>&1 || die_unmeasured "python3 is not installed; the config could not be parsed"
 
 FINDINGS=0
 
 # --- the config: is Jira bound? ---------------------------------------------
-printf '%s\n' "$CONFIG_REL"
-[ -f "$ROOT/$CONFIG_REL" ] \
+CONFIG="$(under_root "$CONFIG_REL")"
+printf '%s\n' "$(shown "$CONFIG_REL")"
+[ -f "$CONFIG" ] \
   || die_unmeasured "no config at the path given, so whether Jira is bound is UNKNOWN. An absent config has not been shown to say null."
 
-JIRA_STATE="$(python3 - "$ROOT/$CONFIG_REL" <<'PY' || true
+JIRA_STATE="$(python3 - "$CONFIG" <<'PY' || true
 import json
 import sys
 
@@ -279,13 +378,15 @@ esac
 
 # --- the backlog: does any row name a key? ----------------------------------
 KEYS_SEEN=0
-for rel in "${BACKLOGS[@]}"; do
+for given in "${BACKLOGS[@]}"; do
+  path="$(under_root "$given")"
+  rel="$(shown "$given")"
   printf '%s\n' "$rel"
-  [ -f "$ROOT/$rel" ] \
+  [ -f "$path" ] \
     || die_unmeasured "no backlog at one of the paths given, so whether any row names a Jira key is UNKNOWN"
-  [ -r "$ROOT/$rel" ] \
+  [ -r "$path" ] \
     || die_unmeasured "a backlog file could not be read, so whether any row names a Jira key is UNKNOWN"
-  hits="$(grep -onE '[A-Z][A-Z0-9]+-[0-9]+' "$ROOT/$rel" || true)"
+  hits="$(grep -onE '[A-Z][A-Z0-9]+-[0-9]+' "$path" || true)"
   if [ -n "$hits" ]; then
     while IFS= read -r hit; do
       [ -n "$hit" ] || continue

@@ -440,6 +440,33 @@ SWALLOW = ("|| true", "|| :", "|| exit 0", "||true", "|| /bin/true")
 TOOL_SUFFIXES = (".sh", ".py")
 
 
+def step_label(step: Dict[str, Any], index: int) -> str:
+    """A step's identity inside its job, from what the step SAYS it is, never
+    from where it sits. Measured on this repository (B138): at ba343ed the
+    `release-draft` job lost its unnamed checkout and gained an unnamed
+    download step in the same position, and a reader keyed on `#0` compared the
+    download against the checkout as one step and reported nothing. So: the
+    `id` when there is one; else the `name` and the action `uses` names, with
+    its `@ref` dropped so a pin bump is the same step; else the first line of
+    `run`. A position is the last resort, for a step that says nothing."""
+    sid = step.get("id")
+    if isinstance(sid, str) and sid.strip():
+        return "id=%s" % sid.strip()
+    name = step.get("name")
+    uses = step.get("uses")
+    action = uses.split("@", 1)[0].strip() if isinstance(uses, str) else ""
+    if isinstance(name, str) and name.strip():
+        return "%s (uses %s)" % (name, action) if action else name
+    if action:
+        return "uses %s" % action
+    run = step.get("run")
+    if isinstance(run, str):
+        lines = logical_lines(run)
+        if lines:
+            return "run: %s" % lines[0][:80]
+    return "#%d" % index
+
+
 def workflow_steps(doc: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
     jobs = doc.get("jobs")
     if not isinstance(jobs, dict):
@@ -452,12 +479,18 @@ def workflow_steps(doc: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
         steps = job.get("steps")
         if not isinstance(steps, list):
             continue
+        seen: Dict[str, int] = {}
         for index, step in enumerate(steps):
             if not isinstance(step, dict):
                 continue
-            name = step.get("name")
-            key = "%s/%s" % (jname, name if isinstance(name, str) else "#%d" % index)
-            out.append((key, step))
+            label = step_label(step, index)
+            # Two steps that say the same thing - two bare checkouts - are told
+            # apart by their order AMONG THEMSELVES, which a step of another
+            # kind inserted between them does not shift.
+            seen[label] = seen.get(label, 0) + 1
+            if seen[label] > 1:
+                label = "%s #%d" % (label, seen[label])
+            out.append(("%s/%s" % (jname, label), step))
     if not out:
         raise Unmeasured("the workflow holds no steps, so there was nothing to compare")
     return out
@@ -540,13 +573,152 @@ def trigger_set(doc: Dict[str, Any]) -> List[str]:
     return sorted(out)
 
 
-def permission_map(doc: Dict[str, Any]) -> Dict[str, Any]:
-    node = doc.get("permissions")
+REST = "*"
+LEVEL_NAME = {0: "none", 1: "read", 2: "write"}
+INHERITED = "the repository's default, which this file does not state"
+
+
+def token_levels(node: Any) -> Optional[Dict[str, Optional[int]]]:
+    """A `permissions` block as scope -> rank, with REST standing for every
+    scope it does not name. None is a token this file does not state at all -
+    no block here or above it, so GitHub's repository default applies - and a
+    rank of None is a value this rule does not order."""
+    if node is None:
+        return None
     if isinstance(node, str):
-        return {"__all__": node}
+        return {REST: {"read-all": 1, "write-all": 2}.get(node.strip().lower())}
     if isinstance(node, dict):
-        return dict(node)
-    return {}
+        out: Dict[str, Optional[int]] = {REST: 0}
+        for scope, value in node.items():
+            out[str(scope)] = PERMISSION_RANK.get(str(value).strip().lower())
+        return out
+    return {REST: None}
+
+
+def job_token(doc: Dict[str, Any], jname: str) -> Any:
+    """The `permissions` node a job's token is actually cut from: its own block
+    when it has one - which REPLACES the workflow's, it does not add to it - and
+    the workflow's otherwise. None when neither says."""
+    job = (doc.get("jobs") or {}).get(jname)
+    if isinstance(job, dict) and "permissions" in job:
+        return job.get("permissions")
+    return doc.get("permissions")
+
+
+def render_level(levels: Optional[Dict[str, Optional[int]]], scope: str) -> str:
+    if levels is None:
+        return INHERITED
+    rank = levels.get(scope, levels[REST])
+    return LEVEL_NAME.get(rank, "a value this rule does not order") if rank is not None \
+        else "a value this rule does not order"
+
+
+def render_token(node: Any) -> str:
+    levels = token_levels(node)
+    if levels is None:
+        return INHERITED
+    named = ["%s: %s" % (s, render_level(levels, s)) for s in sorted(levels) if s != REST]
+    if levels[REST] != 0 or not named:
+        named.append("every other scope: %s" % render_level(levels, REST))
+    return ", ".join(named)
+
+
+def compare_token(surface: Surface, prefix: str, base_node: Any, tree_node: Any,
+                  why: str) -> None:
+    """Every scope either side names, plus the rest. A scope that can do more
+    than it could is a weakening whatever else moved; a token this file does not
+    state on one side only is UNDECIDED, because the repository default it
+    stands for may be wider or narrower than the block on the other side."""
+    lb, lt = token_levels(base_node), token_levels(tree_node)
+    if lb is None and lt is None:
+        return
+    scopes = sorted(set(lb or {}) | set(lt or {}))
+    for scope in scopes:
+        if scope == REST and (lb or {}).get(REST) == 0 and (lt or {}).get(REST) == 0:
+            continue
+        surface.atoms += 1
+        atom = "%s.%s" % (prefix, "(every scope not named)" if scope == REST else scope)
+        rb = None if lb is None else lb.get(scope, lb[REST])
+        rt = None if lt is None else lt.get(scope, lt[REST])
+        before, after = render_level(lb, scope), render_level(lt, scope)
+        if rb is None or rt is None:
+            if before != after:
+                surface.undecided(atom, before, after,
+                                  "one side is a token this rule cannot rank, so "
+                                  "whether it can do more is for a person to say")
+        elif rt > rb:
+            surface.weakened(atom, before, after, why)
+        elif rt < rb:
+            surface.tightened(atom, before, after)
+
+
+def token_move(base_node: Any, tree_node: Any) -> Tuple[str, str]:
+    """Which way a step moved when it left one job for another: by the most the
+    token can do first - a step that could write and now cannot write anything
+    is a tightening even where the new token reads one more scope - then scope
+    by scope. Returns (verdict, rendered tokens)."""
+    lb, lt = token_levels(base_node), token_levels(tree_node)
+    shown = "%s -> %s" % (render_token(base_node), render_token(tree_node))
+    if lb is None or lt is None:
+        return ("same" if lb is None and lt is None else UNDECIDED, shown)
+    pairs = [(lb.get(s, lb[REST]), lt.get(s, lt[REST])) for s in set(lb) | set(lt)]
+    if any(b is None or t is None for b, t in pairs):
+        return (UNDECIDED, shown)
+    mb, mt = max(b for b, _ in pairs), max(t for _, t in pairs)
+    if mt != mb:
+        return (WEAKENED if mt > mb else "tightened", shown)
+    wider = any(t > b for b, t in pairs)
+    narrower = any(t < b for b, t in pairs)
+    if wider and narrower:
+        return (UNDECIDED, shown)
+    if wider:
+        return (WEAKENED, shown)
+    return ("tightened" if narrower else "same", shown)
+
+
+def compare_tokens(surface: Surface, base: Dict[str, Any], tree: Dict[str, Any]) -> None:
+    """The workflow's default token, then every job's. Before B138 only the
+    top-level block was read: at ba343ed a new job was given `pull-requests:
+    read`, which no token in the workflow had held, and nothing was reported,
+    because a job-level block was never looked at - new job or old."""
+    compare_token(surface, "workflow.permissions", base.get("permissions"),
+                  tree.get("permissions"),
+                  "the token this job holds can do more than it could, so a "
+                  "compromised step has more to steal")
+    bjobs = base.get("jobs") if isinstance(base.get("jobs"), dict) else {}
+    tjobs = tree.get("jobs") if isinstance(tree.get("jobs"), dict) else {}
+    for jname in sorted(set(bjobs) | set(tjobs)):
+        bjob, tjob = bjobs.get(jname), tjobs.get(jname)
+        own_b = isinstance(bjob, dict) and "permissions" in bjob
+        own_t = isinstance(tjob, dict) and "permissions" in tjob
+        prefix = "workflow.jobs[%s].permissions" % jname
+        if bjob is not None and tjob is not None:
+            # A job that inherits on both sides moves only with the workflow's
+            # default, which is the atom above. Reading it again here would
+            # report one fact twice.
+            if own_b or own_t:
+                compare_token(surface, prefix, job_token(base, jname),
+                              job_token(tree, jname),
+                              "this job's token can do more than it could, so a "
+                              "compromised step in it has more to steal")
+        elif tjob is not None and own_t:
+            # A NEW job has no earlier token of its own. What it is measured
+            # against is what a job added to this workflow at the base would
+            # have held without a block: the workflow's default there. Every
+            # scope it names is printed, so a narrow one is seen as well.
+            surface.notes.append(
+                "workflow.jobs[%s] is new and cuts its own token: %s. Each scope "
+                "is compared against the workflow's default at the base (%s)."
+                % (jname, render_token(tjob.get("permissions")),
+                   render_token(base.get("permissions"))))
+            compare_token(surface, prefix, base.get("permissions"),
+                          tjob.get("permissions"),
+                          "a new job holds a token that can do more than the "
+                          "workflow's default at the base allowed, so a "
+                          "compromised step in it has more to steal")
+        elif bjob is not None and own_b and tjob is None:
+            surface.tightened(prefix, render_token(bjob.get("permissions")),
+                              "the job is gone, and its token with it")
 
 
 def compare_workflow(surface: Surface, base: Optional[Dict[str, Any]],
@@ -571,52 +743,69 @@ def compare_workflow(surface: Surface, base: Optional[Dict[str, Any]],
                        "the workflow no longer runs on some of what it used to, "
                        "so those pushes and pull requests are unchecked.")
 
-    pb, pt = permission_map(base), permission_map(tree)
-    for scope in sorted(set(pb) | set(pt)):
-        surface.atoms += 1
-        rb = PERMISSION_RANK.get(str(pb.get(scope, "none")).lower())
-        rt = PERMISSION_RANK.get(str(pt.get(scope, "none")).lower())
-        if rb is None or rt is None:
-            if pb.get(scope) != pt.get(scope):
-                surface.undecided("workflow.permissions.%s" % scope,
-                                  pb.get(scope, "none"), pt.get(scope, "none"),
-                                  "this rule does not order one of these "
-                                  "permission values")
-        elif rt > rb:
-            surface.weakened(
-                "workflow.permissions.%s" % scope, pb.get(scope, "none"),
-                pt.get(scope, "none"),
-                "the token this job holds can do more than it could, so a "
-                "compromised step has more to steal")
-        elif rt < rb:
-            surface.tightened("workflow.permissions.%s" % scope,
-                              pb.get(scope, "none"), pt.get(scope, "none"))
+    compare_tokens(surface, base, tree)
 
-    # A STEP GONE BY NAME IS NOT YET A STEP GONE. Two corrections, both forced
+    # A STEP GONE BY NAME IS NOT YET A STEP GONE. Three corrections, each forced
     # by this repository's own history rather than imagined:
-    #   - an identical body under a new name is a RENAME. Neither a weakening
-    #     nor a tightening; it is reported so the reader can disagree.
+    #   - an identical body under a new name IN THE SAME JOB is a RENAME.
+    #     Neither a weakening nor a tightening; it is reported so the reader can
+    #     disagree.
+    #   - an identical body in ANOTHER job is a MOVE, and what moved is the
+    #     token the step runs under. At ba343ed a checkout left the
+    #     `contents: write` job for a read-only one; that is a tightening, and
+    #     it is printed as one rather than read as nothing (B138).
     #   - a body that changed too, while every tool the step invoked still runs
     #     somewhere in the file, is UNDECIDED. Something was reorganised and
     #     nothing measurably stopped. A real deletion takes its invocations with
     #     it, and those are reported by the invocation atom below.
-    gained_bodies = {step_body(tree_steps[k]): k for k in set(tree_steps) - set(base_steps)}
+    gained_keys = sorted(set(tree_steps) - set(base_steps))
+    gained_bodies: Dict[str, List[str]] = {}
+    for k in gained_keys:
+        gained_bodies.setdefault(step_body(tree_steps[k]), []).append(k)
     renamed_from = set()
     tree_invocations = set(invocations(list(tree_steps.items())))
     for key in sorted(base_steps):
         surface.atoms += 1
         if key not in tree_steps:
             body = step_body(base_steps[key])
-            if body in gained_bodies:
-                renamed_from.add(gained_bodies[body])
+            job = key.split("/", 1)[0]
+            free = [k for k in gained_bodies.get(body, []) if k not in renamed_from]
+            same_job = [k for k in free if k.split("/", 1)[0] == job]
+            if same_job:
+                renamed_from.add(same_job[0])
                 surface.notes.append(
                     "workflow.step[%s] was renamed to [%s] with an identical "
                     "body. A name is documentation; nothing it runs changed."
-                    % (key, gained_bodies[body]))
+                    % (key, same_job[0]))
+                continue
+            if free:
+                dest = free[0]
+                renamed_from.add(dest)
+                verdict, shown = token_move(
+                    job_token(base, job), job_token(tree, dest.split("/", 1)[0]))
+                atom = "workflow.step[%s]" % key
+                moved = "moved to [%s]" % dest
+                if verdict == WEAKENED:
+                    surface.weakened(atom, "in job %s" % job, moved,
+                                     "the same step now runs holding a token "
+                                     "that can do more (%s)" % shown)
+                elif verdict == UNDECIDED:
+                    surface.undecided(atom, "in job %s" % job, moved,
+                                      "the step moved between tokens this rule "
+                                      "cannot order (%s); whether it now runs "
+                                      "with more is for a person to say" % shown)
+                elif verdict == "tightened":
+                    surface.tightened(atom, "in job %s" % job,
+                                      "%s, under a token that can do less (%s)"
+                                      % (moved, shown))
+                else:
+                    surface.notes.append(
+                        "workflow.step[%s] %s with an identical body, under an "
+                        "identical token (%s)." % (key, moved, shown))
                 continue
             lost_work = [line for line in invocations([(key, base_steps[key])])
                          if line not in tree_invocations]
-            if gained_bodies and not lost_work:
+            if gained_keys and not lost_work:
                 surface.undecided(
                     "workflow.step[%s]" % key, "declared", "gone by that name",
                     "the step is gone by name while every tool it invoked still "

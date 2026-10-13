@@ -105,6 +105,14 @@
 #
 # --ROOT DEFAULTS TO THE WORK TREE, NEVER THE WORKING DIRECTORY.
 #
+# A RELATIVE --spec OR --index IS READ UNDER THE ROOT, NEVER THE WORKING
+# DIRECTORY; an absolute one is used as given. --root itself, if relative, is
+# read from the working directory, once. Defaults, both under the root:
+# .claude/productizer/spec.md and .claude/productizer/requirement-index.md.
+# Through 1.1 the two options were read from the working directory while their
+# defaults lived under the root, so the same spelling named two different files
+# depending on whether it was typed (B141, ruled "converge on repo root").
+#
 # EXIT CODES ARE THE CONTRACT.
 #
 #   0  written, or already current (--check: the region equals a fresh render)
@@ -127,10 +135,18 @@
 # accepted as an alias, as in build-guide.sh.
 set -euo pipefail
 
-VERSION="build-requirement-index 1.1"
+VERSION="build-requirement-index 1.2"
 
 usage() {
   printf 'usage: build-requirement-index.sh [--root DIR] [--spec FILE] [--index FILE] [--check] [--selftest] [--version] [--help]\n'
+  printf '  --root DIR    the repo work tree. Defaults to the git top level, never to\n'
+  printf '                the working directory.\n'
+  printf '  --spec FILE   the spec (default <root>/.claude/productizer/spec.md)\n'
+  printf '  --index FILE  the index to write or check\n'
+  printf '                (default <root>/.claude/productizer/requirement-index.md)\n'
+  printf '  A relative --spec or --index is read under the ROOT, NOT the working\n'
+  printf '  directory. An absolute one is used as given. A relative --root is read\n'
+  printf '  from the working directory.\n'
 }
 
 ROOT=""; SPEC=""; INDEX=""; MODE="write"
@@ -223,6 +239,8 @@ Generated into requirement-index.md.
 Nothing.
 FIXTURE_SPEC
 
+  SELF_ABS="$(cd "$(dirname "$0")" && pwd)/${0##*/}"
+  DRIVE_CWD=""
   SELF_CASES=0
   SELF_UPHELD=0
   # R39.b: the reached half of the declaration is ACCUMULATED here, one entry
@@ -242,7 +260,8 @@ FIXTURE_SPEC
     local name="$1" want="$2" sentence="$3" what="$4"
     shift 5
     local got=0 verdict
-    bash "$0" "$@" > "$SELF_TMP/out" 2> "$SELF_TMP/err" || got=$?
+    # DRIVE_CWD, when set, is the working directory the case runs from.
+    ( cd "${DRIVE_CWD:-.}" && bash "$SELF_ABS" "$@" ) > "$SELF_TMP/out" 2> "$SELF_TMP/err" || got=$?
     SELF_CASES=$((SELF_CASES + 1))
     CODES="$CODES$got
 "
@@ -429,6 +448,20 @@ SWAP_MARKERS
   run_case no-acceptance-section 3 "no \`## Acceptance criteria\` section" \
     "Verified by cannot be read, which is not every requirement unverified" -- --root "$SELF_TMP/noac" --check
 
+  # B141: a RELATIVE --spec or --index is read under the root. Both cases run
+  # from a working directory holding a decoy of the same name - a spec with no
+  # requirements (exit 3 if read) and an index with no markers (exit 2 if
+  # read). Through 1.1 both read the decoy.
+  mkdir -p "$SELF_TMP/decoy-cwd/.claude/productizer"
+  printf 'a decoy with no requirements section\n' > "$SELF_TMP/decoy-cwd/.claude/productizer/spec.md"
+  printf '# a decoy index with no markers\n' > "$SELF_TMP/decoy-cwd/.claude/productizer/requirement-index.md"
+  DRIVE_CWD="$SELF_TMP/decoy-cwd"
+  run_case relative-spec-under-root 0 ".claude/productizer/spec.md -> .claude/productizer/requirement-index.md" \
+    "a relative --spec is read under the root, never the working directory" -- --root "$CASE_ROOT" --spec .claude/productizer/spec.md --check
+  run_case relative-index-under-root 0 ".claude/productizer/spec.md -> .claude/productizer/requirement-index.md" \
+    "a relative --index is read under the root, never the working directory" -- --root "$CASE_ROOT" --index .claude/productizer/requirement-index.md --check
+  DRIVE_CWD=""
+
   if [ "$SELF_CASES" = "$SELF_UPHELD" ]; then self_verdict="held"; else self_verdict="NOT HELD"; fi
   printf '    R39  %-38s examined %3d  upheld %3d  %s: %s\n' \
     "selftest-cases-produce-declared-exit" "$SELF_CASES" "$SELF_UPHELD" "$self_verdict" \
@@ -455,8 +488,16 @@ if [ -z "$ROOT" ]; then
   }
 fi
 [ -d "$ROOT" ] || { printf 'build-requirement-index: no such directory: %s\n' "$ROOT" >&2; exit 2; }
-[ -n "$SPEC" ] || SPEC="$ROOT/.claude/productizer/spec.md"
-[ -n "$INDEX" ] || INDEX="$ROOT/.claude/productizer/requirement-index.md"
+# Relative is joined to the root, absolute is used as given. The printed names
+# are the python half's `disp`, which already shortens a path inside the root.
+under_root() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s' "$ROOT/$1" ;;
+  esac
+}
+SPEC="$(under_root "${SPEC:-.claude/productizer/spec.md}")"
+INDEX="$(under_root "${INDEX:-.claude/productizer/requirement-index.md}")"
 
 command -v python3 >/dev/null 2>&1 || {
   printf 'build-requirement-index: python3 is not installed, so the spec was never read. Missing, not clean.\n' >&2

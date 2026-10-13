@@ -14,9 +14,9 @@
 # THE THREE STATES R10 HAS TO KEEP APART, and the case that proves each:
 #
 #   1-never-imported.md        no marker, no `Stage 0c`, one change-log row per
-#                              requirement. There is no import here, so there
-#                              is nothing to assert - exit 2, UNMEASURED.
-#                              UNDER 1.0 THIS EXITED 0.
+#                              requirement. There is no import here, and four
+#                              sources were read and say so - exit 0, NO IMPORT
+#                              ON THE RECORD, the premise measured absent.
 #   2-import-marked-none.md    1 with the four rows collapsed into one row
 #                              naming `Stage 0c`, and NOT ONE requirement
 #                              marked. The complete violation - exit 1.
@@ -36,9 +36,9 @@
 #   5-import-silent...md       2 with `Stage 0c` removed from the row. Nothing
 #                              marked, no stage named, so nothing distinguishes
 #                              it from a repository that never imported - exit
-#                              2, UNMEASURED. THIS IS THE DECLARED HOLE, and it
-#                              is a case so that the hole is measured rather
-#                              than asserted.
+#                              0, NO IMPORT ON THE RECORD. THIS IS THE DECLARED
+#                              HOLE, and it is a case so that the hole is
+#                              measured rather than asserted.
 #   5 + a commit message       5 again, committed with `Stage 0c` in the COMMIT
 #                              MESSAGE. Marker-free detection with the spec
 #                              itself silent - exit 1, four findings.
@@ -68,6 +68,33 @@
 #                              backlog naming the stage. Whether an import
 #                              commit wrote it cannot be read - exit 2,
 #                              BACKLOG UNVERIFIED, never a quiet 0.
+#   1, no git, no backlog      a root that is not a git work tree and nothing
+#                              else naming an import. Under 1.2 this exited 0,
+#                              NO IMPORT ON THE RECORD, though two of the four
+#                              sources live in the history it never read (B143)
+#                              - exit 2, HISTORY UNREAD.
+#   1, no commit yet           a git work tree whose branch has no commit. Its
+#                              history is EMPTY, which is walked and holds
+#                              nothing, not unwalkable - exit 0. The guard on
+#                              the case above: fail-closed must not refuse the
+#                              repository every adoption starts from.
+#   5 + backlog prose, one     the drafting commit also wrote two backlog rows
+#     commit                   that DESCRIBE the check and spell `Stage 0c` in
+#                              passing. Under 1.2 that attributed R1-R4 to an
+#                              import, exit 1 - measured on this repository's
+#                              own v4.70.0 commit, eleven findings (B144). A
+#                              gap the import writes OPENS its item cell with
+#                              the stage (`| B<n> | Stage 0c ...`); prose does
+#                              not - exit 0.
+#   5 + prose and a gap row    the same commit with prose AND a real gap row:
+#                              the gap row still attributes - exit 1.
+#   3, then a gap answered     an import marked correctly, then a later commit
+#                              that agrees R5 at intake and moves the import's
+#                              gap row to `done`. Under 1.2 the edited row read
+#                              as a backlog line naming the stage written by a
+#                              drafting commit, and R5 became a finding, exit
+#                              1. A row edited in place is not a gap WRITTEN in
+#                              that pass - exit 0.
 #
 # EXIT CODES ARE THE CONTRACT.
 #
@@ -77,7 +104,7 @@
 #   2  could not run - no git, no check to test, no temporary directory
 set -euo pipefail
 
-VERSION="import-marking-selftest 1.1"
+VERSION="import-marking-selftest 1.2"
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 CHECK="$HERE/../../scripts/check-import-marking.sh"
@@ -117,10 +144,14 @@ CASES=0
 #   ("" for none) · $5 expected exit · $6 a line the output must contain
 #   $7 where the backlog goes: `worktree` (default, never committed),
 #   `with-spec` (in the commit that adds the spec), `later` (its own commit
-#   after it), or `no-git` (the root is not a git work tree at all)
+#   after it), `no-git` (the root is not a git work tree at all), `unborn` (a
+#   git work tree with no commit), or `answered` (spec and backlog in one
+#   commit, then $8 and $9 replace them in a second)
+#   $8 the second spec fixture · $9 the second backlog (`answered` only)
 run_case() {
   name="$1"; fixture="$2"; message="$3"; backlog="$4"
   want_exit="$5"; want_line="$6"; how="${7:-worktree}"
+  spec2="${8:-}"; backlog2="${9:-}"
   CASES=$((CASES + 1))
 
   repo="$WORK/$name"
@@ -128,10 +159,14 @@ run_case() {
   cp "$HERE/spec/$fixture" "$repo/.claude/productizer/spec.md"
   [ -n "$backlog" ] && cp "$HERE/backlog/$backlog" "$repo/.claude/productizer/backlog.md"
 
-  if [ "$how" != no-git ]; then
+  if [ "$how" = unborn ]; then
+    git -c init.defaultBranch=main init -q "$repo"
+  elif [ "$how" != no-git ]; then
     git -c init.defaultBranch=main init -q "$repo"
     git -C "$repo" add .claude/productizer/spec.md
-    [ "$how" = with-spec ] && git -C "$repo" add .claude/productizer/backlog.md
+    case "$how" in
+      with-spec|answered) git -C "$repo" add .claude/productizer/backlog.md ;;
+    esac
     git -C "$repo" \
       -c user.name=fixture -c user.email=fixture@example.invalid \
       commit -q -m "$message"
@@ -140,6 +175,14 @@ run_case() {
       git -C "$repo" \
         -c user.name=fixture -c user.email=fixture@example.invalid \
         commit -q -m "append a backlog row"
+    fi
+    if [ "$how" = answered ]; then
+      cp "$HERE/spec/$spec2" "$repo/.claude/productizer/spec.md"
+      cp "$HERE/backlog/$backlog2" "$repo/.claude/productizer/backlog.md"
+      git -C "$repo" add .claude/productizer/spec.md .claude/productizer/backlog.md
+      git -C "$repo" \
+        -c user.name=fixture -c user.email=fixture@example.invalid \
+        commit -q -m "agree a requirement at intake that answers a backlog item"
     fi
   fi
 
@@ -230,6 +273,30 @@ run_case stage-in-the-spec-prose 7-import-stage-in-the-spec-prose.md \
 run_case backlog-without-git 1-never-imported.md \
   "unused: this root is never committed" with-stage-0c.md \
   2 "BACKLOG UNVERIFIED." no-git
+
+# Fail-closed: the history holds two of the four sources, and neither was read.
+run_case no-git-no-evidence 1-never-imported.md \
+  "unused: this root is never committed" "" \
+  2 "NO IMPORT FOUND, HISTORY UNREAD." no-git
+
+# An empty history is walked and holds nothing; it is not an unwalkable one.
+run_case unborn-history 1-never-imported.md \
+  "unused: this root has no commit" "" \
+  0 "source B - commits introducing one of them: 0, of 0 touching the spec" unborn
+
+# Prose spelling the stage, written by the drafting commit, is not a gap row.
+run_case prose-in-the-import-commit 5-import-silent-in-the-spec.md \
+  "draft the spec from the existing repository" prose-about-the-stage.md \
+  0 "NO IMPORT ON THE RECORD." with-spec
+
+run_case gap-row-beside-prose 5-import-silent-in-the-spec.md \
+  "draft the spec from the existing repository" prose-and-a-gap-row.md \
+  1 "drafted it and named \`Stage 0c\` in .claude/productizer/backlog.md" with-spec
+
+run_case gap-answered-later 3-import-marked-all.md \
+  "draft the spec from the existing repository" with-stage-0c.md \
+  0 "attributed requirements with no inferred marking: 0" answered \
+  8-import-then-a-gap-answered.md with-stage-0c-answered.md
 
 printf '%d case(s), %d failure(s)\n' "$CASES" "$FAILURES"
 [ "$FAILURES" = 0 ] || exit 1

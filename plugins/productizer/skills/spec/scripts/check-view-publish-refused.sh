@@ -3,6 +3,23 @@
 #                              [--settings PATH] [--log PATH]
 #                              [--max-age-days N] [--version] [--help]
 #
+# PATH OPTIONS.
+#   --root DIR       the repo work tree; a relative one is read from the
+#                    working directory, once. Default: the git top level,
+#                    never the working directory.
+#   --hook PATH      default .claude/hooks/artifact-gate.sh under the root
+#   --fixture DIR    default: the plugin's own fixture beside this script
+#                    (<script dir>/../fixtures/view-publish-refused) - NOT
+#                    under the root
+#   --settings PATH  default .claude/settings.json under the root
+#   --log PATH       default .claude/productizer/artifact-gate-log.jsonl under
+#                    the root
+# A relative --hook, --fixture, --settings or --log is read under the ROOT, NOT
+# the working directory; an absolute one is used as given. Only the --fixture
+# DEFAULT lives beside the script. Through 1.1 a relative option was read from
+# the working directory, and a --log given but absent was reported as absent
+# "at the default path" (B141, ruled "converge on repo root").
+#
 # Asserts the half of R31 that nothing observed: IF A PUBLISHED VIEW DECLARES A
 # CAPABILITY THAT CAN PUBLISH NEW VERSIONS OF ITSELF, THEN THE LIFECYCLE SHALL
 # REFUSE TO PUBLISH IT.
@@ -150,7 +167,7 @@
 # a page's own bytes would be published to everyone who clones the repo.
 set -euo pipefail
 
-VERSION="check-view-publish-refused 1.1"
+VERSION="check-view-publish-refused 1.2"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -203,8 +220,21 @@ fi
 [ -d "$ROOT" ] || die_unmeasured "--root $ROOT is not a directory"
 ROOT="$(cd "$ROOT" && pwd -P)"
 
-[ -n "$HOOK" ]    || HOOK="$ROOT/.claude/hooks/artifact-gate.sh"
-[ -n "$FIXTURE" ] || FIXTURE="$HERE/../fixtures/view-publish-refused"
+# A given path option: relative is joined to the root, absolute is used as
+# given. The names printed are rel()'s, which shorten a path inside the root.
+under_root() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *)  printf '%s' "$ROOT/$1" ;;
+  esac
+}
+HOOK="$(under_root "${HOOK:-.claude/hooks/artifact-gate.sh}")"
+if [ -n "$FIXTURE" ]; then FIXTURE="$(under_root "$FIXTURE")"; else FIXTURE="$HERE/../fixtures/view-publish-refused"; fi
+# Which sentence an absent decision record gets: the default path, or the one
+# the caller named. Through 1.1 a named one was called the default.
+if [ -n "$GATELOG" ]; then LOG_WHERE="the path given"; else LOG_WHERE="the default path"; fi
+SETTINGS="$(under_root "${SETTINGS:-.claude/settings.json}")"
+GATELOG="$(under_root "${GATELOG:-.claude/productizer/artifact-gate-log.jsonl}")"
 
 [ -f "$HOOK" ] && [ -r "$HOOK" ] \
   || die_unmeasured "no readable publish hook at the path given. There is nothing to drive, so whether the lifecycle refuses to publish a self-publishing view is UNMEASURED, not satisfied"
@@ -232,6 +262,14 @@ esac
 #   gate-allows-all  the same fixture and a gate that refuses nothing  -> 1
 #   no-fixture       a fixture directory that is not there             -> 2
 #   bad-usage        an option the parser does not take                -> 2
+#
+# and five more (1.2) for the path options, run against a copy of this root's
+# hook and settings from a working directory holding decoys - a gate that
+# allows everything, a settings file registering nothing. Each must also print
+# the repo-relative name of the file it read:
+#
+#   relative-hook / -fixture / -settings / -log                         -> 0
+#   named-log-absent  a --log named and absent says "the path given"   -> 0
 #
 # THE CLEAN CASE GUARDS THE OTHERS' PREMISE. If driving the committed hook does
 # not exit 0, every case below would be red for that reason rather than its
@@ -280,19 +318,25 @@ SELFTEST_HOOK
   # non-zero on purpose, `set -e` would kill the loop at the first one, and a
   # `$(...)` or a pipeline between the command and the read of `$?` resets it -
   # which is how a self-test reports four passes having measured none.
+  # DRIVE_CWD, when set, is the working directory the case runs from. SAYS,
+  # when set, is a fixed string the case must also print: a matching code
+  # without it does not hold, so the case cannot pass for another reason.
+  SELF_ABS="$(cd "$(dirname "$0")" && pwd)/${0##*/}"
+  DRIVE_CWD=""; SAYS=""
   self_drive() {
     _name="$1"; _want="$2"; _why="$3"
     shift 3
     _rc=0
-    bash "$0" "$@" > "$SB/$_name.out" 2> "$SB/$_name.err" || _rc=$?
+    ( cd "${DRIVE_CWD:-.}" && bash "$SELF_ABS" "$@" ) > "$SB/$_name.out" 2> "$SB/$_name.err" || _rc=$?
     SELF_CASES=$((SELF_CASES + 1))
     CODES="$CODES$_rc
 "
-    if [ "$_rc" = "$_want" ]; then
+    if [ "$_rc" = "$_want" ] && { [ -z "$SAYS" ] || grep -qF -- "$SAYS" "$SB/$_name.out"; }; then
       printf '  held:    case %-16s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
     else
       printf '  FINDING: case %-16s expected %s  observed %s  %s\n' "$_name" "$_want" "$_rc" "$_why"
       SELF_FAILED=$((SELF_FAILED + 1))
+      [ -z "$SAYS" ] || printf '           and it had to print: %s\n' "$SAYS"
     fi
   }
 
@@ -318,6 +362,39 @@ SELFTEST_HOOK
     "an option this parser does not take: bad usage is refused rather than ignored" \
     --root "$ROOT" --no-such-option
 
+  # B141: PATH OPTIONS. A relative --hook, --fixture, --settings or --log is
+  # read under the root. The root is a copy of this one's hook and settings
+  # with the fixture at `fx/` and an empty decision record; the cases run from
+  # a working directory holding a decoy of each name - a gate that allows
+  # everything, a settings file registering nothing - and each must print the
+  # repo-relative name of the file it read. Through 1.1 every one read the
+  # decoy or found nothing.
+  mkdir -p "$SB/root/.claude/hooks" "$SB/root/.claude/productizer" \
+           "$SB/decoy-cwd/.claude/hooks" "$SB/decoy-cwd/.claude/productizer"
+  cp "$ROOT/.claude/hooks/artifact-gate.sh" "$SB/root/.claude/hooks/artifact-gate.sh"
+  cp "$ROOT/.claude/settings.json" "$SB/root/.claude/settings.json"
+  cp -R "$FIXTURE" "$SB/root/fx"
+  : > "$SB/root/.claude/productizer/artifact-gate-log.jsonl"
+  cp "$SB/allow-everything.sh" "$SB/decoy-cwd/.claude/hooks/artifact-gate.sh"
+  printf '{}\n' > "$SB/decoy-cwd/.claude/settings.json"
+  DRIVE_CWD="$SB/decoy-cwd"
+  SAYS=".claude/hooks/artifact-gate.sh"
+  self_drive relative-hook 0 "a relative --hook is read under the root, never the working directory" \
+    --root "$SB/root" --hook .claude/hooks/artifact-gate.sh
+  SAYS="fx/cases.tsv"
+  self_drive relative-fixture 0 "a relative --fixture is read under the root, never the working directory" \
+    --root "$SB/root" --fixture fx
+  SAYS=".claude/settings.json"
+  self_drive relative-settings 0 "a relative --settings is read under the root, never the working directory" \
+    --root "$SB/root" --settings .claude/settings.json
+  SAYS=".claude/productizer/artifact-gate-log.jsonl"
+  self_drive relative-log 0 "a relative --log is read under the root, never the working directory" \
+    --root "$SB/root" --log .claude/productizer/artifact-gate-log.jsonl
+  SAYS="there is no decision record at the path given"
+  self_drive named-log-absent 0 "a --log named and absent is called the path given, not the default path" \
+    --root "$SB/root" --log no-such-record.jsonl
+  DRIVE_CWD=""; SAYS=""
+
   printf '  self-test cases driven: %d. Cases that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_FAILED"
 
@@ -329,7 +406,7 @@ SELFTEST_HOOK
     grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '    exit codes reached: %s   documented: 0 1 2\n' "$REACHED"
-  printf '  NOT ASSERTED: the wording of any finding. Each case reads the exit CODE, so a case that went red for the wrong reason is invisible here and is read off the case output by hand.\n'
+  printf '  NOT ASSERTED: the wording of any finding. The first four cases read the exit CODE only, so one that went red for the wrong reason is invisible here and is read off the case output by hand; only the five path-option cases also assert a string of output.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'check-view-publish-refused: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
     exit 1
@@ -345,7 +422,6 @@ fi
 # The record the hook writes when the TOOL calls it. Deliberately the default
 # path and not something derived from an environment variable: the whole value
 # of A7 is that it reads a file this check did not point the hook at.
-[ -n "$GATELOG" ] || GATELOG="$ROOT/.claude/productizer/artifact-gate-log.jsonl"
 
 # `cksum` is POSIX and is on both BSD and GNU systems. Fed on STDIN it prints
 # no filename, so the two platforms' differing trailing field never matters and
@@ -388,7 +464,6 @@ examined "$CASES"
 # Read here rather than at the end so an unreadable settings file refuses the
 # run before twenty publishes are judged against a gate nobody can show is
 # wired in.
-[ -n "$SETTINGS" ] || SETTINGS="$ROOT/.claude/settings.json"
 [ -f "$SETTINGS" ] && [ -r "$SETTINGS" ] \
   || die_unmeasured "no readable settings file at the path given, so whether this hook is registered on the Artifact matcher is UNKNOWN. A registration nobody could read has not been shown to exist"
 examined "$SETTINGS"
@@ -703,7 +778,7 @@ else
 fi
 
 if [ ! -e "$GATELOG" ]; then
-  a7_unmeasured="there is no decision record at the default path, so nothing has been observed invoking this hook. The gate writes one line per decision; an absent file means the Artifact tool has not published since the gate began recording. UNMEASURED - which is not a finding, and is not a pass"
+  a7_unmeasured="there is no decision record at $LOG_WHERE, so nothing has been observed invoking this hook. The gate writes one line per decision; an absent file means the Artifact tool has not published since the gate began recording. UNMEASURED - which is not a finding, and is not a pass"
 elif [ ! -f "$GATELOG" ] || [ ! -r "$GATELOG" ]; then
   a7_unmeasured="the decision record exists but is not a readable file, so whether the tool has invoked this hook is UNKNOWN. A record nobody could read has not been shown to be empty"
 else

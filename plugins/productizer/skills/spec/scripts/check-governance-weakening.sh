@@ -39,11 +39,20 @@
 #
 #   .github/workflows/checks.yml
 #     - `on`: a trigger, branch or tag pattern lost.
-#     - `permissions`: a scope raised or added. This is the one atom whose
-#       weakening is not about checking less; a job token that can do more is a
-#       step worth compromising, and it belongs to the same file and the same
-#       review.
-#     - a STEP lost, by name.
+#     - `permissions`: a scope raised or added, in the workflow's default AND
+#       in every job's own block. This is the one atom whose weakening is not
+#       about checking less; a job token that can do more is a step worth
+#       compromising, and it belongs to the same file and the same review. A
+#       NEW job has no token of its own at the base, so each scope it names is
+#       measured against the workflow's default there, and the whole token is
+#       printed as a NOTE either way (B138: at ba343ed a new job's
+#       `pull-requests: read` went unread, because no job-level block was).
+#     - a STEP lost, keyed by what it says it is - its `id`, else its `name`
+#       and the action it `uses` without the `@ref`, else its first `run` line
+#       - never by its position (B138: an unnamed checkout swapped for an
+#       unnamed download at the same index read as one unchanged step). The
+#       same step reappearing in ANOTHER job is a MOVE, judged by the token it
+#       now runs under: the most that token can do first, then scope by scope.
 #     - `continue-on-error` gaining a true - a step that runs and decides
 #       nothing - and an `if:` arriving on a step that had none.
 #     - an INVOCATION lost: any line of any `run:` block naming a `.sh` or `.py`
@@ -99,8 +108,12 @@
 # level up.
 #
 # IT IS MEASURED AGAINST THIS REPOSITORY'S REAL HISTORY, not argued against it.
-# All 36 commits that ever touched either governance file, each run with its own
-# parent as the base and its own tree checked out:
+# Re-swept for B138 over all 53 commits that touched either file at 01dbd56:
+# the only verdicts that moved are 5117f48 (the job that drafts releases first
+# cut `contents: write`) and ba343ed (`pull-requests: read` on a new job), both
+# 0 -> 1, both a token scope the workflow's default never granted. The first
+# sweep, of the 36 commits that touched either governance file then, each run
+# with its own parent as the base and its own tree checked out, read:
 #
 #   32 of 36   exit 0. Nothing moved down a ladder.
 #    2 of 36   exit 1, and BOTH are UNDECIDED with zero claimed weakenings.
@@ -160,10 +173,15 @@
 #     pass the merge base of the pull request.
 #   - the `.local` override file `run-checks.sh` reads beside `checks.yaml`.
 #     Uncommitted and outside this comparison.
+#   - what a token is USED for. A job's `if:` and `needs:` are not weighed, so
+#     a scope widened on a job that only runs on a tag reads the same as one on
+#     a job every pull request runs. And a step whose key is unchanged is not
+#     compared body to body: a checkout that gains `persist-credentials: true`
+#     under the same `uses` is not seen.
 #   - whether a weakening was RIGHT. This reports the move, never the judgement.
 set -euo pipefail
 
-VERSION="check-governance-weakening 1.0"
+VERSION="check-governance-weakening 1.1"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MEASURE="$HERE/governance-weakening.py"
@@ -302,6 +320,18 @@ jobs:
           bash scripts/check-delta.sh \
             --flag one
           bash plugins/productizer/skills/spec/scripts/run-checks.sh --base "$SHA"
+  release:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v1
+        with:
+          fetch-depth: 0
+      - name: Draft
+        run: |
+          gh release create "$TAG" --draft
 YAML
   }
 
@@ -565,6 +595,59 @@ PY
   drive wider-token 1 "the job token raised from read to write" \
     --root "$WORK/wider-token" --self-id "$SELF_ID_DEFAULT"
   says wider-token "permissions.contents" "it names the scope that was raised"
+
+  # -- B138. At ba343ed a NEW job was given `pull-requests: read` and the
+  # write job's unnamed checkout was swapped for an unnamed download in the same
+  # position. This check said nothing about either: only the workflow's own
+  # `permissions` was read, and steps were keyed by position. Each case below
+  # went 0, or 0 without its sentence, on the version before the fix.
+  build job-token-raised
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("    permissions:\n      contents: write\n","    permissions:\n      contents: write\n      actions: write\n"))' \
+    "$WORK/job-token-raised/$WORKFLOW_REL"
+  drive job-token-raised 1 "a scope added to an EXISTING job's own permissions block: a job-level token was never read before B138" \
+    --root "$WORK/job-token-raised" --self-id "$SELF_ID_DEFAULT"
+  says job-token-raised "WEAKENED: workflow.jobs[release].permissions.actions" \
+    "it names the job and the scope, not the workflow's default"
+
+  build new-job-token
+  printf '%s\n' "  prep:" "    runs-on: ubuntu-latest" "    permissions:" "      contents: read" \
+    "      pull-requests: read" "    steps:" "      - name: Notes" "        run: echo notes" \
+    >> "$WORK/new-job-token/$WORKFLOW_REL"
+  drive new-job-token 1 "a NEW job that cuts a token with a scope the workflow's default never granted: it has no base of its own, and is measured against that default" \
+    --root "$WORK/new-job-token" --self-id "$SELF_ID_DEFAULT"
+  says new-job-token "WEAKENED: workflow.jobs[prep].permissions.pull-requests" \
+    "the widened scope is a weakening, and the scope equal to the default is not"
+
+  build step-replaced
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("      - uses: actions/checkout@v1\n        with:\n          fetch-depth: 0\n","      - uses: actions/download-artifact@v1\n"))' \
+    "$WORK/step-replaced/$WORKFLOW_REL"
+  drive step-replaced 1 "an unnamed checkout replaced by an unnamed download in the same position: keyed by position, the two were one step and nothing was reported" \
+    --root "$WORK/step-replaced" --self-id "$SELF_ID_DEFAULT"
+  says step-replaced "workflow.step[release/uses actions/checkout]" \
+    "the step is named by what it uses, so the one that went is the one reported"
+
+  build checkout-moved
+  python3 - "$WORK/checkout-moved/$WORKFLOW_REL" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+step = "      - uses: actions/checkout@v1\n        with:\n          fetch-depth: 0\n"
+t = t.replace(step, "")
+t += "  prep:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n    steps:\n" + step
+open(p, "w").write(t)
+PY
+  drive checkout-moved 0 "the checkout moved out of the write job into a new read-only one, as at ba343ed: a tightening, so not a finding" \
+    --root "$WORK/checkout-moved" --self-id "$SELF_ID_DEFAULT"
+  says checkout-moved "moved to [prep/uses actions/checkout], under a token that can do less" \
+    "the move is REPORTED as a tightening with both tokens printed, not read as nothing"
+
+  build pin-bumped
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("actions/checkout@v1","actions/checkout@v2"))' \
+    "$WORK/pin-bumped/$WORKFLOW_REL"
+  drive pin-bumped 0 "an action's pin bumped: the @ref is not part of the step's key, so a version bump is the same step and not a deletion" \
+    --root "$WORK/pin-bumped" --self-id "$SELF_ID_DEFAULT"
+  says pin-bumped "Nothing on the governance surface moved down a ladder" \
+    "a routine pin bump stays quiet"
 
   # -- 1: UNDECIDED. A glob rewritten is a member lost and a member gained in
   # one change, and glob subsumption is not decided here.

@@ -108,5 +108,5 @@ jobs:
           fi
           cp -R "$TOOLS" "$RUNNER_TEMP/productizer-tools"
           rm -rf .productizer-tools
-      - run: bash "$RUNNER_TEMP/productizer-tools/build-dispatch.sh" deliver .
+      - run: bash "$RUNNER_TEMP/productizer-tools/build-dispatch.sh" deliver . --protected "$RUNNER_TEMP/productizer-body/protected.txt"
       - run: echo deliver

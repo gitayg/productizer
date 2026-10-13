@@ -51,6 +51,9 @@
 # The states print differently and exit differently:
 #
 #   no import on the record          exit 0   the premise, measured and absent
+#   no import in the files read, and exit 2   UNMEASURED (1.3, B143): two of
+#     a history that could not be             the four sources live in the
+#     walked                                  history, and neither was read
 #   an import, cohort unresolved     exit 2   UNMEASURED
 #   an import, nothing marked        exit 1   findings, under its own heading
 #   an import, some marker missing   exit 1   findings, per id
@@ -65,6 +68,31 @@
 # by `stage-in-the-spec-prose` (it was `stage-in-the-backlog` until the
 # backlog stopped being evidence on its own). No behaviour was changed by this
 # correction; only the prose, which described an earlier draft's intent.
+#
+# ==========================================================================
+# WHAT CHANGED IN 1.3 (B143, B144).
+# ==========================================================================
+#
+# B143. 1.2 printed source B as an em dash - "git could not be walked" - and
+# then `NO IMPORT ON THE RECORD`, exit 0, saying four sources were read. Two of
+# them, the commit messages and the commits that drafted requirements, live in
+# the history it never read. That contradicted this header's own rule (git
+# being unreadable is not a clean run) and the fail-closed reading of R10: the
+# premise was half-read, not measured absent. It is now exit 2, `NO IMPORT
+# FOUND, HISTORY UNREAD`. A git work tree with NO COMMIT YET is not that state:
+# its history is empty, which is walked and holds nothing, so it reads 0 of 0
+# commits and stays exit 0 - the repository every adoption starts from, and the
+# one `measure-check-overfire.sh --history empty` hands every check.
+#
+# B144. 1.2 counted ANY added backlog line spelling the stage, in a commit that
+# drafted requirements, as the import's record. Measured on this repository's
+# own v4.70.0 commit: two rows DESCRIBING this check, written beside R85-R95,
+# made all eleven findings, exit 1, and had to be reworded to ship. 1.3 counts
+# only the row step 5 of the procedure writes - a backlog item whose item cell
+# OPENS with the stage, `| B<n> | Stage 0c could not infer ... |` - and only
+# one that commit WROTE: a row whose id a removed line also held was edited in
+# place (an old gap moved to `done` by the commit whose requirement answers it)
+# and is not a gap written in that pass.
 #
 # ==========================================================================
 # HOW AN IMPORT IS DETECTED. READ THIS BEFORE TRUSTING ANY RUN.
@@ -92,14 +120,15 @@
 #      change log afterwards.
 #
 #   C  A DECLARED STAGE (MARKER-FREE). `Stage 0c` named in a change-log row, a
-#      commit message, anywhere else in the spec, or in a backlog line WRITTEN
-#      BY THE COMMIT THAT DRAFTED THE REQUIREMENTS. This is the ONE piece of
-#      prose used, because it is a stage identifier rather than an English
-#      word - `import` is a substring of `important` and a topic half this
-#      repo's requirements are about; `stage 0c` is neither. C is what makes
-#      an import that marked NOTHING visible, and it is why the backlog is
-#      read: step 5 of the procedure writes the import's refusals down as
-#      backlog items, in the same pass, and those survive a spec nobody marked.
+#      commit message, anywhere else in the spec, or opening a backlog gap
+#      row WRITTEN BY THE COMMIT THAT DRAFTED THE REQUIREMENTS. This is the
+#      ONE piece of prose used, because it is a stage identifier rather than
+#      an English word - `import` is a substring of `important` and a topic
+#      half this repo's requirements are about; `stage 0c` is neither. C is
+#      what makes an import that marked NOTHING visible, and it is why the
+#      backlog is read: step 5 of the procedure writes the import's refusals
+#      down as backlog items, in the same pass, and those survive a spec
+#      nobody marked.
 #
 #      THE BACKLOG AS IT STANDS IS NOT EVIDENCE, since 1.2 (B127, R73's rule
 #      for stage-advance.sh applied here). 1.1 read every line of the file in
@@ -107,14 +136,17 @@
 #      check from 0 into 2, and a row reading `Stage 0c drafted R5` made R5 a
 #      finding - measured on this repository on 2026-10-12, both. A backlog
 #      line now counts only through git: a commit that introduced requirement
-#      bullets for the first time AND, in the same commit, added a backlog line
-#      naming the stage. That commit's NEW ids are the cohort, so this route
-#      now resolves a cohort where 1.1 could only refuse. An append that drafts
-#      nothing is not a commit touching the spec and is never walked. Lines in
-#      the work tree that name the stage are still counted and printed as a
-#      note, so the reader sees them and why they did not count. Where git
-#      cannot be walked or the backlog lies outside the work tree, such lines
-#      are UNVERIFIED and the run is exit 2, never a quiet 0.
+#      bullets for the first time AND, in the same commit, wrote a new backlog
+#      row of the gap shape - its first cell a `B<n>` id, its item cell opening
+#      with the stage (1.3; a line that merely mentions the stage is prose
+#      ABOUT it, not the record of a run). That commit's NEW ids are the
+#      cohort, so this route now resolves a cohort where 1.1 could only
+#      refuse. An append that drafts nothing is not a commit touching the spec
+#      and is never walked. Lines in the work tree that name the stage are
+#      still counted and printed as a note, so the reader sees them and why
+#      they did not count. Where git cannot be walked or the backlog lies
+#      outside the work tree, gap rows there are UNVERIFIED and the run is
+#      exit 2, never a quiet 0.
 #
 #   D  A DECISION-RECORD PROMOTION (marker-free in effect). Promotion DELETES
 #      the marker line, so a ratified requirement is bare BY DESIGN. A row
@@ -167,10 +199,16 @@
 #     that drafted its requirements is, through the backlog, invisible: that
 #     later commit is byte-identical in kind to an append, and treating it as
 #     evidence is the hole 1.2 closed. Step 5 says "in the same pass".
-#   - A COMMIT THAT DRAFTS A NEW REQUIREMENT AND APPENDS A BACKLOG LINE naming
-#     the stage still attributes that requirement. It is a spec change, the
-#     red tier, and it is exactly as strong as naming the stage in that
-#     commit's message, which already counted.
+#   - A COMMIT THAT DRAFTS A NEW REQUIREMENT AND WRITES A NEW BACKLOG GAP ROW
+#     opening with the stage still attributes that requirement. It is a spec
+#     change, the red tier, and it is exactly as strong as naming the stage in
+#     that commit's message, which already counted. What 1.3 narrowed is the
+#     SHAPE, not the route: a row that opens `| B<n> | Stage 0c ...` and is
+#     not a gap at all - a feature request for the import stage, say - written
+#     beside a new requirement, is still read as the import's record.
+#   - AN IMPORT GAP WRITTEN IN ANY OTHER SHAPE - prose, a bullet, the stage
+#     named in the Notes cell only - is, through the backlog, invisible since
+#     1.3. Step 5 of the procedure is where the shape is set.
 #   - AN IMPORT SPLIT ACROSS SEVERAL CHANGE-LOG ROWS only pulls in the rows
 #     that name a marked id or the stage; a row where every marker was
 #     forgotten and the stage went unnamed is a row this check never reaches.
@@ -181,9 +219,11 @@
 #
 # GIT IS PART OF THE INPUT, SO GIT BEING UNREADABLE IS NOT A CLEAN RUN. A root
 # that is not a git work tree, or a history that cannot be walked, is exit 2
-# with cohort B printed as an em dash - never as 0 commits. The one ordering
-# rule: findings already found are a definite answer, so they exit 1 even when
-# B could not be read.
+# with cohort B printed as an em dash - never as 0 commits - and since 1.3 that
+# holds when nothing else names an import too (B143). A work tree with no
+# commit yet has an EMPTY history, walked, 0 of 0. The one ordering rule:
+# findings already found are a definite answer, so they exit 1 even when B
+# could not be read.
 #
 # WHAT IT PRINTS. One BARE PATH per line for every file examined; everything
 # else INDENTED. Findings name the ID AND THE LINE. No requirement text is
@@ -197,8 +237,9 @@
 #   1  at least one is not - reported by id, line, and the source that
 #      attributed it
 #   2  COULD NOT MEASURE - bad usage, a spec that could not be parsed, a git
-#      history that could not be walked, or an import on the record that no
-#      requirement could be attributed to
+#      history that could not be walked (whether or not anything else names an
+#      import), or an import on the record that no requirement could be
+#      attributed to
 #
 # ONE LINE OF THAT CONTRACT WAS STALE UNTIL 2026-09-06 AND IS NOW CORRECTED
 # ABOVE RATHER THAN LEFT WITH A NOTE UNDER IT. `no import on the record at all`
@@ -207,10 +248,9 @@
 # hold. The suite's own comment gives the reason and it is the better argument:
 # R10 is event-driven, four sources were read and none records an import, and
 # that is a measurement of the premise rather than a refusal to look. Nothing
-# in this file's behaviour changed with the correction. NOTE, NOT FIXED HERE:
-# `fixtures/import-marking/selftest.sh`'s own header block still describes
-# cases 1 and 5 as `exit 2, UNMEASURED` while its `run_case` lines declare 0.
-# That file is the suite, not this check, and it is left for whoever owns it.
+# in this file's behaviour changed with the correction. The suite's own header
+# described cases 1 and 5 as `exit 2, UNMEASURED` while its `run_case` lines
+# declared 0; corrected there in suite 1.2, alongside 1.3.
 #
 # --SELFTEST RUNS THE COMMITTED FALSIFICATION SUITE, `fixtures/import-marking/
 # selftest.sh`, against THIS file. That suite already existed and already
@@ -220,15 +260,17 @@
 # knows the path can run is not one the tool carries. The flag is that way in
 # and it adds no second copy of the cases.
 #
-# The suite drives all three of this check's exit codes: 0 on seven cases
-# (never imported, every requirement marked, all of them promoted, an import
-# that left no trace at all, and three backlogs that name the stage by an
-# append or in the work tree only), 1 on four (nothing marked, a marker
-# forgotten, the stage named only in a commit message, the stage named in a
-# backlog line the drafting commit wrote) and 2 on two (the stage named in the
-# spec's prose on a line holding no id, so an import is on the record and its
-# cohort cannot be resolved; and a backlog naming the stage under a root git
-# cannot walk).
+# The suite drives all three of this check's exit codes, over 18 cases: 0 on
+# ten (never imported, every requirement marked, all of them promoted, an
+# import that left no trace at all, three backlogs that name the stage by an
+# append or in the work tree only, a work tree with no commit yet, backlog
+# prose spelling the stage in the drafting commit, and an import gap row moved
+# to `done` by a later commit that agrees a requirement), 1 on five (nothing
+# marked, a marker forgotten, the stage named only in a commit message, a gap
+# row the drafting commit wrote, and that gap row beside prose) and 2 on three
+# (the stage named in the spec's prose on a line holding no id, so an import is
+# on the record and its cohort cannot be resolved; a backlog gap row under a
+# root git cannot walk; and that root with nothing naming an import at all).
 #
 # Under --selftest the three codes mean: every case produced the verdict it
 # declares (0), at least one did not (1), and the suite could not be run at
@@ -236,7 +278,7 @@
 # both ways.
 set -euo pipefail
 
-VERSION="check-import-marking 1.2"
+VERSION="check-import-marking 1.3"
 ROOT=""
 SPEC=".claude/productizer/spec.md"
 BACKLOG=".claude/productizer/backlog.md"
@@ -384,6 +426,14 @@ RE_SEP = re.compile(r'^[\s:|-]+$')
 # the requirements of a product whose subject IS importing; `stage 0c` does
 # neither.
 RE_STAGE0C = re.compile(r'\bstage\s*0c\b', re.I)
+# THE SHAPE OF A GAP THE IMPORT WROTE, since 1.3 (B144). Step 5 of the import
+# procedure writes each refusal down as a backlog item: a row whose first cell
+# is its `B<n>` id and whose item cell is the stage's own gap, so it OPENS with
+# the stage id - `| B1 | Stage 0c could not infer ... |`. 1.2 counted any added
+# line that merely spelled the stage, and a row DESCRIBING this check, written
+# in a commit that drafted eleven requirements, made all eleven findings.
+RE_GAP_ROW = re.compile(r'^\|\s*(B[0-9]+)\s*\|\s*[`*_]*\s*stage\s*0c\b', re.I)
+RE_BACKLOG_ID = re.compile(r'^\|\s*(B[0-9]+)\s*\|')
 # Promotion is recorded in the decision record, and only a row that reads as a
 # confirmation AND says the id came from the import counts as one. The same
 # pair build-view.sh uses, so the two files agree about what a promotion is.
@@ -548,6 +598,9 @@ for index, line in enumerate(lines):
 # commit that introduced requirements AND added a backlog line naming the
 # stage, which an append alone cannot be.
 backlog_named = sum(1 for line in backlog_lines if RE_STAGE0C.search(line))
+# Of those, the rows of the shape an import writes. Only these can ever count,
+# and only through the commit that wrote them.
+backlog_rows = sum(1 for line in backlog_lines if RE_GAP_ROW.match(line))
 
 # --- source A: change-log rows, and C where the row names the stage ---------
 a_rows = 0
@@ -620,9 +673,18 @@ def git(*args):
 
 
 probe = git('rev-parse', '--is-inside-work-tree')
+unborn = None
+if probe.returncode == 0:
+    # A repository with no commit yet has an EMPTY history, which is walked and
+    # holds nothing - not one that could not be walked. `git log` refuses on an
+    # unborn branch, so it is asked first, and only a missing HEAD is spared.
+    unborn = git('rev-parse', '--verify', '--quiet', 'HEAD').returncode != 0
 if probe.returncode != 0:
     git_note = (probe.stderr.strip().split('\n')[-1]
                 if probe.stderr.strip() else 'git rev-parse failed')
+elif unborn:
+    walked = 0
+    b_commits = 0
 else:
     log = git('log', '--max-count=%d' % max_commits, '--reverse',
               '--format=%H%x1f%B%x1e', '--', spec_rel)
@@ -675,10 +737,24 @@ else:
                               if bshow.stderr.strip()
                               else 'git show %s failed' % sha[:12])
                     break
-                if any(l.startswith('+') and not l.startswith('+++')
-                       and RE_STAGE0C.search(l)
-                       for l in bshow.stdout.split('\n')):
-                    backlog_commits.append((sha, fresh))
+                # Only a gap row this commit WROTE: an added line of the
+                # import's shape whose id no removed line held. A row edited in
+                # place - an old gap marked `done` by the commit whose new
+                # requirement answers it - is not a gap written in this pass.
+                bdiff = bshow.stdout.split('\n')
+                rewritten = set()
+                for l in bdiff:
+                    if l.startswith('-') and not l.startswith('---'):
+                        old = RE_BACKLOG_ID.match(l[1:])
+                        if old:
+                            rewritten.add(old.group(1))
+                for l in bdiff:
+                    if not l.startswith('+') or l.startswith('+++'):
+                        continue
+                    row = RE_GAP_ROW.match(l[1:])
+                    if row and row.group(1) not in rewritten:
+                        backlog_commits.append((sha, fresh))
+                        break
         if failed is not None:
             git_note = failed
         else:
@@ -756,9 +832,11 @@ if backlog_note:
 if backlog_named:
     out.write('    note: %d line(s) of %s name `Stage 0c` as it stands. A '
               'backlog line is not evidence of an import on its own - anyone '
-              'may append one - so it counts only where the commit that wrote '
-              'it also drafted requirements: %s such commit(s)\n'
-              % (backlog_named, shown_backlog, backlog_figure))
+              'may append one - so it counts only where it is a gap row the '
+              'import writes (`| B<n> | Stage 0c ...`), %d of them, and the '
+              'commit that wrote it also drafted requirements: %s such '
+              'commit(s)\n'
+              % (backlog_named, shown_backlog, backlog_rows, backlog_figure))
 out.write('    requirements attributed to an import: %d\n' % len(known))
 out.write('    of those, already marked, refused or promoted: %d\n'
           % len(settled))
@@ -854,16 +932,35 @@ for rid in findings:
 if findings:
     raise SystemExit(1)
 
-if not premise and backlog_named and backlog_figure.startswith('—'):
-    # The backlog names the stage and its history could not be read, so
-    # whether an import commit wrote those lines is UNKNOWN. That is not the
-    # premise measured absent; it is the one evidence source left unread.
+if not premise and backlog_rows and backlog_figure.startswith('—'):
+    # The backlog holds a gap row of the import's shape and its history could
+    # not be read, so whether an import commit wrote it is UNKNOWN. That is not
+    # the premise measured absent; it is the one evidence source left unread.
+    # Prose that merely spells the stage is not evidence even when its history
+    # IS read (1.3), so it cannot make this state either.
     out.write('    BACKLOG UNVERIFIED.  %s names `Stage 0c` and the commits '
               'that wrote it could not be read, so whether an import wrote '
               'it is unknown.\n' % shown_backlog)
     sys.stderr.write('check-import-marking: %s names `Stage 0c` and its '
                      'history could not be read. Unmeasured, not clean.\n'
                      % shown_backlog)
+    raise SystemExit(2)
+
+if not premise and b_commits is None:
+    # 1.3 (B143). Two of the four sources live in the history - the commit
+    # messages, and the commits that drafted requirements - and NEITHER was
+    # read. "Four sources were read and none records an import" would be false,
+    # so this is not the premise measured absent; it is the premise half-read.
+    # A repository with no commit yet is not this state: its empty history was
+    # walked, above.
+    out.write('    NO IMPORT FOUND, HISTORY UNREAD.  Nothing in %s or %s says a '
+              'Stage 0c import ran here, and this repository\'s history could '
+              'not be walked (%s), so the commit messages and the commits that '
+              'drafted requirements were never read. Unmeasured, not clean.\n'
+              % (shown, shown_backlog, git_note or 'unknown reason'))
+    sys.stderr.write('check-import-marking: no import in the files read, and '
+                     'the history could not be walked. Unmeasured, not '
+                     'clean.\n')
     raise SystemExit(2)
 
 if not premise:
