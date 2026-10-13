@@ -102,6 +102,32 @@ policy:
   # hides it, and is here only so a repo mid-adoption can opt in deliberately.
   empty_run: refuse
 
+  # REPOSITORY-DECLARED CHECK TOOLS, shipped OFF. While the line below stays a
+  # comment, run-checks.sh refuses the whole file at load (exit 2, naming the
+  # check and the argv position) when a check's program resolves inside this
+  # repository, when an argument names a path inside it, or when `{file}` or
+  # `{files}` is handed to a program not on the plugin's data-only list
+  # (shellcheck, semgrep, grep). The list ships with the plugin and is never
+  # read from this file.
+  #
+  # 16 of the 19 checks below need it on: the 13 whose program is a script in
+  # this repository (pii-log-scan, stderr-suppression, spec-home,
+  # ruling-requested, template-frontmatter, guide-current, view-read-only,
+  # missing-tool-reported, acceptance-rows, import-marking,
+  # classification-provenance, superseded-text, pending-ruling-scope), and
+  # sast, sast-auth and secure-coding-controls, whose `coverage.rules_command`
+  # names a committed file. secret-scan, shell-lint and dependency-audit run
+  # with it off.
+  #
+  # WHAT TURNING IT ON TRUSTS: every commit that lands in this repository. A
+  # check then runs what the committed files say - a script, a module, a file
+  # a tool reads - as you, on the machine that runs the checks, so whoever can
+  # land a commit chooses what runs there. Turn it on in your own repository,
+  # where commits are reviewed; leave it off to run the checks of a repository
+  # you cloned and have not read. Shells, awk, make, env and inline programs
+  # (`python3 -c`) stay refused either way.
+  # allow_repo_local_tools: true
+
   # Where the machine-readable result lands. Stage 6 review reads this file;
   # it is the evidence that the checks stage ran and what it covered.
   #
@@ -301,12 +327,13 @@ checks:
   #                    `rules_pattern` matched exactly those ids - 342 of 342 over
   #                    one Python file. The list is PER LANGUAGE of the target,
   #                    so point it at one committed file in your main language,
-  #                    and set the floor from what you measure. Left unedited the
-  #                    target does not exist, semgrep exits 2, and the check
-  #                    refuses - which is the safe way for it to be wrong.
-  #                    A committed file named here is a repository path, so
-  #                    run-checks.sh refuses the check until
-  #                    `policy.allow_repo_local_tools: true`.
+  #                    and set the floor from what you measure. A file named
+  #                    here is a repository path, so while
+  #                    `policy.allow_repo_local_tools: true` stays commented
+  #                    run-checks.sh refuses this argv at load, edited or not.
+  #                    With it on and this line left unedited, the target does
+  #                    not exist, semgrep exits 2, and the check refuses -
+  #                    which is the safe way for it to be wrong.
   - id: sast
     why: the ordinary injection and path-traversal classes, on every change that touches code
     when:

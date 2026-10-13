@@ -321,12 +321,28 @@ file `.claude/productizer/checks.yaml` at the BASE runs is refusal 3: of every
 check, the program in `command`, `version_command`, `coverage.command` and
 `coverage.rules_command`, the first operand an interpreter is handed there
 (`python3 -m pkg.mod` protects `pkg/**` and `pkg.py`), and every `requires`
-entry, each with everything under it and on its folded key. Since 1.7
-(v4.72.1) also every operand, `--opt=VALUE` or glued `-XVALUE` value naming a
-repository path, and every operand of an interpreter - matched by its stem, so
-`python3.9` is one - whose options precede its script; `argv-classify.py`
-reads the argv for both this and `run-checks.sh`'s repo-local gate. The set is read at
-the base, never from the change, so the change cannot redefine it.
+entry, each with everything under it and on its folded key. Since 1.8
+(v4.72.2, the maintainer's strict rule) no interpreter is recognised: the set
+is the program and every literal argument - each non-option token, bare words
+included, every `--opt=VALUE` and glued `-XVALUE` value that names a repository
+path or is shaped like one, and the module paths of a dotted name (`pkg.mod`
+protects `pkg`, with everything under it, `pkg.py` and `pkg/mod.py`) - whatever
+program it is handed to.
+`argv-classify.py` reads the argv for both this and `run-checks.sh`'s repo-local
+gate. The set is read at the base, never from the change, so the change cannot
+redefine it.
+
+**A placeholder handed to a program off the data-only list is exit 4**
+(maintainer ruling 2026-10-13, B156). Under `--unattended`, a check that hands
+`{file}` or `{files}` to a program neither on the plugin's data-only list
+(shellcheck, semgrep, grep) nor a repository path - `python3 -m pytest {files}`
+- makes the decider refuse to decide, exit 4: that program chooses what it runs
+from files the change picks, and no list drawn from the argv covers them. The
+fix is to wrap the command in a repository script (`[./scripts/test.sh,
+"{files}"]`, the script running `python3 -m pytest "$@"`): the script is then
+the program, and is itself protected. What neither script gates is a file a
+tool finds and runs by itself, with no argument naming it - test discovery,
+`conftest.py`, `.semgrepignore`, `.npmrc`, a git alias.
 
 **The protected list: read it before the AI** (maintainer ruling 2026-10-13).
 Reading that set means parsing YAML, and the job holding the write token must
@@ -747,9 +763,9 @@ your copy after every edit.
   call.** A file a check script sources or runs that `checks.yaml` does not
   name itself (a `.py` beside the `.sh` it runs) is not protected, and a
   `run-checks.sh --config` other than `.claude/productizer/checks.yaml` is not
-  read. Nor is a file a tool runs that no operand names - a test runner
-  discovering tests, a config file the tool finds by itself; `run-checks.sh`'s
-  `allow_repo_local_tools` gate does not see it either. `prepare` installs PyYAML from PyPI pinned by version, not by hash, in
+  read. Nor is a file a tool finds and runs by itself, with no argument naming
+  it - test discovery, `conftest.py`, `.semgrepignore`, `.npmrc`, a git alias;
+  `run-checks.sh`'s `allow_repo_local_tools` gate does not see it either. `prepare` installs PyYAML from PyPI pinned by version, not by hash, in
   the job with no write token.
 - **The agent cannot run your tests, by design.** The no-shell rule removes the
   Bash tool, so build mode edits code without running it. Your checks on the

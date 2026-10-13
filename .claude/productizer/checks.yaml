@@ -2297,15 +2297,24 @@ checks:
             3, each 0 at 6627bcf. Two data-operand cases changed on purpose, to exit 3:
             `unattended-checks-data-operand-protected` and
             `unattended-checks-operand-after-script-protected`; a file no check names stays
-            allowed (`unattended-checks-unnamed-file-allowed`). A placeholder after an
-            interpreter whose options come first, or in an option it takes first, exits 4
-            (`print-protected-placeholder-after-options`, `-in-option`), a placeholder after `-m`
-            names the module's arguments (`print-protected-module-arguments`, exit 0), and with no
-            argv-classify.py beside it the decider exits 4 (`print-protected-no-shared-reading`).
-            Falsified by the building agent at 198 cases: 191, 195 and 196 of 198. Re-falsified
-            2026-10-13 at 202 cases: operands naming a repository path not protected, 195 of 202;
-            an interpreter matched by its exact name, 193 of 202; the options-first reading off,
-            199 of 202.
+            allowed (`unattended-checks-unnamed-file-allowed`). With no argv-classify.py beside
+            it the decider exits 4 (`print-protected-no-shared-reading`). Falsified by the
+            building agent at 198 cases: 191, 195 and 196 of 198. Re-falsified 2026-10-13 at 202
+            cases: operands naming a repository path not protected, 195 of 202; an interpreter
+            matched by its exact name, 193 of 202; the options-first reading off, 199 of 202.
+            Since 1.8 (B152, v4.72.2, the strict rule), 212 cases: no interpreter is recognised,
+            and the program, every literal non-option token, every `--opt=` and glued value and
+            the module paths of a dotted name are protected - `print-protected-literals` and
+            `-literals-exact-set` print exactly that set, and `unattended-literal-*` exit 3 on a
+            whole path, an `--rules=` value, a glued `-I` value, a bare word and a dotted name's
+            module path. A placeholder handed to a program neither on the data-only list nor a
+            repository path is exit 4 (`print-protected-placeholder-unlisted`, `-voided`,
+            `-after-options`, `-in-option`, and `print-protected-module-arguments`, which 1.7
+            allowed), by the maintainer's ruling; `-data-only` exits 0. On this repository the set
+            went from 69 to 82 paths, all 69 kept, the 13 added being bare words. Falsified
+            2026-10-13: shaped values off, 209 of 212; dotted names off, 205; the placeholder exit
+            4 off, 207; bare words off, a whole token protected only when path-shaped or held by
+            the base, 203.
         - id: R127
           verdict: Covered
           evidence: >-
@@ -2329,7 +2338,7 @@ checks:
             line with a space at either end is refused as data, exit 4
             (`unattended-protected-list-trailing-space`, `-leading-space`); falsified by the
             building agent at 196 of 198, and re-falsified 2026-10-13 with the space refusal
-            removed: 200 of 202.
+            removed: 200 of 202. The cases hold at 1.8, 212 cases (v4.72.2).
         - id: R132
           verdict: Covered
           evidence: >-
@@ -3991,10 +4000,58 @@ checks:
             Against the 6627bcf runner the eleven opted-out cases and `rl-no-shared-reading` go
             red. Falsified 2026-10-13: operands never gated, 6 findings (`rl-glued-option`,
             `rl-sed-f`); interpreters matched by exact name, 3 (`rl-file-as-script`); the
-            options-first reading off, 3 (`rl-file-after-option`).
+            options-first reading off, 3 (`rl-file-after-option`). Since 1.2 (B152, v4.72.2, the
+            maintainer's strict rule) the gate recognises no interpreter and over-approximates
+            R102 by three clauses, each driven off and on: the program resolves inside the work
+            tree (`rl-p-relative`, `-absolute`, `-bare`); a literal argument names a path inside
+            it (the `rl-a-*` cases, R142); a placeholder is handed to a program not on the
+            data-only list (`rl-ph-unlisted`, `-voided`, `-config-list`, R143, R144). The B150
+            cases stay as regression cases. Six clause cases are red against 4037079:
+            `rl-a-glued-cluster`, `rl-a-base-only`, `rl-a-base-id`, `rl-a-absent-script`,
+            `rl-ph-unlisted` and `rl-ph-voided`. Falsified per clause 2026-10-13: the program
+            clause off turns the three `rl-p-*` cases red; the argument clause off, 68 findings;
+            the placeholder clause off, 4 cases red. NOT asserted: a file a tool runs that no
+            argument names; an extension-less path an earlier check writes during the run; a
+            value inside a comma-separated list; node_modules resolution; shellcheck and semgrep
+            actually run with a placeholder; a listed tool later gaining a code-running option.
+        - id: R142
+          verdict: Partial
+          reason: >-
+            The runner does not refuse an extension-less path that an earlier check writes during
+            the run (B157), a value inside a comma-separated list (`--x=a,b` is one value), or a
+            name a tool resolves through a search path of its own such as node_modules; the root
+            `.` is not counted, by ruling (B154).
+          evidence: >-
+            With the opt-in off each clause-2 case exits 2 with the marker absent, and runs with
+            it on: `rl-a-dot-slash`, `-double-slash`, `-dotdot`, `-trailing-slash`, `-opt-equals`,
+            `-glued`, `-glued-cluster`, `-base-only`, `-work-tree-only`, `-symlink`, `-base-id`
+            (`docs/{base}` judged as the path it becomes), `-dotted`, `-absent-script`, and the
+            same argument in version_command and the coverage commands (`rl-a-version`,
+            `-coverage`, `-rules`); `rl-a-case-variant` is refused on a disk that folds case.
+            `rl-not-inside-allowed` runs `.`, a registry id and /dev/null with the opt-in off.
+            Falsified 2026-10-13 with the argument clause off: 68 findings.
+        - id: R143
+          verdict: Covered
+          evidence: >-
+            With the opt-in off, `rl-ph-unlisted` (a placeholder handed to a program not on the
+            list), `rl-ph-voided` (grep with --filter), `rl-file-as-script` (`python3 {file}`) and
+            `rl-file-after-option` exit 2 with the marker absent, naming clause 3 and the voiding
+            option, and each runs with it on; `rl-data-allowed` runs grep with {files} with it
+            off. Falsified 2026-10-13 with the placeholder clause off: those four cases red.
+        - id: R144
+          verdict: Partial
+          reason: >-
+            A case can try only the keys it names; that no other key of the configuration is read
+            for the list rests on the source, where the gate's only input for it is DATA_ONLY in
+            argv-classify.py.
+          evidence: >-
+            `rl-ph-config-list`: a config naming its own program as data-only, under two policy
+            keys and on the check, is still refused by clause 3, exit 2, the marker absent; red
+            against 4037079. Falsified 2026-10-13 with the gate made to read `policy.data_only`:
+            the case and its two assertions red.
     limitations:
       - It is the runner's self-test, not this repository's run. That the real suite's refusals print their tails in CI is seen in the workflow log, not asserted here.
-      - The node shapes (`--require`, `--require=`, `node.exe`) and `pypy3` are measured through the runner by hand and pinned in argv-classify.py's table, not driven here, because node is not on every machine this self-test runs on. A file a tool runs that no operand names - a test runner discovering tests, a config the tool finds by itself - is not gated.
+      - A file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself (`.semgrepignore`, `.npmrc`, `conftest.py`), a git alias - is not gated. The data-only list rests on the tools' `--help`, read 2026-10-13.
 
   - id: ci-replay
     why: a local suite that passes on this machine's git defaults and fails on the runner's is how two pushes went red, and the replay is only worth running if it removes those defaults

@@ -35,6 +35,11 @@ policy:
   # enforced, and the run would refuse for the absent tool alone - which would
   # leave the denominator half of R26 untested while the run still went red.
   spec_coverage: require
+  # On because the strict repo-local gate (2026-10-13) hands a placeholder
+  # only to a program on its data-only list without it, and this program is
+  # absent everywhere. Nothing here is repo-local; the subject is the absent
+  # tool, which the gate would otherwise refuse before it is ever looked for.
+  allow_repo_local_tools: true
   # Relative, and deliberately not the name of any real spec. The runner
   # resolves it against the repository under test, which is a temporary copy of
   # this directory holding two files and no spec. There is nothing to read, so

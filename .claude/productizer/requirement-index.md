@@ -167,4 +167,7 @@ marker, because a table left there would be one nothing writes or checks.
 | R139 | event | active | `import-marking` |
 | R140 | event | active | `import-marking` |
 | R141 | event | active | `requirement-index-current` |
+| R142 | unwanted | active | `checks-stage-runner` |
+| R143 | unwanted | active | `checks-stage-runner` |
+| R144 | ubiquitous | active | `checks-stage-runner` |
 <!-- productizer:requirement-index:end -->

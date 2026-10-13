@@ -98,10 +98,15 @@ weakening of `secret-scan` committed and run through the runner read `PASS` on
 both, while the same tool given `--base HEAD~1` named it. Found by measuring
 recall on planted defects, not by reading the code.
 
-It is data, not a program. It is refused in `command[0]`, in the script an
-interpreter is handed, and in `version_command`, `requires` and the coverage
-commands, where nothing would substitute it and the literal text would reach a
-tool. The value is checked to be 40 hex digits before it is used.
+It is data, not a program. It is refused in `command[0]`, and in
+`version_command`, `requires` and the coverage commands, where nothing would
+substitute it and the literal text would reach a tool; elsewhere in `command`,
+without the opt-in, the repo-local gate judges the path it becomes, so a file
+the tree holds under that commit id is refused. The value is checked to be 40
+hex digits before it is used. Since v4.72.2 (the strict rule) no interpreter is
+recognised, so `python3 {base}` is no longer refused as "the script an
+interpreter is handed": with the opt-in on it runs, and with it off it runs
+unless the tree holds a file named by that id.
 
 **A run with no base does not guess one.** Under `--changed`, which names paths
 and no commit, a check whose command takes `{base}` is never invoked and reads

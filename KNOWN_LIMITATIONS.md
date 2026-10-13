@@ -470,16 +470,25 @@ still admits, and the named list must catch, is an ASCII, dot-free file:
 None of those is on the list. Since 1.6 (v4.72.0, B136) a file a check declared
 in `checks.yaml` at the base runs - its program, `version_command`, coverage
 commands, an interpreter's first operand and every `requires` entry - is
-refused under `--unattended`, and since 1.7 (v4.72.1, B151) so is every operand
-naming a repository path and every operand of an interpreter whose options
-precede its script, read by `argv-classify.py`, which `run-checks.sh` shares.
+refused under `--unattended`. Since 1.8 (v4.72.2, B152, the maintainer's
+strict rule) the set is read without recognising any interpreter: the program,
+every literal non-option token, bare words included, every `--opt=` and glued
+value naming a repository path or shaped like one, and the module paths of a
+dotted name, read by `argv-classify.py`, which `run-checks.sh` shares. A
+placeholder handed to a program off the plugin's data-only list is exit 4
+under `--unattended` (B156); wrap the command in a repository script.
 What is still admitted is the TRANSITIVE file: a
 file a check script calls or sources that `checks.yaml` does not name itself,
 such as a `.py` beside the `.sh` it runs, which an unattended build may edit to
-neuter the check that runs it. A file a tool runs that no operand names - a
-test runner discovering tests, a config file the tool finds by itself - is
-neither protected here nor gated by `run-checks.sh`'s
-`allow_repo_local_tools`. A `run-checks.sh --config` other than the
+neuter the check that runs it. A tool that finds and runs repository files by
+itself, with no argument naming them, is gated by neither script: test
+discovery, `.semgrepignore`, `.npmrc`, `conftest.py`, a git alias. With the
+opt-in off `run-checks.sh` does not refuse `.` (the root, by ruling, B154), a
+path with no script extension and no `./` that an earlier check writes during
+the run (B157), a value inside a comma-separated list, or a name a tool
+resolves through node_modules. The data-only list (shellcheck, semgrep, grep,
+each voided by named options) rests on the tools' `--help`, read 2026-10-13;
+an option a later release adds is not on it. A `run-checks.sh --config` other than the
 default is not read, and PyYAML, installed in `prepare` to read the set, is
 pinned by version, not by hash. Attended runs apply the list alone. The plugin manifests under `.claude-plugin/` declare hooks
 and MCP servers and are refused unattended by their dot; attended they are not

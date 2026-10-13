@@ -773,7 +773,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**109 requirements are active**, and they are the whole of what has been
+**112 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-two more are superseded and none withdrawn, and neither kind is listed
@@ -782,7 +782,7 @@ written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
 
-**Always, with no trigger.** Seventeen requirements hold whatever else is
+**Always, with no trigger.** Eighteen requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -819,6 +819,8 @@ happening:
   of the CI template's job that holds a write token.
 - **R130** — The lifecycle shall hand the CI template's deliver job the
   protected list through an artifact the agent's job never downloads.
+- **R144** — The lifecycle shall hold the data-only list in the plugin and
+  never read it from the repository's own configuration.
 
 **When something arrives.** Thirty-seven things happen on a discrete trigger:
 
@@ -943,7 +945,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Forty-two defences, written as `If … then`
+**When something goes wrong.** Forty-four defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1046,6 +1048,13 @@ because a designed path and a defended one are not the same thing:
 - **R131** — If the deliver job has no protected list for its HEAD while that
   HEAD has a `.claude/productizer/checks.yaml`, then the lifecycle shall
   refuse to deliver.
+- **R142** — If a configured command names a path inside the repository being
+  examined in any argument, and the configuration has not opted in to
+  repository-declared check tools, then the lifecycle shall refuse to run it.
+- **R143** — If a configured command hands the files under check to a program
+  that is not on the plugin's data-only list, and the configuration has not
+  opted in to repository-declared check tools, then the lifecycle shall refuse
+  to run it.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

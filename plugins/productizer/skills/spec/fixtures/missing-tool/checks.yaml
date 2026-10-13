@@ -22,6 +22,11 @@ policy:
   # denominator would refuse the run for a second, unrelated reason - which
   # would make the test pass for the wrong cause.
   spec_coverage: "off"
+  # On because the strict repo-local gate (2026-10-13) hands a placeholder
+  # only to a program on its data-only list without it, and this program is
+  # absent everywhere. Nothing here is repo-local; the subject is the absent
+  # tool, which the gate would otherwise refuse before it is ever looked for.
+  allow_repo_local_tools: true
 
 defaults:
   timeout_seconds: 30

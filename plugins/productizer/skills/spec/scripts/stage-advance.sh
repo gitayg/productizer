@@ -128,36 +128,33 @@
 # read from .claude/productizer/checks.yaml AT THE BASE - the tree the change
 # applies to, never the changed tree or the work tree - so the change cannot
 # redefine what is protected. Of every check, in `command`, `version_command`,
-# `coverage.command` and `coverage.rules_command`: the program (element 0);
-# after an element that names an interpreter - matched by its stem, so
-# python3.9, pypy3 and /usr/bin/python3 are interpreters too - its first
-# operand that does not begin with `-`, and, when any option comes before
-# that operand, EVERY operand after the interpreter, because an option may
-# have taken the first one as its value (`python3 -W ignore x.py`, `node
-# --require ./a.js b.js`) and which one is the script cannot be told; with
-# `python3 -m pkg.mod` also protecting `pkg/**`, `pkg.py` and `pkg/mod.py`;
-# and every operand, or `--opt=VALUE` or `-XVALUE` value, that names a
-# repository path - one the base tree holds, or one with no whitespace and a
-# slash or a script extension - because a tool reads a program of its own
-# through an option (`sed -f x.sed`, `perl -Itools/lib`). That protects data
-# operands too: refusing more is the safe direction (B136 review, 2026-10-13:
-# 1.6 protected the first operand only, and eight argv shapes ran a file it
-# allowed an unattended change to). That reading is argv-classify.py's,
-# beside this script, and run-checks.sh loads the same file to decide what
-# it refuses without the opt-in, so the two cannot drift again; only "is it a
-# repository path" is asked here of the base tree and of what a change could
-# add. Then every
-# `requires` entry. Each is taken as a path from the repository root, with
+# `coverage.command` and `coverage.rules_command`, by the STRICT READING
+# (maintainer ruling 2026-10-13), which recognises no interpreter: the program
+# (element 0); every other literal that is not an option, whole, when it has
+# no whitespace - a bare word too, since `python3.9 gen` runs a `gen` a change
+# adds and no rule here knows which program does that; every `--opt=VALUE`
+# value and every value glued to a short option (`-Itools/lib`), when the
+# base tree holds it or it is path-shaped (a slash or a script extension);
+# every later glued suffix and every whole option the base tree holds; and the
+# module paths of any dotted name (`pkg.mod` protects `pkg/**`, `pkg.py` and
+# `pkg/mod.py`). That protects data operands too: refusing more is the safe
+# direction. On this repository the set is a superset of 1.7's (measured
+# 2026-10-13: all 69 paths 1.7 printed, and 13 bare words more). A
+# placeholder (`{file}`, `{files}`) handed to a program that is neither on the
+# data-only list nor a repository path is exit 4: the change itself would
+# choose what that program reads and may run. The reading, the path test and
+# the data-only list are argv-classify.py's, beside this script, and
+# run-checks.sh loads the same file to decide what it refuses without the
+# opt-in; only "is it a repository path" is asked here of the base tree and of
+# what a change could add. Then every `requires` entry. Each is taken as a path from the repository root, with
 # its subtree, and matched on the folded key, so a case variant is refused
 # too. A bare tool name (`shellcheck`) is protected as a root file of that
 # name, which costs nothing and holds should PATH ever reach the work tree.
 # No checks.yaml at the base: nothing extra is protected. One that cannot be
 # read - no PyYAML, not YAML, `checks` not a list, an argv that is not a list
-# of strings, a placeholder in a program position, where an interpreter's
-# script would be, in an option the interpreter takes before it, or after
-# an interpreter whose options precede its script with no `-m` naming the
-# module, or an argv-classify.py that cannot be loaded - is exit 4, never a
-# guess.
+# of strings, a placeholder as the program or handed to a program neither on
+# the data-only list nor a repository path, or an argv-classify.py that
+# cannot be loaded - is exit 4, never a guess.
 # PyYAML is read with python3 -I, which keeps the work tree and PYTHONPATH off
 # sys.path so a module the change planted is never imported; -I also hides the
 # user site, so that one directory is appended LAST, as a plain path whose .pth
@@ -259,7 +256,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.7"
+VERSION="stage-advance 1.8"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -977,13 +974,13 @@ YAML
     "$R" --from build --to test --mode build --patch "$WORK/cy-lint.patch"
   drive unattended-checks-version-command 3 "tools/ver.sh $CY the program in version_command of check lint)" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-ver.patch"
-  drive unattended-checks-interpreter-script 3 "tools/gate.py $CY the script an interpreter is handed in command of check gate)" \
+  drive unattended-checks-interpreter-script 3 "tools/gate.py $CY a repository path named in command of check gate)" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-gate.patch"
   drive unattended-checks-requires 3 "tools/helper.sh $CY a requires entry of check gate)" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-helper.patch"
   drive unattended-checks-coverage-command 3 "tools/cov.sh $CY the program in coverage.command of check gate)" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-cov.patch"
-  drive unattended-checks-module-added 3 "gatepkg/__init__.py $CY the script an interpreter is handed in command of check mod)" \
+  drive unattended-checks-module-added 3 "gatepkg/__init__.py $CY a module path a dotted name resolves to, in command of check mod)" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-mod.patch"
   # Since 1.7 an operand that names a repository path is protected wherever
   # it sits (the argv walk), so the data operand docs/data.txt and the operand
@@ -991,7 +988,7 @@ YAML
   # names stays allowed.
   drive unattended-checks-data-operand-protected 3 "docs/data.txt $CY a repository path named in command of check lint)" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-data.patch"
-  drive unattended-checks-operand-after-script-protected 3 "src/app.sh $CY an operand of an interpreter whose options precede its script in command of check gate)" \
+  drive unattended-checks-operand-after-script-protected 3 "src/app.sh $CY a repository path named in command of check gate)" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/un-code.patch"
   addpatch src/unnamed.sh "$WORK/cy-unnamed.patch"
   drive unattended-checks-unnamed-file-allowed 0 "src/unnamed.sh" \
@@ -1121,10 +1118,10 @@ YAML
     drive "unattended-argv-$(printf '%s' "$p" | tr / :)" 3 "$p (unattended: .claude/productizer/checks.yaml at the base runs it" \
       "$R" --from build --to test --mode build --unattended --patch "$WORK/argv-${ARGVCASE#*=}.patch"
   done
-  # A script the base does not hold, named bare: only the interpreter's stem
-  # (python3.9 is python) protects it, and run-checks.sh would run it.
+  # A script the base does not hold, named bare. 1.7 protected it by the
+  # interpreter's stem; 1.8 protects every bare word, whatever the program.
   addpatch gen "$WORK/argv-gen.patch"
-  drive unattended-argv-versioned-interpreter-new-script 3 "gen (unattended: .claude/productizer/checks.yaml at the base runs it, as the script an interpreter is handed" \
+  drive unattended-argv-versioned-interpreter-new-script 3 "gen (unattended: .claude/productizer/checks.yaml at the base runs it, as a repository path named" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/argv-gen.patch"
   drive unattended-argv-prose-is-not-a-path 0 "src/app.sh" \
     "$R" --from build --to test --mode build --unattended --patch "$WORK/un-code.patch"
@@ -1150,20 +1147,57 @@ YAML
   drive print-protected-space-edged-path 4 "names a path that begins or ends with a space" \
     "$R" --print-protected --base HEAD
 
-  # THE SHARED READING (argv-classify.py, B150). A placeholder after an
-  # interpreter whose options precede its script, or in the value of an
-  # option it takes first, may be the script: the change would choose what
-  # runs. Both exited 0 at 6627bcf; `-m` naming the module first leaves the
-  # placeholders its arguments.
+  # THE STRICT READING (maintainer ruling 2026-10-13). A placeholder handed
+  # to a program that is neither on the data-only list nor a repository path
+  # is exit 4: no interpreter is recognised, so `python3 -W ignore {file}`,
+  # `node --require={file}` and `cat {file}` read alike, and so does
+  # `python3 -mmodpkg.main {files}`, which 1.7 read as the module's arguments
+  # and allowed. On the list (shellcheck) or a repository path (./tools/x.sh),
+  # the program reading the change's files is fixed at the base: exit 0.
+  local PH="hands a placeholder to a program that is neither on the data-only list nor a repository path"
   printf 'checks:\n  - id: pw\n    command: [python3, -W, ignore, "{file}"]\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
-  drive print-protected-placeholder-after-options 4 "an operand of an interpreter whose options precede its script in command of check pw holds a placeholder" \
+  drive print-protected-placeholder-after-options 4 "command of check pw $PH" \
     "$R" --print-protected --base HEAD
   printf 'checks:\n  - id: pr\n    command: [node, "--require={file}", tools/b.js]\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
-  drive print-protected-placeholder-in-option 4 "the script an interpreter is handed in command of check pr holds a placeholder" \
+  drive print-protected-placeholder-in-option 4 "command of check pr $PH" \
     "$R" --print-protected --base HEAD
   printf 'checks:\n  - id: pm\n    command: [python3, -mmodpkg.main, "{files}"]\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
-  drive print-protected-module-arguments 0 "path(s) that .claude/productizer/checks.yaml at HEAD runs" \
+  drive print-protected-module-arguments 4 "command of check pm $PH" \
     "$R" --print-protected --base HEAD
+  printf 'checks:\n  - id: pc\n    command: [cat, "{file}"]\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
+  drive print-protected-placeholder-unlisted 4 "command of check pc $PH (the program is not on the data-only list)" \
+    "$R" --print-protected --base HEAD
+  printf 'checks:\n  - id: pv\n    command: [semgrep, --allow-local-builds, "{files}"]\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
+  drive print-protected-placeholder-voided 4 "but --allow-local-builds in the argv makes it run code" \
+    "$R" --print-protected --base HEAD
+  printf 'checks:\n  - id: ps\n    command: [shellcheck, "{file}"]\n  - id: pq\n    command: [./tools/x.sh, "{files}"]\n' > "$R/.claude/productizer/checks.yaml"; commit "$R"
+  drive print-protected-placeholder-data-only 0 "2 path(s) that .claude/productizer/checks.yaml at HEAD runs" \
+    "$R" --print-protected --base HEAD
+  # NO INTERPRETER IS RECOGNISED. A program no list names protects every
+  # literal it is handed: a path the base holds, a path-shaped value a change
+  # could add (whole, after `=`, glued), a bare word, and a dotted name's
+  # module paths. Each is refused under --unattended when a change adds it.
+  printf 'checks:\n  - id: lit\n    command: [mytool, conf/new.cfg, --rules=conf/r.yml, -Iconf/inc, newword, newpkg.sub, -qXdocs/in.txt]\n' \
+    > "$R/.claude/productizer/checks.yaml"; commit "$R"; G "$R" tag lit-base
+  drive print-protected-literals 0 "path(s) that .claude/productizer/checks.yaml at lit-base runs" \
+    "$R" --print-protected --base lit-base
+  local PLIT="$WORK/print-protected-literals.out"
+  CASES=$((CASES + 1)); CODES="$CODES 0"
+  # Xdocs/in.txt is the glued value read whole (a slash makes it path-shaped);
+  # docs/in.txt is the suffix after the cluster, which the base holds.
+  if printf 'Xdocs/in.txt\nconf/inc\nconf/new.cfg\nconf/r.yml\ndocs/in.txt\nmytool\nnewpkg\nnewpkg.py\nnewpkg.sub\nnewpkg/sub.py\nnewword\n' | cmp -s - "$PLIT"; then
+    HELD=$((HELD + 1)); printf '  ok    %-44s exit 0\n' "print-protected-literals-exact-set"
+  else
+    printf '  FAIL  %-44s the printed list is not the literals the strict reading protects\n' "print-protected-literals-exact-set"
+    sed 's/^/          stdout: /' "$PLIT"
+  fi
+  for u in 'conf/new.cfg=a whole path-shaped literal' 'conf/r.yml=the value of --rules=' \
+           'conf/inc/x.h=a value glued to a short option' 'newword=a bare word' \
+           'newpkg/sub.py=a dotted name read as a module path'; do
+    addpatch "${u%%=*}" "$WORK/lit.patch"
+    drive "unattended-literal-$(printf '%s' "${u%%=*}" | tr / :)" 3 "${u%%=*} (unattended: .claude/productizer/checks.yaml at the base runs it" \
+      "$R" --from build --to test --mode build --unattended --patch "$WORK/lit.patch"
+  done
   mkdir -p "$WORK/lone"; cp "$SELF" "$WORK/lone/stage-advance.sh"
   SELF="$WORK/lone/stage-advance.sh" drive print-protected-no-shared-reading 4 "the shared argv reading argv-classify.py cannot be loaded" \
     "$R" --print-protected --base HEAD
@@ -1175,7 +1209,7 @@ YAML
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); a file a tool runs that no operand names (a test runner discovering tests, a git alias, a config the tool finds by itself), which the argv walk cannot see; that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script, a file a check script calls or sources that checks.yaml does not name itself, such as a .py beside the .sh it runs); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); that a --protected list is the one --print-protected wrote for this base (the list is validated as data, not traced to its source; build-dispatch.sh checks the HEAD it was written for); a checks.yaml at the base that is not a regular file, or an argv in it that is not a list of strings; an absolute program path inside the repository; a checks.yaml other than .claude/productizer/checks.yaml (run-checks.sh --config); a check whose program is resolved through a PATH that reaches the work tree; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); a file a tool runs that no argument names (a test runner discovering tests, a git alias, a config the tool finds by itself), which the strict reading cannot see; a file a change adds under the commit id `{base}` becomes, which this reading cannot know; a value inside a comma-separated list (`--x=a,b`), read as one value; a name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script, a file a check script calls or sources that checks.yaml does not name itself, such as a .py beside the .sh it runs); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); that a --protected list is the one --print-protected wrote for this base (the list is validated as data, not traced to its source; build-dispatch.sh checks the HEAD it was written for); a checks.yaml at the base that is not a regular file, or an argv in it that is not a list of strings; an absolute program path inside the repository; a checks.yaml other than .claude/productizer/checks.yaml (run-checks.sh --config); a check whose program is resolved through a PATH that reaches the work tree; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -1292,7 +1326,7 @@ try:
     with open(classifier, encoding="utf-8") as fh:
         AC = types.ModuleType("argv_classify")
         exec(compile(fh.read(), classifier, "exec"), AC.__dict__)
-    AC.walk, AC.path_like, AC.DESCRIBE, AC.OPERAND
+    AC.values, AC.path_shaped, AC.module_paths, AC.normalise, AC.has_placeholder, AC.data_only
 except Exception as e:
     fail("the shared argv reading %s cannot be loaded (%s: %s)" % (os.path.basename(classifier), type(e).__name__, e))
 try:
@@ -1331,20 +1365,60 @@ def protect(p, why):
     if rel in (".", "..") or rel.startswith("../") or re.search(r"[\x00-\x1f\x7f]", rel):
         return
     out.setdefault(key(rel), (rel, why))
-# THE ARGV WALK (B136 review, 2026-10-13), read by argv-classify.py: the
-# program; for an interpreter - matched by its stem - its script, and every
-# operand after it when its options come first; a module `-m` names; and
-# every operand, `--opt=VALUE` or `-XVALUE` value naming a repository path,
-# here one the base tree holds or one a change could add. A placeholder in a
-# program or script position is refused by protect(): the change itself
-# would choose what runs.
+# THE STRICT READING (maintainer ruling 2026-10-13), argv-classify.py's: no
+# interpreter is recognised. Protected: the program; every literal argument
+# that is not an option, whole, when it has no whitespace (a bare word too:
+# `python3.9 gen` runs a `gen` a change adds, and no rule here knows which
+# program does that); every `--opt=VALUE` value and the value glued to a
+# short option, when the base tree holds it or it is path-shaped (a slash or
+# a script extension); every later glued suffix and every whole option token
+# the base tree holds; and the module paths of any dotted name (`pkg.mod`
+# protects pkg/**, pkg.py and pkg/mod.py). A placeholder is the change
+# choosing an argument: as the program it is exit 4, and anywhere else it is
+# exit 4 unless the program is on the data-only list or is itself a
+# repository path this protects, so that what reads the change's files is
+# fixed at the base.
 def in_base(rel):
     return key(rel) in TREE
+def base_holds(v):
+    rel = AC.normalise(v, root)
+    return rel is not None and in_base(rel)
+def repo_program(p):
+    """argv[0] names a repository path: relative with a slash, absolute under
+    the root, or a bare name the base tree holds."""
+    if p.startswith("/"):
+        return AC.normalise(p, root) is not None
+    return "/" in p or in_base(p)
 def argv_walk(v, where):
-    for _k, role, value in AC.walk(v):
-        if role == AC.OPERAND and not AC.path_like(value, in_base):
+    named = "a repository path named in %s" % where
+    dotted = "a module path a dotted name resolves to, in %s" % where
+    protect(v[0], "the program in %s" % where)
+    for tok in v[1:]:
+        # A placeholder is judged below. `{base}` becomes a commit id this
+        # reading cannot know, so a file a change adds under that id is not
+        # protected (stated in the self-test's NOT ASSERTED).
+        if "{" in tok or tok == "-":
             continue
-        protect(value, "%s in %s" % (AC.DESCRIBE[role], where))
+        for val, shaped in AC.values(tok):
+            if val == tok and shaped:
+                # A literal that is not an option: whole, as a bare word too.
+                if not re.search(r"\s", tok) and "://" not in tok:
+                    protect(tok, named)
+                    for m in AC.module_paths(tok):
+                        protect(m, dotted)
+                elif base_holds(tok):
+                    protect(tok, named)
+            elif base_holds(val) or (shaped and AC.path_shaped(val)):
+                protect(val, named)
+            if shaped and val != tok:
+                for m in AC.module_paths(val):
+                    protect(m, dotted)
+    if any(AC.has_placeholder(t) for t in v[1:]):
+        ok, why = AC.data_only(v)
+        if not ok and not repo_program(v[0]):
+            fail("%s hands a placeholder to a program that is neither on the data-only list nor a "
+                 "repository path (%s), so the change itself would choose what that program reads "
+                 "and may run" % (where, why))
 for i, chk in enumerate(checks):
     if not isinstance(chk, dict):
         fail("checks[%d] is not a mapping" % i)
@@ -1869,7 +1943,7 @@ fi
 if [ -n "$FORBIDDEN" ]; then
   SHAPE_NOTE=""
   [ "$SHAPE_REFUSED" = 0 ] || SHAPE_NOTE="; under --unattended a path is allowed only when its bytes are ASCII and no component of it begins with a dot, bar the backlog, the plan in plan mode and the spec outside build mode on their exact bytes"
-  [ "$CHECKS_REFUSED" = 0 ] || SHAPE_NOTE="$SHAPE_NOTE; under --unattended a file that $CHECKS_YAML at the base runs - a check's program, every operand naming a repository path, every operand of an interpreter whose options precede its script, a requires entry - may not change, because rewriting it neuters the check that runs it"
+  [ "$CHECKS_REFUSED" = 0 ] || SHAPE_NOTE="$SHAPE_NOTE; under --unattended a file that $CHECKS_YAML at the base runs - a check's program, every literal argument naming a repository path or a bare word, the module paths of a dotted name, a requires entry - may not change, because rewriting it neuters the check that runs it"
   finish 3 "the change touches a path the target stage does not permit${MODE:+ in $MODE mode}; forbidden for $TO_KEY: $(printf '%s' "$FORBIDDEN" | tr '\n' ' ' | sed 's/ $//')$SHAPE_NOTE"
 fi
 
