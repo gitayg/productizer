@@ -1476,6 +1476,7 @@ checks:
     severity: block
     requires:
       - ./plugins/productizer/skills/spec/scripts/check-untrusted-execution.sh
+      - ./plugins/productizer/skills/spec/scripts/argv-classify.py
       - python3
     version_command: [./plugins/productizer/skills/spec/scripts/check-untrusted-execution.sh, --version]
     mode: batch
@@ -1497,6 +1498,10 @@ checks:
             named by neither list; a legitimate command still runs. Measured 2026-10-13 through
             run-checks.sh: under the opt-in a repo-local program in argv[0] or an interpreter's
             first operand runs, while awk, make, env and an inline program stay refused.
+            Corrected 2026-10-13 (B150, v4.72.1): this claim did not hold at 6627bcf - twenty
+            argv shapes ran a repository file with the opt-in off, `python3 -W ignore x.py` and
+            `python3.9 x.py` among them - and `interpreter-operand` drives only the one shape.
+            The other shapes are asserted by `checks-stage-runner`.
         - id: R123
           verdict: Partial
           reason: >-
@@ -2119,7 +2124,7 @@ checks:
     # The script itself as argv[0], never `bash <script>`: run-checks.sh refuses
     # a program that takes a command as an operand in any argv position (R29),
     # and it refused the `bash` form this entry was first written with.
-    requires: [./plugins/productizer/skills/spec/scripts/stage-advance.sh, git, python3]
+    requires: [./plugins/productizer/skills/spec/scripts/stage-advance.sh, ./plugins/productizer/skills/spec/scripts/argv-classify.py, git, python3]
     version_command: [./plugins/productizer/skills/spec/scripts/stage-advance.sh, --version]
     mode: batch
     command: [./plugins/productizer/skills/spec/scripts/stage-advance.sh, --selftest]
@@ -2281,10 +2286,26 @@ checks:
             `-version-command`, `-coverage-command`, `-requires`, `-interpreter-script`,
             `-module-added`, `-case-variant` and `-base-mode` (the `unattended-checks-*` cases);
             the set is read at the base, never from the change
-            (`unattended-checks-work-tree-not-read`). Attended, and on a data operand, exit 0:
-            `attended-checks-program-allowed`, `unattended-checks-data-operand-allowed`,
-            `unattended-checks-operand-after-script-allowed`. Falsified 2026-10-13 by the building
+            (`unattended-checks-work-tree-not-read`). Attended, exit 0:
+            `attended-checks-program-allowed`. Falsified 2026-10-13 by the building
             agent with the refusal made never to fire, at 162 cases: 153 of 162.
+            Since 1.7 (B151, v4.72.1) the set is the program, every operand naming a repository
+            path, and every operand of an interpreter whose options precede its script, read by
+            argv-classify.py, which run-checks.sh shares: the seven `unattended-argv-*` cases
+            (`-W ignore`, `-X dev -m`, `--require`, `--require=`, a versioned interpreter,
+            `-Itools/lib`, `sed -f`) and `unattended-argv-versioned-interpreter-new-script` exit
+            3, each 0 at 6627bcf. Two data-operand cases changed on purpose, to exit 3:
+            `unattended-checks-data-operand-protected` and
+            `unattended-checks-operand-after-script-protected`; a file no check names stays
+            allowed (`unattended-checks-unnamed-file-allowed`). A placeholder after an
+            interpreter whose options come first, or in an option it takes first, exits 4
+            (`print-protected-placeholder-after-options`, `-in-option`), a placeholder after `-m`
+            names the module's arguments (`print-protected-module-arguments`, exit 0), and with no
+            argv-classify.py beside it the decider exits 4 (`print-protected-no-shared-reading`).
+            Falsified by the building agent at 198 cases: 191, 195 and 196 of 198. Re-falsified
+            2026-10-13 at 202 cases: operands naming a repository path not protected, 195 of 202;
+            an interpreter matched by its exact name, 193 of 202; the options-first reading off,
+            199 of 202.
         - id: R127
           verdict: Covered
           evidence: >-
@@ -2303,7 +2324,12 @@ checks:
             `-dotdot`, `-link`, `-missing`, `-nonascii`, `-nul`, `-case-variant`); the
             `print-protected-*` cases print the set the decider reads, sorted, one per line
             (`print-protected-exact-set`, `-lists-the-set`, `-no-checks-yaml`, `-needs-base`).
-            Falsified 2026-10-13 by the building agent: 179 of 182.
+            Falsified 2026-10-13 by the building agent: 179 of 182. Since 1.7 (B151):
+            `unattended-argv-protected-list` exits 3 on a list the argv walk printed, and a list
+            line with a space at either end is refused as data, exit 4
+            (`unattended-protected-list-trailing-space`, `-leading-space`); falsified by the
+            building agent at 196 of 198, and re-falsified 2026-10-13 with the space refusal
+            removed: 200 of 202.
         - id: R132
           verdict: Covered
           evidence: >-
@@ -3925,7 +3951,7 @@ checks:
     when:
       always: true
     severity: block
-    requires: [./plugins/productizer/skills/spec/scripts/run-checks.sh, git, python3]
+    requires: [./plugins/productizer/skills/spec/scripts/run-checks.sh, ./plugins/productizer/skills/spec/scripts/argv-classify.py, git, python3]
     version_command: [./plugins/productizer/skills/spec/scripts/run-checks.sh, --version]
     mode: batch
     command: [./plugins/productizer/skills/spec/scripts/run-checks.sh, --selftest]
@@ -3951,8 +3977,24 @@ checks:
             own reason, which before B89 reached only the result file; the clean case asserts a
             passing check prints no output tail. Falsified 2026-10-12 with the tail never printed: the
             run's two `refused-says-why` stderr assertions red.
+        - id: R102
+          verdict: Covered
+          evidence: >-
+            B150. With `allow_repo_local_tools` off, eleven argv shapes that each ran a repository
+            file at 6627bcf exit 2 with the payload's marker absent, and with it on each runs
+            and the marker appears: `rl-w-ignore`, `rl-versioned`, `rl-absolute`,
+            `rl-module-after-option`, `rl-glued-option`, `rl-sed-f`, `rl-file-as-script`,
+            `rl-file-after-option`, and the shape in version_command, coverage.command and
+            coverage.rules_command (`rl-version`, `rl-coverage`, `rl-rules`). `rl-data-allowed`
+            keeps a placeholder and a path the work tree does not hold as data;
+            `rl-no-shared-reading` refuses, exit 2, with no argv-classify.py beside the runner.
+            Against the 6627bcf runner the eleven opted-out cases and `rl-no-shared-reading` go
+            red. Falsified 2026-10-13: operands never gated, 6 findings (`rl-glued-option`,
+            `rl-sed-f`); interpreters matched by exact name, 3 (`rl-file-as-script`); the
+            options-first reading off, 3 (`rl-file-after-option`).
     limitations:
       - It is the runner's self-test, not this repository's run. That the real suite's refusals print their tails in CI is seen in the workflow log, not asserted here.
+      - The node shapes (`--require`, `--require=`, `node.exe`) and `pypy3` are measured through the runner by hand and pinned in argv-classify.py's table, not driven here, because node is not on every machine this self-test runs on. A file a tool runs that no operand names - a test runner discovering tests, a config the tool finds by itself - is not gated.
 
   - id: ci-replay
     why: a local suite that passes on this machine's git defaults and fails on the runner's is how two pushes went red, and the replay is only worth running if it removes those defaults

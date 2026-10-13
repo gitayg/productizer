@@ -127,7 +127,7 @@ marker, because a table left there would be one nothing writes or checks.
 | R99 | unwanted | active | `calibration-recorded` |
 | R100 | unwanted | active | `calibration-recorded` |
 | R101 | unwanted | active | `solver-corpus`, `pending-ruling-scope` |
-| R102 | unwanted | active | `untrusted-execution` |
+| R102 | unwanted | active | `untrusted-execution`, `checks-stage-runner` |
 | R103 | state | active | `pending-ruling-scope` |
 | R104 | event | active | `view-rendered` |
 | R105 | unwanted | active | `guide-current` |

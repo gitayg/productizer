@@ -236,7 +236,7 @@ on_exit() {
 trap on_exit EXIT
 
 die_usage() { printf 'run-checks: %s\n' "$1" >&2; exit 2; }
-VERSION="run-checks 1.0"
+VERSION="run-checks 1.1"
 
 # Echoes the git work tree containing $1, or nothing. git's own explanation is
 # kept in GIT_WHY rather than discarded: a fallback that cannot say why it fell
@@ -1356,6 +1356,159 @@ SELFTEST_ASSERT_AT
   fi
   SELF_ASSERTS=$((SELF_ASSERTS + 1))
 
+  # B150 - THE REPO-LOCAL GATE READS EVERY POSITION THAT CAN SELECT CODE. Each
+  # shape below ran a repository file with `allow_repo_local_tools` off at
+  # 6627bcf, measured with the payload's marker: an option's value taken for
+  # the script, a versioned or absolute interpreter, `-X dev` before `-m`, a
+  # module directory glued to an option, a program sed reads through `-f`,
+  # the changed file as the script, and the same argv in version_command,
+  # coverage.command and coverage.rules_command. Off: exit 2 and no marker.
+# (`python3 -W ignore {file}` is the one the operand rule cannot see: the
+# placeholder is data, so only the walk's options-first reading refuses it.)
+  # On: the same config runs and the marker appears, so the refusal is the
+  # opt-in's and not some other rule's.
+  RL="$SB/rl"; RL_MARK="$SB/rl-ran"
+  mkdir -p "$RL/tools/lib" "$RL/rlpkg" "$RL/docs" "$SB/rl-bin"
+  printf 'open(%s, "w").write("ran")\n' "'$RL_MARK'" > "$RL/tools/a.py"
+  cp "$RL/tools/a.py" "$RL/tools/evil.py"; cp "$RL/tools/a.py" "$RL/rlpkg/__main__.py"
+  : > "$RL/rlpkg/__init__.py"
+  printf 'package Mark; open(my $f, ">", %s); print $f "ran"; close $f; 1;\n' "'$RL_MARK'" > "$RL/tools/lib/Mark.pm"
+  printf 'w %s\n' "$RL_MARK" > "$RL/tools/prog.sed"
+  printf 'data\n' > "$RL/docs/in.txt"
+  printf 'tools/evil.py\n' > "$SB/rl-changed.txt"
+  RL_PY="$(python3 -c 'import sys; print(sys.executable)')"
+  ln -s "$RL_PY" "$SB/rl-bin/python3.99"
+  command -v perl >/dev/null 2>&1 || self_unmeasured "perl is not on PATH, so the glued-option case would report missing_tool rather than the gate"  # stderr-ok: a presence probe whose EXIT STATUS is the whole answer, reported in words on this same line
+  # $1 name, $2 field, $3 mode, $4 argv as a YAML flow list. Writes the
+  # opted-out and the opted-in config, which differ in that one line.
+  rl_cfg() {
+    _cmd="[printf, 'ok\n']"; _ver=""; _cov="from: stdout_count
+      pattern: '^(ok)'
+      min_covered: 0"; _rules=""
+    case "$2" in
+      command) _cmd="$4" ;;
+      version) _ver="    version_command: $4" ;;
+      coverage) _cov="from: command
+      command: $4
+      min_covered: 0" ;;
+      rules) _rules="      min_rules: 1
+      rules_command: $4
+      rules_pattern: '(x)'" ;;
+    esac
+    for _optin in false true; do
+      cat > "$SB/rl-$1-$_optin.yaml" <<SELFTEST_CFG_RL
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+  allow_repo_local_tools: $_optin
+checks:
+  - id: rl
+    why: an argv that runs a repository file, which only the opt-in may allow
+    when:
+      always: true
+    severity: advise
+    mode: $3
+    requires: [printf]
+$_ver
+    command: $_cmd
+    exit_codes:
+      pass: [0]
+      fail: [1, 2]
+    coverage:
+      $_cov
+$_rules
+SELFTEST_CFG_RL
+    done
+  }
+  # $1 name, $2 what it is. Drives both configs and reads the marker after each.
+  rl_case() {
+    for _optin in false true; do
+      rm -f "$RL_MARK"
+      if [ "$_optin" = false ]; then _w=2; else _w=0; fi
+      PATH="$SB/rl-bin:$PATH" self_drive "rl-$1-$_optin" "$_w" \
+        "$2, allow_repo_local_tools: $_optin" \
+        --config "$SB/rl-$1-$_optin.yaml" --root "$RL" \
+        --changed "$SB/rl-changed.txt" --out "$SB/rl-$1-$_optin.json"
+      SELF_ASSERTS=$((SELF_ASSERTS + 1))
+      if [ "$_optin" = false ] && [ -e "$RL_MARK" ]; then
+        printf '  FINDING: assert %-20s %s\n' "payload" "rl-$1: the repository file RAN with the opt-in off"
+        SELF_FAILED=$((SELF_FAILED + 1))
+      elif [ "$_optin" = true ] && [ ! -e "$RL_MARK" ]; then
+        printf '  FINDING: assert %-20s %s\n' "payload" "rl-$1: the repository file did not run with the opt-in on, so the refusal off is not shown to be the gate's"
+        SELF_FAILED=$((SELF_FAILED + 1))
+      else
+        printf '  held:    assert %-20s %s\n' "payload" "rl-$1: the marker is $([ "$_optin" = false ] && printf absent || printf present) with the opt-in $_optin"
+      fi
+    done
+    self_assert_err "$SB/rl-$1-false.err" "set \`policy.allow_repo_local_tools: true\`" \
+      "rl-$1: the refusal is the repo-local gate's, naming the opt-in"
+  }
+  rl_cfg w-ignore command batch "[python3, -W, ignore, tools/a.py]"
+  rl_cfg versioned command batch "[python3.99, tools/a.py]"
+  rl_cfg absolute command batch "['$RL_PY', -W, ignore, tools/a.py]"
+  rl_cfg module-after-option command batch "[python3, -X, dev, -m, rlpkg]"
+  rl_cfg glued-option command batch "[perl, -Itools/lib, -MMark, /dev/null]"
+  rl_cfg sed-f command batch "[sed, -n, -f, tools/prog.sed, docs/in.txt]"
+  rl_cfg file-as-script command per_file "[python3, '{file}']"
+  rl_cfg file-after-option command per_file "[python3, -W, ignore, '{file}']"
+  rl_cfg version version batch "[python3, -W, ignore, tools/a.py]"
+  rl_cfg coverage coverage batch "[python3.99, tools/a.py]"
+  rl_cfg rules rules batch "[python3, -W, ignore, tools/a.py]"
+  rl_case w-ignore "python3 -W ignore tools/a.py: the option's value is taken for the script"
+  rl_case versioned "python3.99 tools/a.py: an interpreter named by its stem"
+  rl_case absolute "an absolute interpreter path with -W ignore before the script"
+  rl_case module-after-option "python3 -X dev -m rlpkg: a module named after an option's value"
+  rl_case glued-option "perl -Itools/lib -MMark /dev/null: a module directory glued to an option"
+  rl_case sed-f "sed -f tools/prog.sed: a program a tool reads through an option"
+  rl_case file-as-script "python3 {file}: the changed file is the script"
+  rl_case file-after-option "python3 -W ignore {file}: the changed file after an option's value"
+  rl_case version "the -W ignore shape in version_command"
+  rl_case coverage "a versioned interpreter in coverage.command"
+  rl_case rules "the -W ignore shape in coverage.rules_command"
+  # The control: a placeholder and an option value that names nothing in the
+  # work tree are data, and stay allowed with the opt-in off.
+  cat > "$SB/rl-data.yaml" <<'SELFTEST_CFG_RL_DATA'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+checks:
+  - id: rl-data
+    why: a placeholder and a registry id that is not a path in the work tree
+    when:
+      always: true
+    severity: advise
+    mode: batch
+    requires: [grep]
+    command: [grep, -c, --label=p/default, ran, "{files}"]
+    exit_codes:
+      pass: [0, 1]
+    coverage:
+      from: stdout_count
+      pattern: '^([0-9]+)'
+      min_covered: 0
+SELFTEST_CFG_RL_DATA
+  self_drive rl-data-allowed 0 \
+    "a placeholder and an option value naming no path in the work tree, opt-in off: data, still run" \
+    --config "$SB/rl-data.yaml" --root "$RL" \
+    --changed "$SB/rl-changed.txt" --out "$SB/rl-data.json"
+  # The shared reading gone: refused, never guessed.
+  mkdir -p "$SB/rl-lone"; cp "$0" "$SB/rl-lone/run-checks.sh"
+  _rc=0
+  bash "$SB/rl-lone/run-checks.sh" --config "$SB/checks-pass.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --out "$SB/rl-lone.json" > "$SB/rl-lone.out" 2> "$SB/rl-lone.err" || _rc=$?
+  SELF_CASES=$((SELF_CASES + 1)); CODES="$CODES$_rc
+"
+  if [ "$_rc" = 2 ]; then
+    printf '  held:    case %-13s expected %s  observed %s  %s\n' "rl-no-shared-reading" 2 "$_rc" "a runner with no argv-classify.py beside it refuses the config rather than guessing"
+  else
+    printf '  FINDING: case %-13s expected %s  observed %s  %s\n' "rl-no-shared-reading" 2 "$_rc" "a runner with no argv-classify.py beside it refuses the config rather than guessing"
+    SELF_FAILED=$((SELF_FAILED + 1))
+  fi
+  self_assert_err "$SB/rl-lone.err" "the shared argv reading argv-classify.py cannot be loaded" \
+    "and says the shared reading is missing"
+
   printf '  self-test cases driven: %d, result-file assertions: %d. Cases and assertions that did not hold: %d\n' \
     "$SELF_CASES" "$SELF_ASSERTS" "$SELF_FAILED"
 
@@ -1376,6 +1529,7 @@ SELFTEST_ASSERT_AT
   printf '  NOW ASSERTED, and this line used to say it was not: a --base whose ref is NOT an ancestor of HEAD, where change.base (the merge base) and `git rev-parse <ref>` differ. `base-substituted` builds that repository, measures that the two commits differ before it runs, and asserts that change.base and the argv a `{base}` check received are both the merge base. `base-in-argv0`, `base-in-version-command` and `base-without-base` assert the refusals and the `no_base` row, reading stderr and the result file rather than the exit code alone.\n'
   printf '  NOW ASSERTED (B80, warn means warn): an advisory check that FAILS keeps its spec_units claim. `adv-fail-covers`, `adv-block-voids` and `adv-hollow-voids` differ in one config line each, and their result files are read: the advisory failure leaves the claim unvoided and annotated advisory_failing, R1 Covered and held_by_failing_advisory, coverage satisfied, and the printed line saying so; the same check as block voids it and coverage refuses on its own account; an advisory hollow check voids it too. NOT ASSERTED: an advisory fail that ALSO failed its coverage assertion, which is voided by its own branch and is not driven here; nor a requirement covered both by a passing check and by a failing advisory one.\n'
   printf '  NOW ASSERTED (B89): a refused blocking check prints the tail of its own output under its row; `refused-says-why` reads the tool reason off stderr, and the clean case asserts a passing check prints none. NOT ASSERTED: the 20-line and 300-character bounds, which no case here exceeds.\n'
+  printf '  NOW ASSERTED (B150): with `allow_repo_local_tools` off, eleven argv shapes that each ran a repository file at 6627bcf exit 2 and the payload marker is absent - `-W ignore` before the script, a versioned interpreter (python3.99, a link to this python), an absolute interpreter path, `-X dev -m pkg`, `perl -Itools/lib -MMark /dev/null`, `sed -f tools/prog.sed`, `python3 {file}`, `python3 -W ignore {file}`, and the `-W ignore` or versioned shape in version_command, coverage.command and coverage.rules_command; with it on, each config runs and the marker appears. `rl-data-allowed` keeps a placeholder and an option value naming nothing in the work tree as data, and `rl-no-shared-reading` refuses with no argv-classify.py beside the runner. NOT ASSERTED here: node `--require`, `node.exe` and `pypy3` (measured through this runner by hand and pinned in argv-classify.py'"'"'s table, because node is not on every machine this self-test runs on); a file a tool runs that no operand names - a test runner discovering tests, a config the tool finds by itself; a placeholder in an option value of a tool that is not an interpreter.\n'
   printf '  NOT ASSERTED: `{base}` in an interpreter program operand (refused by the same rule as argv[0], not driven here), and a base that resolved but is not 40 hex digits - a SHA-256 repository - whose row is `no_base` with a different sentence and is not driven here. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
@@ -1673,12 +1827,28 @@ done < "$WORK/changed.txt"
 # --- plan: parse, validate, decide what this change attracts ---------------
 
 cat > "$WORK/plan.py" <<'PY'
-import json, os, re, sys
+import json, os, re, sys, types
 
-CONFIG, WORK, CHANGED, TAGS, ROOT, ROOT_SOURCE, CONFIG_SOURCE, DELETED, DELETED_SOURCE, BASE_SHA, BASE_REF = sys.argv[1:12]
+CONFIG, WORK, CHANGED, TAGS, ROOT, ROOT_SOURCE, CONFIG_SOURCE, DELETED, DELETED_SOURCE, BASE_SHA, BASE_REF, CLASSIFIER = sys.argv[1:13]
 
 def bad(msg):
     sys.stderr.write("run-checks: %s: %s\n" % (os.path.basename(CONFIG), msg))
+    sys.exit(2)
+
+# THE ARGV READING IS SHARED with stage-advance.sh, which protects from an
+# unattended change exactly what this refuses without the opt-in (B150): one
+# file, argv-classify.py beside this script, loaded by its path and compiled
+# from its source, so no bytecode cache beside it is ever read. Two copies of
+# this reading drifted twice; a copy cannot drift from itself.
+try:
+    with open(CLASSIFIER, encoding="utf-8") as _fh:
+        AC = types.ModuleType("argv_classify")
+        exec(compile(_fh.read(), CLASSIFIER, "exec"), AC.__dict__)
+    AC.walk, AC.is_interpreter, AC.SCRIPT_EXT, AC.PROGRAM, AC.SCRIPT, AC.AFTER, AC.MODULE, AC.OPERAND
+except Exception as exc:
+    sys.stderr.write("run-checks: the shared argv reading %s cannot be loaded (%s), so which "
+                     "positions of a command select what runs cannot be decided. Refusing rather "
+                     "than guessing.\n" % (os.path.basename(CLASSIFIER), type(exc).__name__))
     sys.exit(2)
 
 try:
@@ -2037,7 +2207,12 @@ tags = [t.strip() for t in TAGS.split(",") if t.strip()]
 #                                  repository's Makefile is a shell command.
 #
 # So: EVERY element of the argv is inspected, and the repo-local gate is
-# applied per PROGRAM POSITION rather than once to value[0].
+# applied per PROGRAM POSITION rather than once to value[0]. Since B150
+# (2026-10-13) those positions are argv-classify.py's, the reading
+# stage-advance.sh uses too, and they include every operand naming a path in
+# the work tree: twenty argv shapes - `python3 -W ignore x.py`, `python3.9
+# x.py`, `sed -f x.sed`, `perl -Itools/lib -MMod /dev/null`, `python3 {file}`
+# among them - ran a repository file here with the opt-in off.
 
 # Programs that take a command as an operand. Naming one of these anywhere in
 # an argv IS the shell invocation the argv-only rule exists to forbid —
@@ -2058,30 +2233,68 @@ SHELLS = {"sh","bash","zsh","dash","ksh","mksh","csh","tcsh","fish","rc",
 # program is a positional argument, so there is no flag to look for and no
 # safe shape for it in a repository-supplied command.
 AWKS = {"awk","gawk","nawk","mawk","busybox-awk"}
-INTERPRETERS = {"python","python2","python3","perl","ruby","node","deno","bun",
-                "php","lua","luajit","tclsh","expect","Rscript","osascript",
-                "swift","ghc","runghc","groovy","jshell","scala"}
+# Interpreters, by STEM (python3.9, pypy3, node.exe and /usr/bin/python3 are
+# interpreters), and the script extensions are argv-classify.py's.
 INLINE_FLAGS = {"-c","-e","-E","-Xc","--command","--eval","--exec"}
-SCRIPT_EXT = re.compile(
-    r"\.(py|sh|bash|zsh|pl|rb|js|mjs|cjs|ts|lua|php|r|scpt|tcl|exp|ps1|awk)$",
-    re.IGNORECASE)
 ROOT_REAL = os.path.realpath(ROOT)
+
+# HOW EACH CLASSIFIED POSITION READS in a refusal. Reported by position and
+# role, never by quoting the value: checks.yaml is a file a stranger writes.
+ROLE_TEXT = {
+    AC.PROGRAM: "the program",
+    AC.SCRIPT: "the script an interpreter is handed",
+    AC.AFTER: "an operand of an interpreter whose options precede its script, any of which may be the script",
+    AC.MODULE: "a module an interpreter is told to run",
+    AC.OPERAND: "an operand or option value, which a tool may read as a program of its own",
+}
 
 def program_ref(where, elem, role):
     """A position that SELECTS AN EXECUTABLE, gated by allow_repo_local_tools.
 
-    Only these positions are gated. A path sitting in an ordinary operand is
-    data, which is what P4 already says it is; gating those would refuse
-    `--config pyproject.toml` and teach people to switch the gate off."""
+    WHICH POSITIONS, since B150 (2026-10-13): every position argv-classify.py
+    classifies - the program; an interpreter's script, and every operand after
+    an interpreter whose options precede it; a module `-m` names; and every
+    operand, `--opt=VALUE` and glued `-XVALUE` value. This used to gate the
+    program positions only, on the reasoning that a path in an ordinary
+    operand is data and gating it would refuse `--config pyproject.toml` and
+    teach people to switch the gate off. Measured against R102 that reasoning
+    did not hold: `sed -f tools/x.sed`, `node --require=./a.js /abs/b.js` and
+    `perl -Itools/lib -MMod /dev/null` each ran a repository file with the
+    opt-in off, because a tool reads a program of its own through an option.
+    So an operand naming a path the work tree holds is gated too, and the
+    cost is the one that reasoning named: a repository's own config file
+    handed to a tool needs the opt-in."""
     # `{base}` IS DATA, NEVER THE PROGRAM. It becomes a commit id, and a
     # position that selects what executes is no place for one: `python3 {base}`
     # would run whatever file in the work tree carries that name. Refused in
     # every program position of every argv, before anything else is asked.
-    if "{base}" in elem:
+    if role != AC.OPERAND and "{base}" in elem:
         bad("%s (%s) contains {base}. {base} is replaced by a commit id, which is data: it is "
             "never the program and never the script an interpreter is handed. Put it in an "
-            "ordinary argument." % (where, role))
-    if os.path.isabs(elem):
+            "ordinary argument." % (where, ROLE_TEXT[role]))
+    placeholder = "{" in elem
+    if role == AC.OPERAND:
+        # A placeholder in an ordinary operand is the files under check - data.
+        # Otherwise: a path the work tree the tools run in holds. A path it
+        # does not hold names nothing a tool could read (semgrep's registry
+        # id `p/default` is such a string); stage-advance.sh, which must also
+        # stop a change ADDING one, protects those too.
+        if placeholder:
+            return
+        if os.path.isabs(elem):
+            real = os.path.realpath(elem)
+            inside = real == ROOT_REAL or real.startswith(ROOT_REAL + os.sep)
+        else:
+            rel_ = os.path.normpath(elem)
+            inside = (rel_ not in (".", "..") and not rel_.startswith(".." + os.sep)
+                      and os.path.lexists(os.path.join(ROOT, rel_)))
+    elif role == AC.MODULE:
+        inside = os.path.lexists(os.path.join(ROOT, elem))
+    elif placeholder:
+        # `{file}` or `{files}` where the program or the script would be: the
+        # change under check would be choosing what executes.
+        inside = True
+    elif os.path.isabs(elem):
         real = os.path.realpath(elem)
         inside = real == ROOT_REAL or real.startswith(ROOT_REAL + os.sep)
     else:
@@ -2091,7 +2304,7 @@ def program_ref(where, elem, role):
         # interpreter is the thing opening it — `python3 lint.py` reads
         # ./lint.py with no slash anywhere in the argv.
         inside = ("/" in elem or elem.startswith(".")
-                  or SCRIPT_EXT.search(elem) is not None
+                  or AC.SCRIPT_EXT.search(elem) is not None
                   or os.path.exists(os.path.join(ROOT, elem))
                   # `python3 -m pkg.mod` puts the work tree on sys.path, so a
                   # module name that resolves to a file in it is a repo-local
@@ -2105,11 +2318,15 @@ def program_ref(where, elem, role):
     if inside and not ALLOW_REPO_LOCAL:
         # Reported by POSITION, never by quoting the value. checks.yaml is a
         # file a stranger writes and this text lands in a committed result.
-        bad("%s (%s) is a path inside the repository being checked. A cloned "
+        bad("%s (%s) %s. A cloned "
             "repo would be choosing what executes on the machine that cloned it. "
             "If this is your own repo's script, set `policy.allow_repo_local_tools: "
             "true` - it is off by default so that trusting the repo is a decision "
-            "someone made, not one nobody noticed." % (where, role))
+            "someone made, not one nobody noticed."
+            % (where, ROLE_TEXT[role],
+               "is a placeholder for the files under check, so the change being checked would "
+               "choose what runs" if placeholder else
+               "is a path inside the repository being checked"))
 
 def argv_of(where, value):
     if isinstance(value, str):
@@ -2133,18 +2350,14 @@ def argv_of(where, value):
                 "invocation argv-only exists to prevent, and the list form does not make it safe; "
                 "it is refused in any position, not only the first. Name the tool you actually "
                 "want to run." % at)
-        if base in INTERPRETERS:
+        if AC.is_interpreter(elem):
             for j in range(i + 1, len(value)):
                 if value[j] in INLINE_FLAGS:
                     bad("%s[%d] hands an interpreter an inline program. Put the program in a file "
                         "the repo can review, and name that file here." % (where, j))
-            for j in range(i + 1, len(value)):
-                if value[j].startswith("-"):
-                    continue
-                program_ref("%s[%d]" % (where, j), value[j],
-                            "the first operand of an interpreter")
-                break
-    program_ref("%s[0]" % where, value[0], "the program")
+    # Every position argv-classify.py reads as able to select what runs.
+    for k, role, val in AC.walk(value):
+        program_ref("%s[%d]" % (where, k), val, role)
     return list(value)
 
 def int_list(where, value):
@@ -2707,7 +2920,7 @@ for c in plan:
 sys.stdout.write("\n".join(str(c["index"]) for c in plan if c["triggered"]) + "\n")
 PY
 
-TRIGGERED="$(python3 "$WORK/plan.py" "$CONFIG_ABS" "$WORK" "$WORK/changed.txt" "$TAGS" "$ROOT" "$ROOT_SOURCE" "$CONFIG_SOURCE" "$WORK/deleted.txt" "$DELETED_SOURCE" "$BASE_SHA" "$BASE_REF")" || {
+TRIGGERED="$(python3 "$WORK/plan.py" "$CONFIG_ABS" "$WORK" "$WORK/changed.txt" "$TAGS" "$ROOT" "$ROOT_SOURCE" "$CONFIG_SOURCE" "$WORK/deleted.txt" "$DELETED_SOURCE" "$BASE_SHA" "$BASE_REF" "$SELF_DIR/argv-classify.py")" || {
   rc=$?
   cleanup
   exit "$rc"

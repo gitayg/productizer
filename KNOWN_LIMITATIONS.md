@@ -470,10 +470,16 @@ still admits, and the named list must catch, is an ASCII, dot-free file:
 None of those is on the list. Since 1.6 (v4.72.0, B136) a file a check declared
 in `checks.yaml` at the base runs - its program, `version_command`, coverage
 commands, an interpreter's first operand and every `requires` entry - is
-refused under `--unattended`; what is still admitted is the TRANSITIVE file: a
+refused under `--unattended`, and since 1.7 (v4.72.1, B151) so is every operand
+naming a repository path and every operand of an interpreter whose options
+precede its script, read by `argv-classify.py`, which `run-checks.sh` shares.
+What is still admitted is the TRANSITIVE file: a
 file a check script calls or sources that `checks.yaml` does not name itself,
 such as a `.py` beside the `.sh` it runs, which an unattended build may edit to
-neuter the check that runs it. A `run-checks.sh --config` other than the
+neuter the check that runs it. A file a tool runs that no operand names - a
+test runner discovering tests, a config file the tool finds by itself - is
+neither protected here nor gated by `run-checks.sh`'s
+`allow_repo_local_tools`. A `run-checks.sh --config` other than the
 default is not read, and PyYAML, installed in `prepare` to read the set, is
 pinned by version, not by hash. Attended runs apply the list alone. The plugin manifests under `.claude-plugin/` declare hooks
 and MCP servers and are refused unattended by their dot; attended they are not

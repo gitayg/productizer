@@ -392,6 +392,7 @@ jobs:
           python3 evals/check-hard-corpus.py --selftest
           python3 evals/check-mech-corpus.py --selftest
           python3 evals/solver-probe.py --selftest
+          python3 plugins/productizer/skills/spec/scripts/argv-classify.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-ci-template.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-release-workflow.py --selftest

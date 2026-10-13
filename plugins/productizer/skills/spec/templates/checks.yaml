@@ -304,6 +304,9 @@ checks:
   #                    and set the floor from what you measure. Left unedited the
   #                    target does not exist, semgrep exits 2, and the check
   #                    refuses - which is the safe way for it to be wrong.
+  #                    A committed file named here is a repository path, so
+  #                    run-checks.sh refuses the check until
+  #                    `policy.allow_repo_local_tools: true`.
   - id: sast
     why: the ordinary injection and path-traversal classes, on every change that touches code
     when:
