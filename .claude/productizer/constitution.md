@@ -103,7 +103,7 @@ Checked by
 absent/unknown/zero rendering.
 
 Enforced by
-: R13, R15, R25, R26, R20.
+: R13, R96, R97, R25, R26, R20.
 
 ### P2 — Nothing reaches an audience without a person deciding
 Active. Ratified 2026-08-28 by the maintainer.
@@ -120,7 +120,7 @@ Checked by
 PreToolUse hooks, exit 2 to block.
 
 Enforced by
-: R17.
+: R123.
 
 ### P3 — A view never becomes an input
 Active. Ratified 2026-08-28 by the maintainer.
@@ -138,7 +138,7 @@ Checked by
 view emits a table to paste.
 
 Enforced by
-: R4, R11.
+: R106, R11.
 
 ### P4 — A repository being examined never chooses what runs
 Active. Ratified 2026-08-28 by the maintainer.
@@ -172,6 +172,7 @@ pattern, instead of spread across the feature PRs that each relaxed it.
 | Date | Principle | Change | Prompted by | Why | Ratified by |
 |---|---|---|---|---|---|
 | 2026-10-10 | P1 | amended in place | B95 | `Checked by` named `track-traffic.sh`, a script that does not exist in this repository; a check nothing can run checks nothing, and `validate-spec.py`'s `PRINCIPLE_CHECK_ABSENT` found it. The name is removed and the other three stay. What P1 forbids is unchanged | the maintainer |
+| 2026-10-13 | P1, P2, P3 | amended in place | B145 | Their `Enforced by` lists named requirements retired the same day by the maintainer's spec-review rulings (v4.71.0): R15 split into R96 (report it as hollow) and R97 (treat it as a failure), R17 normalised to R123, R4 normalised to R106. Each principle now names the requirements that carry the same obligations; what each principle forbids is unchanged | the maintainer |
 | 2026-10-13 | P1 | amended in place | B98 | `Enforced by` named R16, which was retired and split into R25 (report a value that could not be measured as unmeasured) and R26 (never record it as zero); P1 now names both halves, so its enforcement is exactly what it was. What P1 forbids is unchanged | the maintainer |
 | 2026-10-12 | — | record corrected | B99 | Two rows that stood below the P1 entry were the template's own examples - an amendment of P4 under #612 and a withdrawal of P5 under #588 - and described changes that never happened in this repository; a record that carries invented history cannot be trusted for the real entries. Both are removed. No principle changes | the maintainer |
 
