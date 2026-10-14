@@ -773,11 +773,11 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**114 requirements are active**, and they are the whole of what has been
+**116 requirements are active**, and they are the whole of what has been
 agreed.
 
-Thirty-two more are superseded and none withdrawn, and neither kind is listed
-here. The spec keeps both forever with their text intact, so a citation
+Thirty-three more are superseded and none withdrawn, and neither kind is
+listed here. The spec keeps both forever with their text intact, so a citation
 written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
@@ -821,9 +821,10 @@ happening:
   protected list through an artifact the agent's job never downloads.
 - **R144** — The lifecycle shall hold the data-only list in the plugin and
   never read it from the repository's own configuration.
-- **R146** — The lifecycle shall count a configured argument that holds a
+- **R149** — The lifecycle shall count a configured argument that holds a
   slash, holds no whitespace and resolves under the repository root as naming
-  a path inside that repository, whether or not that path exists yet.
+  a path inside that repository, whether or not that path exists yet, except a
+  semgrep registry id that R148 excludes.
 
 **When something arrives.** Thirty-eight things happen on a discrete trigger:
 
@@ -951,7 +952,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Forty-four defences, written as `If … then`
+**When something goes wrong.** Forty-six defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1061,6 +1062,13 @@ because a designed path and a defended one are not the same thing:
   that is not on the plugin's data-only list, and the configuration has not
   opted in to repository-declared check tools, then the lifecycle shall refuse
   to run it.
+- **R147** — If an unattended stage run changes a file named by the value an
+  option carries in a check declared in `.claude/productizer/checks.yaml` at
+  the base, whether or not that value is spelled as a path, then the lifecycle
+  shall refuse the stage move.
+- **R148** — If a configured command hands the semgrep data-only tool a
+  registry id as its configuration, and no repository path of that name
+  exists, then the lifecycle shall not count that id as a repository path.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

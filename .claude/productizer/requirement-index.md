@@ -171,5 +171,8 @@ marker, because a table left there would be one nothing writes or checks.
 | R143 | unwanted | active | `checks-stage-runner` |
 | R144 | ubiquitous | active | `checks-stage-runner` |
 | R145 | event | active | `checks-stage-runner` |
-| R146 | ubiquitous | active | `checks-stage-runner` |
+| R146 | ubiquitous | superseded by R149 | `checks-stage-runner` |
+| R147 | unwanted | active | `stage-advance-guard` |
+| R148 | unwanted | active | `checks-stage-runner` |
+| R149 | ubiquitous | active | `checks-stage-runner` |
 <!-- productizer:requirement-index:end -->

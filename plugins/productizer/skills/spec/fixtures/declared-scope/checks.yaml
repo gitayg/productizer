@@ -41,7 +41,7 @@
 # the CHECK reported it examined, not what is on disk. An absolute path here
 # would have made the test pass on one machine and refuse on every other one.
 # They hold no slash: since run-checks.sh 1.3 a value spelled as a path under
-# the root counts as a repository path whether or not it exists (B157, R146),
+# the root counts as a repository path whether or not it exists (B157, R149),
 # and `echo fixture/one.txt` would be refused without the opt-in for a reason
 # that is not this fixture's subject.
 version: 1

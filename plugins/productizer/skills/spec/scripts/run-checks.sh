@@ -238,7 +238,7 @@ on_exit() {
 trap on_exit EXIT
 
 die_usage() { printf 'run-checks: %s\n' "$1" >&2; exit 2; }
-VERSION="run-checks 1.3"
+VERSION="run-checks 1.4"
 
 # Echoes the git work tree containing $1, or nothing. git's own explanation is
 # kept in GIT_WHY rather than discarded: a fallback that cannot say why it fell
@@ -1831,6 +1831,72 @@ SELFTEST_CFG_RL_DATA
     "a placeholder and an option value naming no path in the work tree, opt-in off: data, still run" \
     --config "$SB/rl-data.yaml" --root "$RL" \
     --changed "$SB/rl-changed.txt" --out "$SB/rl-data.json"
+  # B159, maintainer ruling 2026-10-14 ("Narrow exception"): the value of
+  # semgrep's --config, --config= or -c spelled as a registry id (`p/default`)
+  # is not a repository path while neither tree holds a file or directory by
+  # that name; when one does, it is a path again, at load and when semgrep
+  # comes to run. `semgrep` here is a stub OUTSIDE the work tree, created only
+  # now so no case above can reach it: it writes the marker and reads nothing,
+  # so the marker shows the check ran. The three run cases were refused at
+  # a0c7f6e (exit 2), and `sg-registry-written` was refused at load there.
+  printf '#!/bin/sh\nprintf ran > %s\nprintf "ok\\n"\n' "'$RL_MARK'" > "$SB/rl-bin/semgrep"
+  chmod +x "$SB/rl-bin/semgrep"
+  sg_runs() {
+    rl_cfg "sg-$1" command batch "$3"
+    rm -f "$RL_MARK"
+    PATH="$SB/rl-bin:$PATH" self_drive "sg-$1" 0 "$2, allow_repo_local_tools: false" \
+      --config "$SB/rl-sg-$1-false.yaml" --root "$RL" \
+      --changed "$SB/rl-changed.txt" --out "$SB/sg-$1.json"
+    SELF_ASSERTS=$((SELF_ASSERTS + 1))
+    if [ -e "$RL_MARK" ]; then
+      printf '  held:    assert %-20s %s\n' "payload" "sg-$1: semgrep ran with the opt-in off"
+    else
+      printf '  FINDING: assert %-20s %s\n' "payload" "sg-$1: semgrep did not run with the opt-in off"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    fi
+  }
+  [ ! -e "$RL/p" ] || self_unmeasured "the repo-local corpus already holds p, so the registry cases would not start from a tree with no p/default. Unmeasured, not a pass"
+  sg_runs registry-runs "semgrep --config p/default, which neither tree holds: a registry id, not a path" "[semgrep, --config, p/default]"
+  sg_runs config-equals "semgrep --config=p/x, which neither tree holds: a registry id" "[semgrep, --config=p/x]"
+  sg_runs short-c "semgrep -c r/abc, which neither tree holds: a registry id" "[semgrep, -c, r/abc]"
+  # Not semgrep named bare, or semgrep with an option that voids its entry:
+  # no exception, so `p/default` is a path by its spelling (R149), refused.
+  # `rl-a-registry-id` above is the same for a program not on the list.
+  rl_cfg sg-path-program command batch "['$SB/rl-bin/semgrep', --config, p/default]"
+  rl_case sg-path-program "semgrep named by a path, --config p/default: the entry is for the bare name, so p/default is a path"
+  rl_cfg sg-voided command batch "[semgrep, --allow-local-builds, --config, p/default]"
+  rl_case sg-voided "semgrep with --allow-local-builds, --config p/default: the voided entry grants no exception"
+  # The existence override: a file of that name in the work tree only, then
+  # in the base tree only, makes the id a path again.
+  mkdir -p "$RL/p"; printf 'rules: []\n' > "$RL/p/default"
+  rl_cfg sg-work-tree-holds command batch "[semgrep, --config, p/default]"
+  rl_case sg-work-tree-holds "semgrep --config p/default with an untracked p/default in the work tree: a path"
+  RLG add -- p/default && RLG commit -qm registry-file || self_unmeasured "p/default could not be committed to the repo-local corpus. Unmeasured, not a pass"
+  rm -f "$RL/p/default"
+  RLG cat-file -e HEAD:p/default && [ ! -e "$RL/p/default" ] ||
+    self_unmeasured "p/default is not a path only the base tree holds. Unmeasured, not a pass"
+  rl_cfg sg-base-holds command batch "[semgrep, --config, p/default]"
+  rl_case sg-base-holds "semgrep --config p/default with p/default committed at the base: a path"
+  self_assert_err "$SB/rl-sg-base-holds-false.err" "command[2] names a path inside the repository being checked" \
+    "sg-base-holds: the refusal is clause 2's, on the value semgrep's --config carries"
+  RLG rm -q -- p/default && RLG commit -qm registry-file-gone || self_unmeasured "p/default could not be removed from the repo-local corpus. Unmeasured, not a pass"
+  # Judged case-insensitively on a disk that folds case: measured, never
+  # assumed, as `rl-a-case-variant` is.
+  mkdir -p "$RL/p"; printf 'rules: []\n' > "$RL/p/DEFAULT"
+  rl_cfg sg-case-variant command batch "[semgrep, --config, p/default]"
+  if [ -e "$RL/p/default" ]; then _sv=2; _svw="this disk folds case, so p/DEFAULT is p/default and the id is a path"
+  else _sv=0; _svw="this disk does not fold case, so p/DEFAULT is another name and p/default is a registry id"; fi
+  rm -f "$RL_MARK"
+  PATH="$SB/rl-bin:$PATH" self_drive sg-case-variant "$_sv" "$_svw, allow_repo_local_tools: false" \
+    --config "$SB/rl-sg-case-variant-false.yaml" --root "$RL" \
+    --changed "$SB/rl-changed.txt" --out "$SB/sg-case-variant.json"
+  rm -rf "${RL:?}/p"
+  # Written by an earlier check in the same run: allowed when the config is
+  # read, refused when semgrep comes to run (exit 3, its row `refused`).
+  wtn_cfg registry command "[semgrep, --config, p/default]" p/default
+  wtn_case registry 3 "semgrep --config p/default, which an earlier check writes as a file: a path when semgrep comes to run"
+  rm -rf "${RL:?}/p"
+
   # The shared reading gone: refused, never guessed.
   mkdir -p "$SB/rl-lone"; cp "$0" "$SB/rl-lone/run-checks.sh"
   _rc=0
@@ -1870,6 +1936,7 @@ SELFTEST_CFG_RL_DATA
   printf '  NOW ASSERTED (B89): a refused blocking check prints the tail of its own output under its row; `refused-says-why` reads the tool reason off stderr, and the clean case asserts a passing check prints none. NOT ASSERTED: the 20-line and 300-character bounds, which no case here exceeds.\n'
   printf '  NOW ASSERTED (B150, then the strict rule of 2026-10-13): with `allow_repo_local_tools` off every case exits 2 with the marker absent, and with it on runs with the marker present. Clause 1, the program: a relative path, an absolute path under the root, a bare name the root holds found through PATH. Clause 2, a literal argument, handed to a stub outside the work tree that runs nothing: ./x, x//y, x/../y, a trailing slash, --opt=VALUE, a value glued to a short option and one glued after a cluster, a path only the base tree holds, one only the work tree holds, an absolute path outside the root through a symlink pointing inside, `docs/{base}` judged as the path it becomes, the same argument in version_command, coverage.command and coverage.rules_command, a dotted name (`python3 -m rlpkg.mod`) read as the module path it resolves to, and a script-shaped path neither tree holds yet; a case variant, refused or run as this disk folds case or not. Clause 3: a placeholder handed to a program not on the data-only list, and grep, on it, with --filter; a config that names its own program as data-only, in the policy and in the check, is refused all the same, because the list is the plugin'"'"'s (`rl-ph-config-list`). The B150 shapes stay as regression cases (-W ignore, a versioned or absolute interpreter, -X dev -m, perl -I, sed -f, python3 {file}). Controls run with the opt-in off: `rl-data-allowed` (grep, on the list, with {files}) and `rl-not-inside-allowed` (`.`, a word with no slash, /dev/null); `rl-a-registry-id` (`p/default`) is refused since 1.3, counted by its spelling. `rl-no-shared-reading` refuses with no argv-classify.py beside the runner. NOT ASSERTED here: a file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself; the root itself or a directory above it as an argument, which is not refused because the checks already run there; a value inside a comma-separated list (`--x=a,b`); a bare name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); a tool on the data-only list whose installed version gained an option that runs code; shellcheck and semgrep with a placeholder, which are on the list but not on every machine.\n'
   printf '  NOW ASSERTED (B157): a path an earlier check writes during the run. Each `wtn-*` case ran the written file at b84994b; with the opt-in off it is now refused and the marker absent, with it on it runs and the marker appears. Judged again just before it runs, exit 3 with wtn-b `refused`: a bare program a PATH entry into the tree finds, an argument and an --opt=VALUE with no slash, the same in version_command, coverage.command and coverage.rules_command, and a per_file `{file}` invocation of shellcheck a PATH entry into the tree now finds. Counted by its spelling when the config is read, exit 2: an extension-less path under a directory the tree holds and under one it does not, as --opt=VALUE and glued to a short option. NOT ASSERTED: a file written while a check runs by a process that outlives the check, or between the judgement and the exec; a file the later check reads that no argument names.\n'
+  printf '  NOW ASSERTED (B159, ruling 2026-10-14): semgrep'"'"'s --config, --config= or -c value spelled as a registry id is not a repository path while neither tree holds a file or directory by that name. With the opt-in off, `sg-registry-runs` (--config p/default), `sg-config-equals` (--config=p/x) and `sg-short-c` (-c r/abc) run a semgrep stub outside the work tree, each refused at a0c7f6e; `sg-work-tree-holds` and `sg-base-holds` refuse it when the work tree or the base tree holds p/default, `sg-case-variant` refuses or runs as this disk folds case or not, and `wtn-registry` refuses it when semgrep comes to run after an earlier check wrote p/default (exit 3, the row `refused`). No exception for semgrep named by a path (`sg-path-program`), with --allow-local-builds (`sg-voided`), or another program (`rl-a-registry-id`). NOT ASSERTED: what the real semgrep reads for a registry id - measured by hand with semgrep 1.171.0 on 2026-10-14 (it fetched the registry and did not read a local p/default), not here; a registry id after -f, an abbreviated --conf or a glued -cVALUE, which stay paths.\n'
   printf '  NOT ASSERTED: `{base}` as an operand of a program that runs it, with the opt-in on, which is the opt-in'"'"'s to allow and is not refused, and a base that resolved but is not 40 hex digits - a SHA-256 repository - whose row is `no_base` with a different sentence and is not driven here. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
@@ -2196,7 +2263,10 @@ ROOT_REAL = os.path.realpath(ROOT)
 #      a case-insensitive disk; and, absent from both, a path under the root
 #      spelled with a script extension, a `./` or a `/` (B157), which an
 #      earlier check in the same run could create. Any program counts the
-#      same; or
+#      same, with one exception the plugin holds (B159): the value of
+#      semgrep's `--config`, `--config=` or `-c` spelled as a registry id
+#      (`p/default`, argv-classify.py's registry_ids()) is not a path while
+#      neither tree holds a file or directory by that name; or
 #   3. a PLACEHOLDER (`{file}`, `{files}`) is handed to a program that is not
 #      on argv-classify.py's data-only list, which lives in the plugin and
 #      never in the config being examined.
@@ -2282,11 +2352,23 @@ def names_tree_path(value, shaped=False):
     # when a tree held it. So any value spelled as a path - a `/` in
     # it and no whitespace - that resolves under the root counts, whether or
     # not it exists yet. A registry id spelled with a slash (`p/default`)
-    # counts with it: that is this rule's cost, paid with the opt-in. The
-    # root itself (`.`, `x/..`) normalises to nothing and still does not.
+    # counts with it, except where gate_reason lets semgrep's entry read it as
+    # one (B159). The root itself (`.`, `x/..`) normalises to nothing and
+    # still does not.
     if rel is not None and shaped and "/" in value and AC.path_shaped(value):
         return True
     return _real_inside(os.path.join(ROOT, value))
+
+def tree_holds(value):
+    """A file or directory by this name exists in the base tree or the work
+    tree, as this disk folds case."""
+    if "\x00" in value:
+        return False
+    rel = AC.normalise(value, ROOT, FOLD)
+    if rel is None:
+        return False
+    full = os.path.join(ROOT, rel)
+    return _fold(rel) in BASE_TREE or os.path.lexists(full) or _real_inside(full)
 
 def program_inside(prog):
     """Clause 1: does argv[0] resolve inside the work tree the checks run in?"""
@@ -2322,6 +2404,12 @@ def gate_reason(where, value, base_sha):
     can see in the diff. The refusal sentence, or None."""
     if not AC.has_placeholder(value[0]) and program_inside(value[0]):
         return "%s[0] (the program) resolves inside the repository being checked. %s" % (where, GATE_TAIL)
+    # B159, maintainer ruling 2026-10-14 ("Narrow exception"): a registry id
+    # semgrep's data-only entry reads off its --config value (`p/default`) is
+    # not a repository path while neither tree holds a file or directory by
+    # that name. Judged here, so at load and again just before it runs: a
+    # `p/default` an earlier check writes is a path when semgrep comes to run.
+    registry = set(AC.registry_ids(value))
     for k in range(1, len(value)):
         tok = value[k]
         if AC.has_placeholder(tok):
@@ -2331,6 +2419,8 @@ def gate_reason(where, value, base_sha):
         if base_sha:
             tok = tok.replace("{base}", base_sha)
         for v, shaped in AC.values(tok):
+            if (k, v) in registry and not tree_holds(v):
+                continue
             if names_tree_path(v, shaped):
                 return ("%s[%d] names a path inside the repository being checked%s. %s"
                         % (where, k, "" if v == tok else ", in the value it carries", GATE_TAIL))
@@ -2403,7 +2493,7 @@ try:
     with open(CLASSIFIER, encoding="utf-8") as _fh:
         AC = types.ModuleType("argv_classify")
         exec(compile(_fh.read(), CLASSIFIER, "exec"), AC.__dict__)
-    AC.values, AC.normalise, AC.has_placeholder, AC.data_only, AC.module_paths, AC.SCRIPT_EXT, AC.is_interpreter
+    AC.values, AC.normalise, AC.has_placeholder, AC.data_only, AC.module_paths, AC.SCRIPT_EXT, AC.is_interpreter, AC.registry_ids
 except Exception as exc:
     sys.stderr.write("run-checks: the shared argv reading %s cannot be loaded (%s), so whether a "
                      "command names a path in the repository cannot be decided. Refusing rather "

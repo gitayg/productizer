@@ -133,13 +133,19 @@
 # (element 0); every other literal that is not an option, whole, when it has
 # no whitespace - a bare word too, since `python3.9 gen` runs a `gen` a change
 # adds and no rule here knows which program does that; every `--opt=VALUE`
-# value and every value glued to a short option (`-Itools/lib`), when the
-# base tree holds it or it is path-shaped (a slash or a script extension);
-# every later glued suffix and every whole option the base tree holds; and the
-# module paths of any dotted name (`pkg.mod` protects `pkg/**`, `pkg.py` and
-# `pkg/mod.py`). That protects data operands too: refusing more is the safe
+# value and every value glued to a short option (`-Itools/lib`, `-Sgen`),
+# read the same way, a bare word too, since `--script=gen` runs a `gen` a
+# change adds as surely (B158; 1.8 counted one only when the base held it or
+# it had a slash or a script extension); every later glued suffix and every
+# whole option the base tree holds; and the module paths of any dotted name
+# (`pkg.mod` protects `pkg/**`, `pkg.py` and `pkg/mod.py`). The root `.` is
+# never protected. That protects data operands too: refusing more is the safe
 # direction. On this repository the set is a superset of 1.7's (measured
-# 2026-10-13: all 69 paths 1.7 printed, and 13 bare words more). A
+# 2026-10-13: all 69 paths 1.7 printed, and 13 bare words more). A semgrep
+# registry id (`--config p/default`), which run-checks.sh no longer counts as
+# a path while no tree holds one (B159), is still protected here: a change
+# that adds a file by that name would turn the id into a repository path,
+# and over-protecting is the safe direction. A
 # placeholder (`{file}`, `{files}`) handed to a program that is neither on the
 # data-only list nor a repository path is exit 4: the change itself would
 # choose what that program reads and may run. The reading, the path test and
@@ -256,7 +262,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.8"
+VERSION="stage-advance 1.9"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -1129,7 +1135,8 @@ YAML
     "$R" --print-protected --base argv-base
   local PA="$WORK/print-protected-argv.out"
   CASES=$((CASES + 1)); CODES="$CODES 0"
-  if printf 'dev\ndocs/in.txt\ngen\nignore\nmodpkg\nmodpkg.main\nmodpkg.py\nmodpkg/main.py\nnode\nperl\npython3\npython3.9\nsed\ntools/a.py\ntools/b.js\ntools/c.js\ntools/lib\ntools/n.pl\ntools/pre.js\ntools/pre2.js\ntools/prog.sed\ntools/v.py\ntools/x.sh\n' | cmp -s - "$PA"; then
+  # Mark is -MMark's glued value, a bare word, protected since 1.9 (B158).
+  if printf 'Mark\ndev\ndocs/in.txt\ngen\nignore\nmodpkg\nmodpkg.main\nmodpkg.py\nmodpkg/main.py\nnode\nperl\npython3\npython3.9\nsed\ntools/a.py\ntools/b.js\ntools/c.js\ntools/lib\ntools/n.pl\ntools/pre.js\ntools/pre2.js\ntools/prog.sed\ntools/v.py\ntools/x.sh\n' | cmp -s - "$PA"; then
     HELD=$((HELD + 1)); printf '  ok    %-44s exit 0\n' "print-protected-argv-exact-set"
   else
     printf '  FAIL  %-44s the printed list is not the set the argv walk derives\n' "print-protected-argv-exact-set"
@@ -1197,6 +1204,32 @@ YAML
     addpatch "${u%%=*}" "$WORK/lit.patch"
     drive "unattended-literal-$(printf '%s' "${u%%=*}" | tr / :)" 3 "${u%%=*} (unattended: .claude/productizer/checks.yaml at the base runs it" \
       "$R" --from build --to test --mode build --unattended --patch "$WORK/lit.patch"
+  done
+  # B158: AN OPTION'S BARE VALUE. 1.8 protected an `--opt=VALUE` value or a
+  # value glued to a short option only when the base held it or it had a
+  # slash or a script extension, so a change adding a root file `wtnopt` was
+  # allowed under --unattended though `--script=wtnopt` runs it. Since 1.9 it
+  # is read as a whole literal is, a bare word too; the root `.` and a value
+  # with whitespace still are not. B159: semgrep's registry id `p/default`,
+  # which run-checks.sh no longer counts as a path while no tree holds one,
+  # is still protected here (a change adding it would make it one).
+  printf 'checks:\n  - id: ov\n    command: [wtn-run, --script=wtnopt, --x=sub/gen2, -Swtn/glued, -Sglued, --dir=., "--msg=a b"]\n  - id: sg\n    command: [semgrep, --config, p/default, "{files}"]\n' \
+    > "$R/.claude/productizer/checks.yaml"; commit "$R"; G "$R" tag ov-base
+  drive print-protected-option-values 0 "7 path(s) that .claude/productizer/checks.yaml at ov-base runs" \
+    "$R" --print-protected --base ov-base
+  local POV="$WORK/print-protected-option-values.out"
+  CASES=$((CASES + 1)); CODES="$CODES 0"
+  if printf 'glued\np/default\nsemgrep\nsub/gen2\nwtn-run\nwtn/glued\nwtnopt\n' | cmp -s - "$POV"; then
+    HELD=$((HELD + 1)); printf '  ok    %-44s exit 0\n' "print-protected-option-values-exact-set"
+  else
+    printf '  FAIL  %-44s the printed list is not every option value, bare words included, without . or a value with a space\n' "print-protected-option-values-exact-set"
+    sed 's/^/          stdout: /' "$POV"
+  fi
+  for u in 'wtnopt=the bare value of --script=' 'glued=a bare value glued to a short option' \
+           'p/default=a semgrep registry id, still protected'; do
+    addpatch "${u%%=*}" "$WORK/ov.patch"
+    drive "unattended-option-value-$(printf '%s' "${u%%=*}" | tr / :)" 3 "${u%%=*} (unattended: .claude/productizer/checks.yaml at the base runs it" \
+      "$R" --from build --to test --mode build --unattended --patch "$WORK/ov.patch"
   done
   mkdir -p "$WORK/lone"; cp "$SELF" "$WORK/lone/stage-advance.sh"
   SELF="$WORK/lone/stage-advance.sh" drive print-protected-no-shared-reading 4 "the shared argv reading argv-classify.py cannot be loaded" \
@@ -1370,10 +1403,13 @@ def protect(p, why):
 # that is not an option, whole, when it has no whitespace (a bare word too:
 # `python3.9 gen` runs a `gen` a change adds, and no rule here knows which
 # program does that); every `--opt=VALUE` value and the value glued to a
-# short option, when the base tree holds it or it is path-shaped (a slash or
-# a script extension); every later glued suffix and every whole option token
-# the base tree holds; and the module paths of any dotted name (`pkg.mod`
-# protects pkg/**, pkg.py and pkg/mod.py). A placeholder is the change
+# short option, read the same way, a bare word too (B158); every later glued
+# suffix and every whole option token the base tree holds; and the module
+# paths of any dotted name (`pkg.mod` protects pkg/**, pkg.py and
+# pkg/mod.py). A semgrep registry id is protected like any other value,
+# though run-checks.sh reads it as no path while no tree holds one (B159):
+# protecting it refuses a change that would add a file by that name. A
+# placeholder is the change
 # choosing an argument: as the program it is exit 4, and anywhere else it is
 # exit 4 unless the program is on the data-only list or is itself a
 # repository path this protects, so that what reads the change's files is
@@ -1400,15 +1436,14 @@ def argv_walk(v, where):
         if "{" in tok or tok == "-":
             continue
         for val, shaped in AC.values(tok):
-            if val == tok and shaped:
-                # A literal that is not an option: whole, as a bare word too.
-                if not re.search(r"\s", tok) and "://" not in tok:
-                    protect(tok, named)
+            if shaped and not re.search(r"\s", val) and "://" not in val:
+                # A literal that is not an option, whole, or the value an
+                # option carries: as a bare word too (B158).
+                protect(val, named)
+                if val == tok:
                     for m in AC.module_paths(tok):
                         protect(m, dotted)
-                elif base_holds(tok):
-                    protect(tok, named)
-            elif base_holds(val) or (shaped and AC.path_shaped(val)):
+            elif base_holds(val):
                 protect(val, named)
             if shaped and val != tok:
                 for m in AC.module_paths(val):

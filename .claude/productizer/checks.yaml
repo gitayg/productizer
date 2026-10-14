@@ -2314,7 +2314,21 @@ checks:
             went from 69 to 82 paths, all 69 kept, the 13 added being bare words. Falsified
             2026-10-13: shaped values off, 209 of 212; dotted names off, 205; the placeholder exit
             4 off, 207; bare words off, a whole token protected only when path-shaped or held by
-            the base, 203.
+            the base, 203. Since 1.9 (B158, v4.72.4), 217 cases: an option's value is protected
+            as a whole literal is, a bare word too (R147). A semgrep registry id, which
+            run-checks.sh 1.4 does not count as a path while no tree holds one (R148), stays
+            protected here: `unattended-option-value-p:default` exits 3 on a change adding
+            `p/default`; falsified with registry ids skipped, 214 of 217.
+        - id: R147
+          verdict: Covered
+          evidence: >-
+            B158. `print-protected-option-values` and `-exact-set` print every value an option
+            carries, a bare word included (`--script=wtnopt`, `-Sglued`), beside the path-shaped
+            `--x=sub/gen2` and `-Swtn/glued`, and neither `--dir=.` nor a value with a space; under
+            --unattended, `unattended-option-value-wtnopt` and `-glued` exit 3 on a change adding
+            a root file of that name. Those four were red at a0c7f6e, which allowed both changes,
+            exit 0, and `print-protected-argv-exact-set`, which gains `-MMark`'s `Mark`, too.
+            Falsified 2026-10-14 with the a0c7f6e argv walk put back: 212 of 217.
         - id: R127
           verdict: Covered
           evidence: >-
@@ -4012,7 +4026,7 @@ checks:
             clause off turns the three `rl-p-*` cases red; the argument clause off, 68 findings;
             the placeholder clause off, 4 cases red. Since 1.3 (B157, v4.72.3) every argv is
             judged again just before it runs, and a value spelled as a path under the root counts
-            whether or not it exists (R145, R146): the eleven `wtn-*` cases, each of which ran a
+            whether or not it exists (R145, R146, now R149): the eleven `wtn-*` cases, each of which ran a
             file an earlier check wrote at b84994b, are refused off and run on. NOT asserted: a
             file a tool runs that no argument names; a file written between the judgement and the
             exec; a value inside a comma-separated list; node_modules resolution; shellcheck and
@@ -4033,7 +4047,7 @@ checks:
             `-coverage`, `-rules`); `rl-a-case-variant` is refused on a disk that folds case.
             `rl-not-inside-allowed` runs `.`, a word with no slash and /dev/null with the opt-in
             off. Falsified 2026-10-13 with the argument clause off: 68 findings. Since 1.3 (B157)
-            a path an earlier check writes is refused too: by its spelling at load (R146) or
+            a path an earlier check writes is refused too: by its spelling at load (R146, now R149) or
             judged again just before it runs (R145), the `wtn-*` cases.
         - id: R143
           verdict: Covered
@@ -4072,18 +4086,39 @@ checks:
             (`wtn-per-file`). Each ran the written file at b84994b. Falsified 2026-10-14 with the
             run-time judgement off: those seven cases red; with the per-file and coverage.command
             calls alone removed, `wtn-per-file` and `wtn-coverage` red.
-        - id: R146
+        - id: R149
           verdict: Covered
           evidence: >-
-            B157. With the opt-in off, an extension-less path no tree holds yet, which an earlier
-            check then writes, is refused when the config is read, exit 2, the marker absent, and
-            runs with the opt-in on: under a directory the tree holds (`wtn-subdir`), under one it
+            B157, moved from R146, which R149 supersedes (B159, ruled 2026-10-14). With the
+            opt-in off, an extension-less path no tree holds yet, which an earlier check then
+            writes, is refused when the config is read, exit 2, the marker absent, and runs with the opt-in on: under a directory the tree holds (`wtn-subdir`), under one it
             does not (`wtn-new-dir`), as --opt=VALUE (`wtn-opt-slash`) and glued to a short option
             (`wtn-glued`); `rl-a-registry-id` refuses `p/default`, a registry id spelled as a path,
             which is this rule's cost. Each ran at b84994b. The root is still not counted
             (`rl-not-inside-allowed` runs `.`). Falsified 2026-10-14 with the spelling rule off:
             the four `wtn-*` cases exit 3, refused only when they came to run, and
-            `rl-a-registry-id` runs - five cases red.
+            `rl-a-registry-id` runs - five cases red. Since 1.4 (B159, v4.72.4) the exception R149
+            names is R148's: a registry id semgrep's data-only entry reads off its --config, --config=
+            or -c value while no tree holds a path of that name. `rl-a-registry-id` (another
+            program), `sg-path-program` (semgrep named by a path) and `sg-voided` (semgrep with
+            --allow-local-builds) still refuse `p/default` by its spelling.
+        - id: R148
+          verdict: Covered
+          evidence: >-
+            B159, the maintainer's ruling of 2026-10-14. With the opt-in off, `sg-registry-runs`
+            (`semgrep --config p/default`), `sg-config-equals` (`--config=p/x`) and `sg-short-c`
+            (`-c r/abc`) run a semgrep stub outside the work tree, each exit 2 at a0c7f6e. The
+            existence override refuses the id, exit 2 off and 0 on, when the work tree holds
+            `p/default` (`sg-work-tree-holds`), when the base tree does (`sg-base-holds`), and on
+            a disk that folds case when it holds `p/DEFAULT` (`sg-case-variant`, measured);
+            `wtn-registry` refuses it when semgrep comes to run after an earlier check wrote
+            `p/default` - exit 3, its row `refused`. No exception for semgrep named by a path
+            (`sg-path-program`), with --allow-local-builds (`sg-voided`), or another program
+            (`rl-a-registry-id`). Falsified 2026-10-14: the exception off, 9 findings
+            (`sg-registry-runs`, `-config-equals`, `-short-c`, `wtn-registry`); the existence
+            override off, 13 (`sg-work-tree-holds`, `-base-holds`, `-case-variant`,
+            `wtn-registry`); the voiding ignored, 3 (`sg-voided`). NOT asserted: what the real
+            semgrep reads for a registry id, measured by hand with semgrep 1.171.0 and not here.
     limitations:
       - It is the runner's self-test, not this repository's run. That the real suite's refusals print their tails in CI is seen in the workflow log, not asserted here.
       - A file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself (`.semgrepignore`, `.npmrc`, `conftest.py`), a git alias - is not gated. The data-only list rests on the tools' `--help`, read 2026-10-13.

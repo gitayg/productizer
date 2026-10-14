@@ -38,6 +38,17 @@ whole, as `--opt=VALUE` or as an abbreviation a parser would accept, voids the
 entry for that argv. The program must be named bare: a path in argv[0] is not
 the tool the entry describes.
 
+A REGISTRY ID IS NOT A PATH, for semgrep alone (maintainer ruling
+2026-10-14, "Narrow exception"). semgrep's entry names the options whose
+value may be a registry id - `--config VALUE`, `--config=VALUE` and `-c
+VALUE`, nothing else, so `-f`, an abbreviation and a glued `-cVALUE` stay
+paths - and the spelling of one: `p/`, `r/` or `s/` and a single name of
+letters, digits, `.`, `_` and `-` after it. registry_ids(argv) returns those
+positions; it returns none when argv[0] is not bare semgrep or a voiding
+option is in the argv. The caller still counts the value as a path when a
+file or directory by that name exists in either tree: the exception is for a
+name nothing in the repository holds.
+
 is_interpreter() serves only run-checks.sh's R18 refusal of an interpreter
 handed an inline program (`python3 -c`). It decides nothing under R102 or R126.
 
@@ -60,7 +71,7 @@ import re
 import subprocess
 import sys
 
-VERSION = "argv-classify 2.0"
+VERSION = "argv-classify 2.1"
 
 # The placeholders the runner expands into repository paths. `{base}` is not
 # one: it becomes a commit id, and run-checks.sh judges the id it becomes.
@@ -74,21 +85,28 @@ PLACEHOLDERS = ("{file}", "{files}")
 # code, and why it is otherwise data-only. The option lists were read off
 # the installed tools' --help on 2026-10-13 (shellcheck 0.11.0, semgrep
 # 1.171.0, BSD grep 2.6.0, GNU grep 3.x); an option a later release adds is
-# not on them.
+# not on them. The third field is the entry's registry rule, or None: the
+# options whose value may name a registry entry, and that entry's spelling.
+# semgrep 1.171.0 documents `-f VAL, -c VAL, --config=VAL` as a "YAML
+# configuration file, directory of YAML files ending in .yml|.yaml, URL of a
+# configuration file, or Semgrep registry entry name", and its config_resolver
+# reads a value as a registry id when it "Starts with r/, p/, s/ for registry,
+# pack, and snippet respectively" - and tries that before any local path.
+SEMGREP_REGISTRY = (("--config", "-c"), re.compile(r"^[prs]/[A-Za-z0-9][A-Za-z0-9._-]*$"))
 DATA_ONLY = {
     "shellcheck": ((), "parses each file operand as shell source and never runs it; "
-                       "--rcfile, -P and -x only choose more files to parse"),
+                       "--rcfile, -P and -x only choose more files to parse", None),
     "semgrep": (("--allow-local-builds", "--allow-untrusted-validators"),
                 "matches rules against each target as text; a rules file is YAML with no "
                 "code. --allow-local-builds builds (runs) the scanned project and "
                 "--allow-untrusted-validators runs validators from rules of any origin, "
-                "so either voids the entry"),
+                "so either voids the entry", SEMGREP_REGISTRY),
     "grep": (("--filter", "--pager", "--view", "--config", "---", "--save-config",
               "--format-open", "--pre", "--pre-glob"),
              "reads each operand as text and matches patterns in it; GNU and BSD grep have "
              "no option that runs a command. The voiding options are ugrep's and ripgrep's, "
              "for a `grep` on PATH that is one of them: --filter, --pager, --view and --pre "
-             "run a command, --config, --- and --save-config load or write a config file"),
+             "run a command, --config, --- and --save-config load or write a config file", None),
 }
 
 # Kept for run-checks.sh's R18 inline-program refusal only.
@@ -190,12 +208,42 @@ def data_only(argv):
     prog = argv[0]
     if prog not in DATA_ONLY:
         return False, "the program is not on the data-only list"
-    denied, reason = DATA_ONLY[prog]
+    denied, reason, _ = DATA_ONLY[prog]
     for tok in argv[1:]:
         d = denied_option(tok, denied)
         if d:
             return False, "the program is on the data-only list, but %s in the argv makes it run code" % d
     return True, reason
+
+
+def registry_ids(argv):
+    """[(index, value)]: each value the program's data-only entry reads as a
+    registry id by its spelling - after one of the entry's options, as the
+    next token or after `=` - up to a `--`. None unless argv[0] is bare on
+    the list with a registry rule and no voiding option is in the argv. The
+    caller decides whether a tree holds a path of that name."""
+    entry = DATA_ONLY.get(argv[0]) if argv else None
+    if not entry or not entry[2] or not data_only(argv)[0]:
+        return []
+    opts, form = entry[2]
+    out = []
+    k = 1
+    while k < len(argv):
+        tok = argv[k]
+        if tok == "--":
+            break
+        if tok in opts and k + 1 < len(argv):
+            if form.match(argv[k + 1]):
+                out.append((k + 1, argv[k + 1]))
+            k += 2
+            continue
+        for o in opts:
+            if o.startswith("--") and tok.startswith(o + "="):
+                v = tok[len(o) + 1:]
+                if form.match(v):
+                    out.append((k, v))
+        k += 1
+    return out
 
 
 # THE TABLES the self-test pins.
@@ -231,6 +279,24 @@ DATA = [(["shellcheck", "--severity=warning", "{file}"], True),
         (["python3", "{file}"], False),
         (["cat", "{file}"], False),
         (["{file}"], False)]
+REGISTRY = [(["semgrep", "--config", "p/default", "{files}"], [(2, "p/default")]),
+            (["semgrep", "--config=p/x"], [(1, "p/x")]),
+            (["semgrep", "-c", "r/abc", "-c", "s/a.b-c_1"], [(2, "r/abc"), (4, "s/a.b-c_1")]),
+            (["semgrep", "scan", "--config", "p/default"], [(3, "p/default")]),
+            (["semgrep", "-f", "p/default"], []),
+            (["semgrep", "-cp/default"], []),
+            (["semgrep", "--conf", "p/default"], []),
+            (["semgrep", "--config", "P/default"], []),
+            (["semgrep", "--config", "p/../x"], []),
+            (["semgrep", "--config", "p/a/b"], []),
+            (["semgrep", "--config", "p/"], []),
+            (["semgrep", "--config", "./p/default"], []),
+            (["semgrep", "--", "--config", "p/default"], []),
+            (["semgrep", "--config", "p/default", "--allow-local-builds"], []),
+            (["/usr/bin/semgrep", "--config", "p/default"], []),
+            (["rl-echo", "--config", "p/default"], []),
+            (["grep", "--config", "p/default"], []),
+            (["shellcheck", "-c", "p/default"], [])]
 STEMS = [("python3.12", True), ("pypy3", True), ("node.exe", True), ("/usr/bin/python3", True),
          ("pythonista", False), ("grep", False), ("shellcheck", False)]
 
@@ -268,6 +334,9 @@ def selftest():
     for argv, want in DATA:
         got = data_only(argv)[0]
         case("data_only %s is %s" % (" ".join(argv), want), got is want, "-> %r" % (data_only(argv),))
+    for argv, want in REGISTRY:
+        got = registry_ids(argv)
+        case("registry_ids %s" % " ".join(argv), got == want, "-> %r" % (got,))
     for name, want in STEMS:
         case("interpreter %s is %s (R18 only)" % (name, want), is_interpreter(name) is want)
     me = os.path.abspath(__file__)
@@ -319,7 +388,9 @@ def finish(held, total, reached, inner=False):
           "--help read on 2026-10-13, and an option a later release adds is not on them; a "
           "file a tool runs that no argument names - a test runner discovering tests, a "
           "config the tool finds by itself, a git alias; a value inside a comma-separated "
-          "list (`--x=a,b`), which is one value here.")
+          "list (`--x=a,b`), which is one value here; that semgrep reads no local path for a "
+          "registry id it is handed - measured with semgrep 1.171.0 on 2026-10-14, not "
+          "re-measured here, and the caller's existence override refuses one a tree holds.")
     if got != doc and not inner:
         print("FAIL: reached and documented exit codes differ")
         return 1

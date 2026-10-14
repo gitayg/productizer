@@ -113,6 +113,19 @@ and no commit, a check whose command takes `{base}` is never invoked and reads
 `no_base` — a status that blocks at any severity, like `missing_tool`, because a
 check that compares against a base measures nothing without one.
 
+**A semgrep registry id is not a path until one exists** (v4.72.4, B159, the
+maintainer's narrow exception). Without the opt-in, a value spelled as a path
+under the root is refused whether or not it exists (R149, which superseded
+R146), which caught `semgrep --config p/default` until this exception. The value
+of semgrep's `--config`, `--config=` or `-c` spelled `p/`, `r/` or `s/` and one
+name is read as a registry id instead (R148), by semgrep's entry in the plugin's data-only list, never by the config.
+The existence override: while either tree holds a file or directory of that
+name - case-folded on a disk that folds case - it is a path and refused, judged
+at load and again just before semgrep runs, so a `p/default` an earlier check
+writes is caught. semgrep named by a path, with `--allow-local-builds`, or
+spelled `-f`, `--conf` or `-cVALUE` gets no exception. `stage-advance.sh` still
+protects the id, so an unattended change cannot add a `p/default`.
+
 ### Testing this class of bug
 
 Two ways a test can agree with itself while all of the above is live, both

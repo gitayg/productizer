@@ -473,7 +473,7 @@ commands, an interpreter's first operand and every `requires` entry - is
 refused under `--unattended`. Since 1.8 (v4.72.2, B152, the maintainer's
 strict rule) the set is read without recognising any interpreter: the program,
 every literal non-option token, bare words included, every `--opt=` and glued
-value naming a repository path or shaped like one, and the module paths of a
+value (a bare word too, since 1.9, B158), and the module paths of a
 dotted name, read by `argv-classify.py`, which `run-checks.sh` shares. A
 placeholder handed to a program off the plugin's data-only list is exit 4
 under `--unattended` (B156); wrap the command in a repository script.
@@ -488,11 +488,17 @@ value inside a comma-separated list, or a name a tool resolves through
 node_modules. Since 1.3 (v4.72.3, B157) it judges each command again just
 before it runs, so a path an earlier check wrote is refused when a later check
 names it, and it counts a value spelled as a path under the root whether or not
-it exists - so a registry id spelled with a slash (`semgrep --config
-p/default`) needs the opt-in (B159). Still not judged: a file written between
-that judgement and the exec, or by a process an earlier check left running.
-`stage-advance.sh` does not protect a bare option value the base does not hold
-(`--script=gen`, B158). The data-only list (shellcheck, semgrep, grep,
+it exists. Since 1.4 (v4.72.4, B159, the maintainer's narrow exception) a
+registry id handed to semgrep's `--config`, `--config=` or `-c` - `p/`, `r/` or
+`s/` and one name - is not counted while neither tree holds a file or directory
+by that name, judged case-folded on a disk that folds case, at load and again
+before it runs; once one exists the id is a path and needs the opt-in. It rests
+on semgrep reading a registry id from its registry, measured with 1.171.0 on
+2026-10-14 and not re-measured by any check. `-f`, an abbreviated `--conf` and
+a glued `-cVALUE` get no exception, nor does semgrep named by a path or with
+`--allow-local-builds`. `stage-advance.sh` still protects the id. Still not
+judged: a file written between that judgement and the exec, or by a process an
+earlier check left running. The data-only list (shellcheck, semgrep, grep,
 each voided by named options) rests on the tools' `--help`, read 2026-10-13;
 an option a later release adds is not on it. A `run-checks.sh --config` other than the
 default is not read, and PyYAML, installed in `prepare` to read the set, is
