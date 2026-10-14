@@ -4010,17 +4010,20 @@ checks:
             `rl-a-glued-cluster`, `rl-a-base-only`, `rl-a-base-id`, `rl-a-absent-script`,
             `rl-ph-unlisted` and `rl-ph-voided`. Falsified per clause 2026-10-13: the program
             clause off turns the three `rl-p-*` cases red; the argument clause off, 68 findings;
-            the placeholder clause off, 4 cases red. NOT asserted: a file a tool runs that no
-            argument names; an extension-less path an earlier check writes during the run; a
-            value inside a comma-separated list; node_modules resolution; shellcheck and semgrep
-            actually run with a placeholder; a listed tool later gaining a code-running option.
+            the placeholder clause off, 4 cases red. Since 1.3 (B157, v4.72.3) every argv is
+            judged again just before it runs, and a value spelled as a path under the root counts
+            whether or not it exists (R145, R146): the eleven `wtn-*` cases, each of which ran a
+            file an earlier check wrote at b84994b, are refused off and run on. NOT asserted: a
+            file a tool runs that no argument names; a file written between the judgement and the
+            exec; a value inside a comma-separated list; node_modules resolution; shellcheck and
+            semgrep actually run with a placeholder; a listed tool later gaining a code-running
+            option.
         - id: R142
           verdict: Partial
           reason: >-
-            The runner does not refuse an extension-less path that an earlier check writes during
-            the run (B157), a value inside a comma-separated list (`--x=a,b` is one value), or a
-            name a tool resolves through a search path of its own such as node_modules; the root
-            `.` is not counted, by ruling (B154).
+            The runner does not refuse a value inside a comma-separated list (`--x=a,b` is one
+            value), or a name a tool resolves through a search path of its own such as
+            node_modules; the root `.` is not counted, by ruling (B154).
           evidence: >-
             With the opt-in off each clause-2 case exits 2 with the marker absent, and runs with
             it on: `rl-a-dot-slash`, `-double-slash`, `-dotdot`, `-trailing-slash`, `-opt-equals`,
@@ -4028,8 +4031,10 @@ checks:
             (`docs/{base}` judged as the path it becomes), `-dotted`, `-absent-script`, and the
             same argument in version_command and the coverage commands (`rl-a-version`,
             `-coverage`, `-rules`); `rl-a-case-variant` is refused on a disk that folds case.
-            `rl-not-inside-allowed` runs `.`, a registry id and /dev/null with the opt-in off.
-            Falsified 2026-10-13 with the argument clause off: 68 findings.
+            `rl-not-inside-allowed` runs `.`, a word with no slash and /dev/null with the opt-in
+            off. Falsified 2026-10-13 with the argument clause off: 68 findings. Since 1.3 (B157)
+            a path an earlier check writes is refused too: by its spelling at load (R146) or
+            judged again just before it runs (R145), the `wtn-*` cases.
         - id: R143
           verdict: Covered
           evidence: >-
@@ -4049,9 +4054,40 @@ checks:
             keys and on the check, is still refused by clause 3, exit 2, the marker absent; red
             against 4037079. Falsified 2026-10-13 with the gate made to read `policy.data_only`:
             the case and its two assertions red.
+        - id: R145
+          verdict: Partial
+          reason: >-
+            The judgement is made immediately before the exec, not at it: a file written in
+            between, or by a process an earlier check left running, is not judged; nor is a file
+            the command reads that no argument names.
+          evidence: >-
+            B157. With the opt-in off, a file an earlier check writes with a tool that names
+            nothing, then named by a later check with no slash, is refused when the later check
+            comes to run - exit 3, its row `refused`, the marker absent, the refusal saying it was
+            judged again just before it ran - and with the opt-in on it runs: as the program, a
+            bare name a PATH entry into the tree finds (`wtn-program`); as an argument
+            (`wtn-argument`); as --opt=VALUE (`wtn-opt-equals`); in version_command, coverage.command
+            and coverage.rules_command (`wtn-version`, `-coverage`, `-rules`); and in a per_file
+            `{file}` invocation of shellcheck, which a PATH entry into the tree now finds
+            (`wtn-per-file`). Each ran the written file at b84994b. Falsified 2026-10-14 with the
+            run-time judgement off: those seven cases red; with the per-file and coverage.command
+            calls alone removed, `wtn-per-file` and `wtn-coverage` red.
+        - id: R146
+          verdict: Covered
+          evidence: >-
+            B157. With the opt-in off, an extension-less path no tree holds yet, which an earlier
+            check then writes, is refused when the config is read, exit 2, the marker absent, and
+            runs with the opt-in on: under a directory the tree holds (`wtn-subdir`), under one it
+            does not (`wtn-new-dir`), as --opt=VALUE (`wtn-opt-slash`) and glued to a short option
+            (`wtn-glued`); `rl-a-registry-id` refuses `p/default`, a registry id spelled as a path,
+            which is this rule's cost. Each ran at b84994b. The root is still not counted
+            (`rl-not-inside-allowed` runs `.`). Falsified 2026-10-14 with the spelling rule off:
+            the four `wtn-*` cases exit 3, refused only when they came to run, and
+            `rl-a-registry-id` runs - five cases red.
     limitations:
       - It is the runner's self-test, not this repository's run. That the real suite's refusals print their tails in CI is seen in the workflow log, not asserted here.
       - A file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself (`.semgrepignore`, `.npmrc`, `conftest.py`), a git alias - is not gated. The data-only list rests on the tools' `--help`, read 2026-10-13.
+      - The run-time judgement (R145) is made just before each exec; a file written in the gap, or by a process an earlier check left running, is not judged.
 
   - id: ci-replay
     why: a local suite that passes on this machine's git defaults and fails on the runner's is how two pushes went red, and the replay is only worth running if it removes those defaults

@@ -238,7 +238,7 @@ on_exit() {
 trap on_exit EXIT
 
 die_usage() { printf 'run-checks: %s\n' "$1" >&2; exit 2; }
-VERSION="run-checks 1.2"
+VERSION="run-checks 1.3"
 
 # Echoes the git work tree containing $1, or nothing. git's own explanation is
 # kept in GIT_WHY rather than discarded: a fallback that cannot say why it fell
@@ -536,7 +536,8 @@ SELFTEST_CFG_FAIL
   # input that is not there, so it exits 2 - `refused` - and its own reason,
   # `No such file or directory`, is on its stderr, which the executor folds
   # into the check's output. The run must print that reason, not only the
-  # status word.
+  # status word. The input has no slash: since 1.3 an absent path spelled with
+  # one under the root is the repo-local gate's (B157), not this case's.
   cat > "$SB/checks-reason.yaml" <<'SELFTEST_CFG_REASON'
 version: 1
 policy:
@@ -555,7 +556,7 @@ checks:
     requires: [grep]
     version_command: [grep, --version]
     mode: batch
-    command: [grep, -e, RUN-CHECKS-SELFTEST-NEEDLE, fixture/B89-no-such-input.txt]
+    command: [grep, -e, RUN-CHECKS-SELFTEST-NEEDLE, B89-no-such-input.txt]
     exit_codes:
       pass: [0]
       fail: [1]
@@ -1364,7 +1365,7 @@ SELFTEST_ASSERT_AT
     "the check really refused - the reason printed is a refusal's, not a finding's"
   self_assert_err "$SB/refused-says-why.err" "-> its own output, last " \
     "the summary heads the check's own output under its row"
-  self_assert_err "$SB/refused-says-why.err" "| grep: fixture/B89-no-such-input.txt: No such file or directory" \
+  self_assert_err "$SB/refused-says-why.err" "| grep: B89-no-such-input.txt: No such file or directory" \
     "and prints the tool's own reason, which before B89 reached only the result file"
   self_assert_err "$SB/clean.err" "PASS: every blocking check ran" \
     "the control: the clean run reached its pass line"
@@ -1627,20 +1628,25 @@ SELFTEST_CFG_RL_LIST
   self_assert_err "$SB/rl-a-glued-false.err" "command[1] names a path inside the repository being checked, in the value it carries" \
     "rl-a-glued: the refusal is clause 2's, on the value and not the whole token"
   # A case variant names the path only on a disk that folds case. Measured
-  # here, never assumed: refused where it does, run where it does not.
-  rl_cfg a-case-variant command batch "[rl-echo, DOCS/IN.TXT]"
-  if [ -e "$RL/DOCS/IN.TXT" ]; then _cv=2; _cvw="this disk folds case, so DOCS/IN.TXT is docs/in.txt and is refused"
-  else _cv=0; _cvw="this disk does not fold case, so DOCS/IN.TXT names nothing and is data"; fi
+  # here, never assumed: refused where it does, run where it does not. A root
+  # file with no slash, because since 1.3 a value spelled with one under the
+  # root is refused by its spelling on every disk (B157), which would hide the
+  # fold this case is about.
+  rl_cfg a-case-variant command batch "[rl-echo, RLBARE]"
+  if [ -e "$RL/RLBARE" ]; then _cv=2; _cvw="this disk folds case, so RLBARE is rlbare and is refused"
+  else _cv=0; _cvw="this disk does not fold case, so RLBARE names nothing and is data"; fi
   rm -f "$RL_MARK"
   PATH="$SB/rl-bin:$PATH" self_drive rl-a-case-variant "$_cv" "clause 2: $_cvw, allow_repo_local_tools: false" \
     --config "$SB/rl-a-case-variant-false.yaml" --root "$RL" \
     --changed "$SB/rl-changed.txt" --out "$SB/rl-a-case-variant.json"
-  # The controls: the root itself, a registry id and a device path name no
-  # path inside the work tree, and run with the opt-in off.
-  rl_cfg ok-not-inside command batch "[rl-echo, ., p/default, /dev/null, --x=p/y, -W]"
+  # The controls: the root itself, a word and a device path name no path
+  # inside the work tree, and run with the opt-in off. A registry id spelled
+  # with a slash (`p/default`) was a control here until 1.3: it is a path
+  # under the root by its spelling, and is now refused (rl-a-registry-id).
+  rl_cfg ok-not-inside command batch "[rl-echo, ., default, /dev/null, --x=y, -W]"
   rm -f "$RL_MARK"
   PATH="$SB/rl-bin:$PATH" self_drive rl-not-inside-allowed 0 \
-    "the root itself, a registry id and /dev/null name no path inside the work tree: run with the opt-in off" \
+    "the root itself, a word with no slash and /dev/null name no path inside the work tree: run with the opt-in off" \
     --config "$SB/rl-ok-not-inside-false.yaml" --root "$RL" \
     --changed "$SB/rl-changed.txt" --out "$SB/rl-not-inside.json"
   SELF_ASSERTS=$((SELF_ASSERTS + 1))
@@ -1651,6 +1657,153 @@ SELFTEST_CFG_RL_LIST
     SELF_FAILED=$((SELF_FAILED + 1))
   fi
 
+  # B157 - A PATH AN EARLIER CHECK WRITES DURING THE RUN. 1.2 judged each argv
+  # once, when the config was read; a path neither tree held then, spelled
+  # with no script extension and no `./`, was not counted, and a check that
+  # ran after one that wrote it ran it with the opt-in off. Each case below
+  # ran the written file at b84994b, measured with the payload's marker.
+  # wtn-a writes the payload with wtn-write, a stub OUTSIDE the work tree
+  # that names nothing in its argv - it reads where to write from a file in
+  # the sandbox - so the writer passes the gate and the case is about wtn-b.
+  # Two fixes, two kinds of case:
+  #   judged again just before it runs (exit 3, wtn-b `refused`): a bare
+  #   program a PATH entry into the tree finds, a value with no slash as an
+  #   argument and as --opt=VALUE, and the same in version_command,
+  #   coverage.command, coverage.rules_command and a per_file `{file}`
+  #   invocation;
+  #   counted by its spelling when the config is read (exit 2): an
+  #   extension-less path under a directory the tree holds, under one it does
+  #   not, as --opt=VALUE and glued to a short option.
+  # On: the same config runs and the payload's marker appears.
+  printf '#!/bin/sh\nprintf ran > %s\nprintf "ok\\n"\n' "'$RL_MARK'" > "$SB/wtn-payload"
+  printf '#!/bin/sh\nt="$(cat %s)"\nmkdir -p "$(dirname "$t")"\ncp %s "$t"\nchmod +x "$t"\nprintf "ok\\n"\n' \
+    "'$SB/wtn-target'" "'$SB/wtn-payload'" > "$SB/rl-bin/wtn-write"
+  printf '#!/bin/sh\np="$1"; p="${p#--script=}"; p="${p#-S}"\nexec sh "$p"\n' > "$SB/rl-bin/wtn-run"
+  chmod +x "$SB/rl-bin/wtn-write" "$SB/rl-bin/wtn-run"
+  # $1 name, $2 field (command, version, coverage, per_file), $3 wtn-b's argv
+  # as a YAML flow list, $4 the path wtn-write writes, relative to the root.
+  wtn_cfg() {
+    _cmd="[printf, 'ok\n']"; _ver=""; _rules=""; _mode="batch"; _req="printf"; _cov="from: stdout_count
+      pattern: '^(ok)'
+      min_covered: 0"
+    case "$2" in
+      command) _cmd="$3" ;;
+      version) _ver="    version_command: $3" ;;
+      coverage) _cov="from: command
+      command: $3
+      min_covered: 0" ;;
+      rules) _rules="      min_rules: 1
+      rules_command: $3
+      rules_pattern: '(ok)'" ;;
+      per_file) _cmd="$3"; _mode="per_file"; _req="shellcheck" ;;
+    esac
+    printf '%s\n' "$4" > "$SB/wtn-$1.target"
+    for _optin in false true; do
+      cat > "$SB/wtn-$1-$_optin.yaml" <<SELFTEST_CFG_WTN
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+  allow_repo_local_tools: $_optin
+checks:
+  - id: wtn-a
+    why: writes a file into the work tree with a tool outside it that names nothing
+    when:
+      always: true
+    severity: advise
+    requires: [printf]
+    command: [wtn-write]
+    exit_codes:
+      pass: [0]
+    coverage:
+      from: stdout_count
+      pattern: '^(ok)'
+      min_covered: 0
+  - id: wtn-b
+    why: names the file wtn-a wrote, which neither tree held when the config was read
+    when:
+      always: true
+    severity: advise
+    mode: $_mode
+    requires: [$_req]
+$_ver
+    command: $_cmd
+    exit_codes:
+      pass: [0]
+      fail: [1, 2]
+    coverage:
+      $_cov
+$_rules
+SELFTEST_CFG_WTN
+    done
+  }
+  # $1 name, $2 the exit wanted with the opt-in off (3 judged at run time,
+  # 2 counted at load), $3 what it is.
+  wtn_case() {
+    _wn="$1"; _ww="$2"; _wd="$3"
+    cp "$SB/wtn-$_wn.target" "$SB/wtn-target"
+    _wt="$(cat "$SB/wtn-target")"
+    for _optin in false true; do
+      rm -rf "$RL_MARK" "${RL:?}/${_wt:?}" "$RL/wtn" "$RL/wtn-bin"
+      if [ "$_optin" = false ]; then _w="$_ww"; else _w=0; fi
+      PATH="$RL/wtn-bin:$SB/rl-bin:$PATH" self_drive "wtn-$_wn-$_optin" "$_w" \
+        "$_wd, allow_repo_local_tools: $_optin" \
+        --config "$SB/wtn-$_wn-$_optin.yaml" --root "$RL" \
+        --changed "$SB/rl-changed.txt" --out "$SB/wtn-$_wn-$_optin.json"
+      SELF_ASSERTS=$((SELF_ASSERTS + 1))
+      if [ "$_optin" = false ] && [ -e "$RL_MARK" ]; then
+        printf '  FINDING: assert %-20s %s\n' "payload" "wtn-$_wn: the written file RAN with the opt-in off"
+        SELF_FAILED=$((SELF_FAILED + 1))
+      elif [ "$_optin" = true ] && [ ! -e "$RL_MARK" ]; then
+        printf '  FINDING: assert %-20s %s\n' "payload" "wtn-$_wn: the written file did not run with the opt-in on, so the refusal off is not shown to be the gate's"
+        SELF_FAILED=$((SELF_FAILED + 1))
+      else
+        printf '  held:    assert %-20s %s\n' "payload" "wtn-$_wn: the marker is $([ "$_optin" = false ] && printf absent || printf present) with the opt-in $_optin"
+      fi
+    done
+    rm -rf "${RL:?}/${_wt:?}" "$RL/wtn" "$RL/wtn-bin"
+    self_assert_err "$SB/wtn-$_wn-false.err" "set \`policy.allow_repo_local_tools: true\`" \
+      "wtn-$_wn: the refusal is the repo-local gate's, naming the opt-in"
+    if [ "$_ww" = 3 ]; then
+      self_assert_err "$SB/wtn-$_wn-false.err" "judged again just before it ran: check 'wtn-b'" \
+        "wtn-$_wn: refused when wtn-b came to run, not when the config was read"
+      SELF_ASSERTS=$((SELF_ASSERTS + 1))
+      _ws="$(python3 -c 'import json,sys; print([r["status"] for r in json.load(open(sys.argv[1]))["checks"] if r["id"] == "wtn-b"][0])' "$SB/wtn-$_wn-false.json")" || _ws="unreadable"
+      if [ "$_ws" = refused ]; then
+        printf '  held:    assert %-20s %s\n' "status" "wtn-$_wn: wtn-b's row is refused"
+      else
+        printf '  FINDING: assert %-20s %s\n' "status" "wtn-$_wn: wtn-b's row is $_ws, not refused"
+        SELF_FAILED=$((SELF_FAILED + 1))
+      fi
+    fi
+  }
+  wtn_cfg program command "[wtngen]" wtn-bin/wtngen
+  wtn_cfg argument command "[wtn-run, wtnarg]" wtnarg
+  wtn_cfg opt-equals command "[wtn-run, --script=wtnopt]" wtnopt
+  wtn_cfg version version "[wtn-run, wtnver]" wtnver
+  wtn_cfg coverage coverage "[wtn-run, wtncov]" wtncov
+  wtn_cfg rules rules "[wtn-run, wtnrules]" wtnrules
+  wtn_cfg per-file per_file "[shellcheck, '{file}']" wtn-bin/shellcheck
+  wtn_cfg subdir command "[wtn-run, docs/wtngen]" docs/wtngen
+  wtn_cfg new-dir command "[wtn-run, wtn/sub/gen]" wtn/sub/gen
+  wtn_cfg opt-slash command "[wtn-run, --script=wtn/opt]" wtn/opt
+  wtn_cfg glued command "[wtn-run, -Swtn/glued]" wtn/glued
+  wtn_case program 3 "the program: a bare name a PATH entry into the tree finds once an earlier check wrote it"
+  wtn_case argument 3 "an argument with no slash that an earlier check wrote at the root"
+  wtn_case opt-equals 3 "--script=VALUE with no slash, written at the root by an earlier check"
+  wtn_case version 3 "the argument in version_command"
+  wtn_case coverage 3 "the argument in coverage.command"
+  wtn_case rules 3 "the argument in coverage.rules_command"
+  wtn_case per-file 3 "a per_file {file} invocation of shellcheck, which a PATH entry into the tree now finds"
+  wtn_case subdir 2 "an extension-less file under a directory the tree holds, which neither tree holds yet"
+  wtn_case new-dir 2 "an extension-less file under a directory neither tree holds yet"
+  wtn_case opt-slash 2 "--script=VALUE spelled as a path neither tree holds yet"
+  wtn_case glued 2 "a value spelled as a path glued to a short option, neither tree holding it yet"
+  # The cost of counting by spelling: a registry id spelled with a slash is a
+  # path under the root, and needs the opt-in.
+  rl_cfg a-registry-id command batch "[rl-echo, --config, p/default]"
+  rl_case a-registry-id "clause 2: p/default, a registry id spelled as a path, counted by its spelling since 1.3"
+
   # The control: a placeholder and an option value that names nothing in the
   # work tree are data, and stay allowed with the opt-in off.
   cat > "$SB/rl-data.yaml" <<'SELFTEST_CFG_RL_DATA'
@@ -1660,13 +1813,13 @@ policy:
   spec_coverage: "off"
 checks:
   - id: rl-data
-    why: a placeholder and a registry id that is not a path in the work tree
+    why: a placeholder and a word that is not a path in the work tree
     when:
       always: true
     severity: advise
     mode: batch
     requires: [grep]
-    command: [grep, -c, --label=p/default, ran, "{files}"]
+    command: [grep, -c, --label=default, ran, "{files}"]
     exit_codes:
       pass: [0, 1]
     coverage:
@@ -1715,7 +1868,8 @@ SELFTEST_CFG_RL_DATA
   printf '  NOW ASSERTED (B153): a file at the root named by the merge-base id, which made the runner'"'"'s own merge-base diff ambiguous and exit before any check. `base-id-root-file` repeats the `deleted-under-base` run beside such a file and reads the deleted path off the result.\n'
   printf '  NOW ASSERTED (B80, warn means warn): an advisory check that FAILS keeps its spec_units claim. `adv-fail-covers`, `adv-block-voids` and `adv-hollow-voids` differ in one config line each, and their result files are read: the advisory failure leaves the claim unvoided and annotated advisory_failing, R1 Covered and held_by_failing_advisory, coverage satisfied, and the printed line saying so; the same check as block voids it and coverage refuses on its own account; an advisory hollow check voids it too. NOT ASSERTED: an advisory fail that ALSO failed its coverage assertion, which is voided by its own branch and is not driven here; nor a requirement covered both by a passing check and by a failing advisory one.\n'
   printf '  NOW ASSERTED (B89): a refused blocking check prints the tail of its own output under its row; `refused-says-why` reads the tool reason off stderr, and the clean case asserts a passing check prints none. NOT ASSERTED: the 20-line and 300-character bounds, which no case here exceeds.\n'
-  printf '  NOW ASSERTED (B150, then the strict rule of 2026-10-13): with `allow_repo_local_tools` off every case exits 2 with the marker absent, and with it on runs with the marker present. Clause 1, the program: a relative path, an absolute path under the root, a bare name the root holds found through PATH. Clause 2, a literal argument, handed to a stub outside the work tree that runs nothing: ./x, x//y, x/../y, a trailing slash, --opt=VALUE, a value glued to a short option and one glued after a cluster, a path only the base tree holds, one only the work tree holds, an absolute path outside the root through a symlink pointing inside, `docs/{base}` judged as the path it becomes, the same argument in version_command, coverage.command and coverage.rules_command, a dotted name (`python3 -m rlpkg.mod`) read as the module path it resolves to, and a script-shaped path neither tree holds yet; a case variant, refused or run as this disk folds case or not. Clause 3: a placeholder handed to a program not on the data-only list, and grep, on it, with --filter; a config that names its own program as data-only, in the policy and in the check, is refused all the same, because the list is the plugin'"'"'s (`rl-ph-config-list`). The B150 shapes stay as regression cases (-W ignore, a versioned or absolute interpreter, -X dev -m, perl -I, sed -f, python3 {file}). Controls run with the opt-in off: `rl-data-allowed` (grep, on the list, with {files}) and `rl-not-inside-allowed` (`.`, a registry id, /dev/null). `rl-no-shared-reading` refuses with no argv-classify.py beside the runner. NOT ASSERTED here: a file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself; the root itself or a directory above it as an argument, which is not refused because the checks already run there; a value inside a comma-separated list (`--x=a,b`); a path with no script extension and no `./` that neither tree holds when the config is read but an earlier check in the same run writes; a bare name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); a tool on the data-only list whose installed version gained an option that runs code; shellcheck and semgrep with a placeholder, which are on the list but not on every machine.\n'
+  printf '  NOW ASSERTED (B150, then the strict rule of 2026-10-13): with `allow_repo_local_tools` off every case exits 2 with the marker absent, and with it on runs with the marker present. Clause 1, the program: a relative path, an absolute path under the root, a bare name the root holds found through PATH. Clause 2, a literal argument, handed to a stub outside the work tree that runs nothing: ./x, x//y, x/../y, a trailing slash, --opt=VALUE, a value glued to a short option and one glued after a cluster, a path only the base tree holds, one only the work tree holds, an absolute path outside the root through a symlink pointing inside, `docs/{base}` judged as the path it becomes, the same argument in version_command, coverage.command and coverage.rules_command, a dotted name (`python3 -m rlpkg.mod`) read as the module path it resolves to, and a script-shaped path neither tree holds yet; a case variant, refused or run as this disk folds case or not. Clause 3: a placeholder handed to a program not on the data-only list, and grep, on it, with --filter; a config that names its own program as data-only, in the policy and in the check, is refused all the same, because the list is the plugin'"'"'s (`rl-ph-config-list`). The B150 shapes stay as regression cases (-W ignore, a versioned or absolute interpreter, -X dev -m, perl -I, sed -f, python3 {file}). Controls run with the opt-in off: `rl-data-allowed` (grep, on the list, with {files}) and `rl-not-inside-allowed` (`.`, a word with no slash, /dev/null); `rl-a-registry-id` (`p/default`) is refused since 1.3, counted by its spelling. `rl-no-shared-reading` refuses with no argv-classify.py beside the runner. NOT ASSERTED here: a file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself; the root itself or a directory above it as an argument, which is not refused because the checks already run there; a value inside a comma-separated list (`--x=a,b`); a bare name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); a tool on the data-only list whose installed version gained an option that runs code; shellcheck and semgrep with a placeholder, which are on the list but not on every machine.\n'
+  printf '  NOW ASSERTED (B157): a path an earlier check writes during the run. Each `wtn-*` case ran the written file at b84994b; with the opt-in off it is now refused and the marker absent, with it on it runs and the marker appears. Judged again just before it runs, exit 3 with wtn-b `refused`: a bare program a PATH entry into the tree finds, an argument and an --opt=VALUE with no slash, the same in version_command, coverage.command and coverage.rules_command, and a per_file `{file}` invocation of shellcheck a PATH entry into the tree now finds. Counted by its spelling when the config is read, exit 2: an extension-less path under a directory the tree holds and under one it does not, as --opt=VALUE and glued to a short option. NOT ASSERTED: a file written while a check runs by a process that outlives the check, or between the judgement and the exec; a file the later check reads that no argument names.\n'
   printf '  NOT ASSERTED: `{base}` as an operand of a program that runs it, with the opt-in on, which is the opt-in'"'"'s to allow and is not refused, and a base that resolved but is not 40 hex digits - a SHA-256 repository - whose row is `no_base` with a different sentence and is not driven here. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
@@ -2014,10 +2168,226 @@ done < "$WORK/changed.txt"
 
 # --- plan: parse, validate, decide what this change attracts ---------------
 
+# --- the repo-local gate: written once, read by the plan and the executor --
+
+# THE GATE IS ONE FILE, READ TWICE (B157). plan.py judges every argv when the
+# config is read; judge.py judges each again just before it runs, against the
+# work tree as it stands then. Both load this text, so the two judgements
+# cannot drift. The loader sets AC (argv-classify.py), ROOT and BASE_TREE_FILE
+# first, and handles an unreadable base tree itself.
+cat > "$WORK/gate.py" <<'PY'
+import os
+
+ROOT_REAL = os.path.realpath(ROOT)
+
+# THE STRICT REPO-LOCAL GATE (maintainer ruling 2026-10-13). It replaced the
+# interpreter-aware reading of B150, which guessed which operand an
+# interpreter takes for its script and was found by review to guess wrong.
+# Without `policy.allow_repo_local_tools`, a command is refused when:
+#   1. its PROGRAM resolves inside the work tree: a relative path, an absolute
+#      path under the root, a bare name the root holds, or a bare name that
+#      PATH resolves into the tree;
+#   2. any LITERAL ARGUMENT names a path inside the work tree: the whole
+#      token normalised, the value after `=` in `--opt=VALUE`, or a value
+#      glued to a short option (argv-classify.py's values()), and a dotted
+#      name read as the module path it resolves to from the root. Judged against
+#      the base tree (the merge base under --base, HEAD otherwise) and against
+#      the work tree as it stands, through every symlink, and case-folded on
+#      a case-insensitive disk; and, absent from both, a path under the root
+#      spelled with a script extension, a `./` or a `/` (B157), which an
+#      earlier check in the same run could create. Any program counts the
+#      same; or
+#   3. a PLACEHOLDER (`{file}`, `{files}`) is handed to a program that is not
+#      on argv-classify.py's data-only list, which lives in the plugin and
+#      never in the config being examined.
+# The root itself is not a path inside it: the checks run there, so `.`
+# selects nothing a tool run with no operand would not find by itself, which
+# is the limit this gate states rather than hides.
+#
+# JUDGED TWICE (B157). Once when the config is read, which is all 1.2 did,
+# and again just before each command, version_command and coverage command
+# runs, and before each `{file}` invocation of a per_file check, against the
+# work tree as it stands at that moment. A check runs after the ones before
+# it, which may have written into the tree: a bare `gen` that a PATH entry
+# into the tree finds, or a `gen` named with no slash, is judged against what
+# is there when it runs, not what was there when the config was read.
+
+def _case_insensitive(root):
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return False
+    have = set(names)
+    for n in names:
+        s = n.swapcase()
+        if s != n and s not in have:
+            return os.path.lexists(os.path.join(root, s))
+    return False
+
+FOLD = _case_insensitive(ROOT)
+
+def _fold(p):
+    return p.lower() if FOLD else p
+
+BASE_TREE = set()
+with open(BASE_TREE_FILE, "rb") as _fh:
+    for _b in _fh.read().split(b"\0"):
+        if _b:
+            _parts = _b.decode("utf-8", "surrogateescape").split("/")
+            for _n in range(1, len(_parts) + 1):
+                BASE_TREE.add(_fold("/".join(_parts[:_n])))
+
+def _real_inside(p):
+    """p exists, and its real location - every symlink read, the root in any
+    spelling the disk accepts - is strictly inside the root."""
+    if "\x00" in p or not os.path.lexists(p):
+        return False
+    real = os.path.realpath(p)
+    if real.startswith(ROOT_REAL.rstrip(os.sep) + os.sep):
+        return True
+    d = os.path.dirname(real)
+    while True:
+        try:
+            if os.path.samefile(d, ROOT_REAL):
+                return True
+        except OSError:
+            pass
+        up = os.path.dirname(d)
+        if up == d:
+            return False
+        d = up
+
+def _under_root(value):
+    return (AC.normalise(value, ROOT, FOLD) is not None
+            or AC.normalise(value, ROOT_REAL, FOLD) is not None)
+
+def names_tree_path(value, shaped=False):
+    """Clause 2: does this value name a path strictly inside the work tree?
+    `shaped` is argv-classify.py's: the value is the whole token, or the one
+    an option carries, and not a later suffix of a glued cluster."""
+    if not value or "\x00" in value or AC.has_placeholder(value):
+        return False
+    if value.startswith("/"):
+        return _under_root(value) or _real_inside(value)
+    rel = AC.normalise(value, ROOT, FOLD)
+    if rel is not None and (_fold(rel) in BASE_TREE or os.path.lexists(os.path.join(ROOT, rel))):
+        return True
+    # Absent from both trees, but spelled as a path under the root with a
+    # script extension or an explicit `./`: a check earlier in the same run
+    # could write it (`curl -o tools/x.py ...`) before a later one runs it, so
+    # it counts by its spelling.
+    if rel is not None and (AC.SCRIPT_EXT.search(rel) or value.startswith("./")):
+        return True
+    # B157: so can `tools/gen`, which carries neither, and 1.2 counted it only
+    # when a tree held it. So any value spelled as a path - a `/` in
+    # it and no whitespace - that resolves under the root counts, whether or
+    # not it exists yet. A registry id spelled with a slash (`p/default`)
+    # counts with it: that is this rule's cost, paid with the opt-in. The
+    # root itself (`.`, `x/..`) normalises to nothing and still does not.
+    if rel is not None and shaped and "/" in value and AC.path_shaped(value):
+        return True
+    return _real_inside(os.path.join(ROOT, value))
+
+def program_inside(prog):
+    """Clause 1: does argv[0] resolve inside the work tree the checks run in?"""
+    if "\x00" in prog or prog in (".", ".."):
+        return False
+    if "/" in prog:
+        if prog.startswith("/"):
+            return _under_root(prog) or _real_inside(prog)
+        return AC.normalise(prog, ROOT, FOLD) is not None or _real_inside(os.path.join(ROOT, prog))
+    if _fold(prog) in BASE_TREE or os.path.lexists(os.path.join(ROOT, prog)):
+        return True
+    # A bare name PATH resolves. A relative PATH entry, or an empty one,
+    # resolves against the root, because that is where the checks run.
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        d = d or "."
+        cand = os.path.join(d if os.path.isabs(d) else os.path.join(ROOT, d), prog)
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return _under_root(os.path.abspath(cand)) or _real_inside(cand)
+    return False
+
+GATE_TAIL = ("A cloned repo would be choosing what executes on the machine that cloned it. "
+             "If this is your own repo's script, set `policy.allow_repo_local_tools: true` - "
+             "it is off by default so that trusting the repo is a decision someone made, not "
+             "one nobody noticed.")
+
+def gate_reason(where, value, base_sha):
+    """The three clauses, reported by POSITION and never by quoting the value:
+    checks.yaml is a file a stranger writes and this text lands in a committed
+    result. A repo-local check script is both the attack and a legitimate
+    pattern - a cloned repo choosing what runs on your machine, and your own
+    repo declaring its own linter, are the same bytes in the same place - so
+    the config must tell them apart: default deny, and an opt-in a reviewer
+    can see in the diff. The refusal sentence, or None."""
+    if not AC.has_placeholder(value[0]) and program_inside(value[0]):
+        return "%s[0] (the program) resolves inside the repository being checked. %s" % (where, GATE_TAIL)
+    for k in range(1, len(value)):
+        tok = value[k]
+        if AC.has_placeholder(tok):
+            continue
+        # `{base}` is judged as the commit id it becomes: a file the tree
+        # holds under that name would otherwise ride in unseen.
+        if base_sha:
+            tok = tok.replace("{base}", base_sha)
+        for v, shaped in AC.values(tok):
+            if names_tree_path(v, shaped):
+                return ("%s[%d] names a path inside the repository being checked%s. %s"
+                        % (where, k, "" if v == tok else ", in the value it carries", GATE_TAIL))
+            # A dotted name is read as the module path it can resolve to from
+            # the root, where the checks run (`-m pkg.mod` is pkg/mod.py).
+            # Any program counts; none is recognised.
+            if any(names_tree_path(m) for m in AC.module_paths(v)):
+                return ("%s[%d] is a dotted name that resolves to a module path inside the "
+                        "repository being checked. %s" % (where, k, GATE_TAIL))
+    at = [k for k, t in enumerate(value) if AC.has_placeholder(t)]
+    if at:
+        ok, why = AC.data_only(value)
+        if not ok:
+            return ("%s[%d] is a placeholder for the files under check, and %s, so the change being "
+                    "checked would choose what that program is handed and may run. %s"
+                    % (where, at[0], why, GATE_TAIL))
+    return None
+PY
+
+# JUDGED AGAIN JUST BEFORE IT RUNS (B157). Reads one argv the plan wrote and
+# the gate above, and exits 0 to run it, 3 refused, 1 when it cannot judge -
+# which the executor also treats as refused. Never run with the opt-in on.
+cat > "$WORK/judge.py" <<'PY'
+import json, sys
+
+CLASSIFIER, GATE_FILE, BASE_TREE_FILE, PLAN, INDEX, FIELD, ARGV = sys.argv[1:8]
+
+def load(path, ns):
+    with open(path, encoding="utf-8") as fh:
+        exec(compile(fh.read(), path, "exec"), ns)
+    return ns
+
+try:
+    AC = type(sys)("argv_classify")
+    load(CLASSIFIER, AC.__dict__)
+    with open(PLAN) as fh:
+        plan = json.load(fh)
+    G = load(GATE_FILE, {"AC": AC, "ROOT": plan["root"], "BASE_TREE_FILE": BASE_TREE_FILE})
+    with open(ARGV, "rb") as fh:
+        argv = [a.decode("utf-8", "surrogateescape") for a in fh.read().split(b"\0") if a]
+    cid = [c["id"] for c in plan["checks"] if c["index"] == int(INDEX)][0]
+except Exception as exc:
+    sys.stderr.write("run-checks: a command could not be judged again just before it ran (%s), so "
+                     "it was not run. Refusing it rather than running it unjudged.\n"
+                     % type(exc).__name__)
+    sys.exit(1)
+why = G["gate_reason"]("check %r.%s" % (cid, FIELD), argv, plan["base"] or "")
+if why:
+    sys.stderr.write("run-checks: judged again just before it ran: %s\n" % why)
+    sys.exit(3)
+sys.exit(0)
+PY
+
 cat > "$WORK/plan.py" <<'PY'
 import json, os, re, sys, types
 
-CONFIG, WORK, CHANGED, TAGS, ROOT, ROOT_SOURCE, CONFIG_SOURCE, DELETED, DELETED_SOURCE, BASE_SHA, BASE_REF, CLASSIFIER, BASE_TREE_FILE = sys.argv[1:14]
+CONFIG, WORK, CHANGED, TAGS, ROOT, ROOT_SOURCE, CONFIG_SOURCE, DELETED, DELETED_SOURCE, BASE_SHA, BASE_REF, CLASSIFIER, BASE_TREE_FILE, GATE_FILE = sys.argv[1:15]
 
 def bad(msg):
     sys.stderr.write("run-checks: %s: %s\n" % (os.path.basename(CONFIG), msg))
@@ -2426,163 +2796,23 @@ AWKS = {"awk","gawk","nawk","mawk","busybox-awk"}
 # /usr/bin/python3 are interpreters) for R18's inline-program refusal only;
 # argv-classify.py keeps that list. The repo-local gate below recognises none.
 INLINE_FLAGS = {"-c","-e","-E","-Xc","--command","--eval","--exec"}
-ROOT_REAL = os.path.realpath(ROOT)
-
-# THE STRICT REPO-LOCAL GATE (maintainer ruling 2026-10-13). It replaced the
-# interpreter-aware reading of B150, which guessed which operand an
-# interpreter takes for its script and was found by review to guess wrong.
-# Without `policy.allow_repo_local_tools`, a command is refused when:
-#   1. its PROGRAM resolves inside the work tree: a relative path, an absolute
-#      path under the root, a bare name the root holds, or a bare name that
-#      PATH resolves into the tree;
-#   2. any LITERAL ARGUMENT names a path inside the work tree: the whole
-#      token normalised, the value after `=` in `--opt=VALUE`, or a value
-#      glued to a short option (argv-classify.py's values()), and a dotted
-#      name read as the module path it resolves to from the root. Judged against
-#      the base tree (the merge base under --base, HEAD otherwise) and against
-#      the work tree as it stands, through every symlink, and case-folded on
-#      a case-insensitive disk; and, absent from both, a path under the root
-#      spelled with a script extension or `./`, which an earlier check in the
-#      same run could create. Any program counts the same; or
-#   3. a PLACEHOLDER (`{file}`, `{files}`) is handed to a program that is not
-#      on argv-classify.py's data-only list, which lives in the plugin and
-#      never in the config being examined.
-# The root itself is not a path inside it: the checks run there, so `.`
-# selects nothing a tool run with no operand would not find by itself, which
-# is the limit this gate states rather than hides.
-
-def _case_insensitive(root):
-    try:
-        names = os.listdir(root)
-    except OSError:
-        return False
-    have = set(names)
-    for n in names:
-        s = n.swapcase()
-        if s != n and s not in have:
-            return os.path.lexists(os.path.join(root, s))
-    return False
-
-FOLD = _case_insensitive(ROOT)
-
-def _fold(p):
-    return p.lower() if FOLD else p
-
-BASE_TREE = set()
+# THE STRICT REPO-LOCAL GATE is gate.py, written above, because it is read
+# twice: here, once, when the config is read, and by judge.py just before
+# each command runs (B157). Its clauses and their reasons are written there.
+GATE = {"AC": AC, "ROOT": ROOT, "BASE_TREE_FILE": BASE_TREE_FILE}
 try:
-    with open(BASE_TREE_FILE, "rb") as _fh:
-        for _b in _fh.read().split(b"\0"):
-            if _b:
-                _parts = _b.decode("utf-8", "surrogateescape").split("/")
-                for _n in range(1, len(_parts) + 1):
-                    BASE_TREE.add(_fold("/".join(_parts[:_n])))
+    with open(GATE_FILE, encoding="utf-8") as _fh:
+        exec(compile(_fh.read(), GATE_FILE, "exec"), GATE)
 except OSError as exc:
     bad("the base tree listing cannot be read (%s), so whether a command names a path in it "
         "cannot be decided" % type(exc).__name__)
 
-def _real_inside(p):
-    """p exists, and its real location - every symlink read, the root in any
-    spelling the disk accepts - is strictly inside the root."""
-    if "\x00" in p or not os.path.lexists(p):
-        return False
-    real = os.path.realpath(p)
-    if real.startswith(ROOT_REAL.rstrip(os.sep) + os.sep):
-        return True
-    d = os.path.dirname(real)
-    while True:
-        try:
-            if os.path.samefile(d, ROOT_REAL):
-                return True
-        except OSError:
-            pass
-        up = os.path.dirname(d)
-        if up == d:
-            return False
-        d = up
-
-def _under_root(value):
-    return (AC.normalise(value, ROOT, FOLD) is not None
-            or AC.normalise(value, ROOT_REAL, FOLD) is not None)
-
-def names_tree_path(value):
-    """Clause 2: does this value name a path strictly inside the work tree?"""
-    if not value or "\x00" in value or AC.has_placeholder(value):
-        return False
-    if value.startswith("/"):
-        return _under_root(value) or _real_inside(value)
-    rel = AC.normalise(value, ROOT, FOLD)
-    if rel is not None and (_fold(rel) in BASE_TREE or os.path.lexists(os.path.join(ROOT, rel))):
-        return True
-    # Absent from both trees, but spelled as a path under the root with a
-    # script extension or an explicit `./`: a check earlier in the same run
-    # could write it (`curl -o tools/x.py ...`) before a later one runs it, so
-    # it counts by its spelling. A path with neither (`p/default`, a registry
-    # id) still counts only when a tree holds it.
-    if rel is not None and (AC.SCRIPT_EXT.search(rel) or value.startswith("./")):
-        return True
-    return _real_inside(os.path.join(ROOT, value))
-
-def program_inside(prog):
-    """Clause 1: does argv[0] resolve inside the work tree the checks run in?"""
-    if "\x00" in prog or prog in (".", ".."):
-        return False
-    if "/" in prog:
-        if prog.startswith("/"):
-            return _under_root(prog) or _real_inside(prog)
-        return AC.normalise(prog, ROOT, FOLD) is not None or _real_inside(os.path.join(ROOT, prog))
-    if _fold(prog) in BASE_TREE or os.path.lexists(os.path.join(ROOT, prog)):
-        return True
-    # A bare name PATH resolves. A relative PATH entry, or an empty one,
-    # resolves against the root, because that is where the checks run.
-    for d in os.environ.get("PATH", "").split(os.pathsep):
-        d = d or "."
-        cand = os.path.join(d if os.path.isabs(d) else os.path.join(ROOT, d), prog)
-        if os.path.isfile(cand) and os.access(cand, os.X_OK):
-            return _under_root(os.path.abspath(cand)) or _real_inside(cand)
-    return False
-
-GATE_TAIL = ("A cloned repo would be choosing what executes on the machine that cloned it. "
-             "If this is your own repo's script, set `policy.allow_repo_local_tools: true` - "
-             "it is off by default so that trusting the repo is a decision someone made, not "
-             "one nobody noticed.")
-
 def repo_local_gate(where, value):
-    """The three clauses, reported by POSITION and never by quoting the value:
-    checks.yaml is a file a stranger writes and this text lands in a committed
-    result. A repo-local check script is both the attack and a legitimate
-    pattern - a cloned repo choosing what runs on your machine, and your own
-    repo declaring its own linter, are the same bytes in the same place - so
-    the config must tell them apart: default deny, and an opt-in a reviewer
-    can see in the diff."""
     if ALLOW_REPO_LOCAL:
         return
-    if not AC.has_placeholder(value[0]) and program_inside(value[0]):
-        bad("%s[0] (the program) resolves inside the repository being checked. %s" % (where, GATE_TAIL))
-    for k in range(1, len(value)):
-        tok = value[k]
-        if AC.has_placeholder(tok):
-            continue
-        # `{base}` is judged as the commit id it becomes: a file the tree
-        # holds under that name would otherwise ride in unseen.
-        if BASE_SHA:
-            tok = tok.replace("{base}", BASE_SHA)
-        for v, _shaped in AC.values(tok):
-            if names_tree_path(v):
-                bad("%s[%d] names a path inside the repository being checked%s. %s"
-                    % (where, k, "" if v == tok else ", in the value it carries", GATE_TAIL))
-            # A dotted name is read as the module path it can resolve to from
-            # the root, where the checks run (`-m pkg.mod` is pkg/mod.py).
-            # Any program counts; none is recognised.
-            if any(names_tree_path(m) for m in AC.module_paths(v)):
-                bad("%s[%d] is a dotted name that resolves to a module path inside the repository "
-                    "being checked. %s" % (where, k, GATE_TAIL))
-    at = [k for k, t in enumerate(value) if AC.has_placeholder(t)]
-    if at:
-        ok, why = AC.data_only(value)
-        if not ok:
-            bad("%s[%d] is a placeholder for the files under check, and %s, so the change being "
-                "checked would choose what that program is handed and may run. %s"
-                % (where, at[0], why, GATE_TAIL))
+    why = GATE["gate_reason"](where, value, BASE_SHA)
+    if why:
+        bad(why)
 
 def argv_of(where, value):
     if isinstance(value, str):
@@ -3101,6 +3331,10 @@ if WAIVER_DIR is not None:
                                 % (len(_group), _cid))
 
 os.makedirs(os.path.join(WORK, "run"), exist_ok=True)
+# With the opt-in off, the executor judges every argv again just before it
+# runs (B157); with it on nothing is refused, then or now.
+if not ALLOW_REPO_LOCAL:
+    open(os.path.join(WORK, "rejudge"), "w").close()
 with open(os.path.join(WORK, "plan.json"), "w") as fh:
     json.dump({"config": CONFIG, "config_source": CONFIG_SOURCE,
                "root": ROOT, "root_source": ROOT_SOURCE,
@@ -3193,7 +3427,7 @@ if git_toplevel "$ROOT" > /dev/null &&
     die_usage "cannot list the tree at $BASE_TREE_REF, so whether a command names a path in it cannot be decided. Refusing rather than guessing."
 fi
 
-TRIGGERED="$(python3 "$WORK/plan.py" "$CONFIG_ABS" "$WORK" "$WORK/changed.txt" "$TAGS" "$ROOT" "$ROOT_SOURCE" "$CONFIG_SOURCE" "$WORK/deleted.txt" "$DELETED_SOURCE" "$BASE_SHA" "$BASE_REF" "$SELF_DIR/argv-classify.py" "$WORK/base-tree")" || {
+TRIGGERED="$(python3 "$WORK/plan.py" "$CONFIG_ABS" "$WORK" "$WORK/changed.txt" "$TAGS" "$ROOT" "$ROOT_SOURCE" "$CONFIG_SOURCE" "$WORK/deleted.txt" "$DELETED_SOURCE" "$BASE_SHA" "$BASE_REF" "$SELF_DIR/argv-classify.py" "$WORK/base-tree" "$WORK/gate.py")" || {
   rc=$?
   cleanup
   exit "$rc"
@@ -3295,6 +3529,32 @@ cd "$ROOT"
 # it is about to become an argument, rather than trusted from where it was
 # made: a value that is not one is never substituted. Empty is the `--changed`
 # mode, which has no base at all.
+# JUDGED AGAIN JUST BEFORE IT RUNS (B157). The plan judged every argv when the
+# config was read; a check runs only after the ones before it, which may have
+# written into the work tree since. So with the opt-in off, each command,
+# version_command and coverage command, and each `{file}` invocation of a
+# per_file check, is judged again by the same gate immediately before it
+# runs. A refusal then refuses THAT CHECK, not the run: its row is `refused`,
+# which blocks whatever its severity, so the run exits 3 - the per-check
+# refusal this runner already has for a tool that refused its input. Not
+# exit 2: the config was valid when it was read and the checks before this
+# one ran and measured; stopping would throw their results away and still
+# not pass. A judge that cannot judge refuses too, never runs the command.
+# Its python3 is the one PATH names now, before any check has run, so a check
+# that writes a `python3` into a PATH entry inside the tree cannot become the
+# judge of the checks after it.
+JUDGE_PY="$(command -v python3)"
+judge_now() {  # $1 the field, as the plan names it; $2 its argv file
+  [ -e "$WORK/rejudge" ] || return 0
+  _jrc=0
+  "$JUDGE_PY" -I "$WORK/judge.py" "$SELF_DIR/argv-classify.py" "$WORK/gate.py" "$WORK/base-tree" \
+    "$WORK/plan.json" "$idx" "$1" "$2" 2> "$D/gate_refused" || _jrc=$?
+  [ "$_jrc" -ne 0 ] || return 0
+  cat "$D/gate_refused" >&2
+  printf 'gate_refused\n' > "$D/status_override"
+  return 1
+}
+
 BASE_IS_SHA=0
 case "$BASE_SHA" in
   *[!0-9a-f]*) ;;
@@ -3358,6 +3618,7 @@ for idx in $TRIGGERED; do
   # The tool's own version, recorded in the result. A scanner that silently
   # stops working usually changes version first.
   if [ -s "$D/version_argv" ]; then
+    judge_now version_command "$D/version_argv" || continue
     read_argv "$D/version_argv"
     vrc=0
     run_limited "$VERSION_TIMEOUT" "$D/version_out" "${ARGV[@]}" || vrc=$?
@@ -3367,6 +3628,7 @@ for idx in $TRIGGERED; do
   # Rules the check loaded, where it declares a way to enumerate them. An
   # empty ruleset passes everything.
   if [ -s "$D/rules_argv" ]; then
+    judge_now coverage.rules_command "$D/rules_argv" || continue
     read_argv "$D/rules_argv"
     rrc=0
     run_limited "$timeout" "$D/rules_out" "${ARGV[@]}" || rrc=$?
@@ -3401,8 +3663,10 @@ for idx in $TRIGGERED; do
     }
     worst=0
     worst_rank=-1
+    gated=0
     while IFS= read -r f; do
       [ -n "$f" ] || continue
+      judge_now command "$D/argv" || { gated=1; break; }
       read_argv "$D/argv"
       CMD=()
       for a in "${ARGV[@]}"; do
@@ -3422,8 +3686,10 @@ for idx in $TRIGGERED; do
       [ "$r" -eq 0 ] && r=4
       if [ "$r" -gt "$worst_rank" ]; then worst_rank="$r"; worst="$frc"; fi
     done < "$D/files"
+    [ "$gated" -eq 0 ] || continue
     printf '%s\n' "$worst" > "$D/exit"
   else
+    judge_now command "$D/argv" || continue
     read_argv "$D/argv"
     CMD=()
     for a in "${ARGV[@]}"; do
@@ -3444,6 +3710,7 @@ for idx in $TRIGGERED; do
   printf '%s\n' "$(( $(date +%s) - started ))" > "$D/duration"
 
   if [ -s "$D/cov_argv" ]; then
+    judge_now coverage.command "$D/cov_argv" || continue
     read_argv "$D/cov_argv"
     crc=0
     run_limited "$timeout" "$D/cov_out" "${ARGV[@]}" || crc=$?
@@ -3542,6 +3809,20 @@ for c in plan["checks"]:
     row["dropped_source"] = plan["deleted_source"]
 
     override = read(d, "status_override").strip()
+    if override == "gate_refused":
+        # JUDGED AGAIN JUST BEFORE IT RAN, AND REFUSED (B157): something in
+        # the work tree when it came to run - typically a path an earlier
+        # check wrote - made an argv the plan allowed name the repository.
+        # The judge's own sentence is the detail, with the run-time marker.
+        row["status"] = "refused"
+        row["detail"] = (" ".join(read(d, "gate_refused").split())[:1000].replace("run-checks: ", "", 1)
+                         + " Refused at run time, not when the config was read: the work tree had "
+                         "changed since, so whatever ran in this check before the refusal measured "
+                         "nothing it can be credited with.")
+        row["tool"] = {"version": None}
+        results.append(row)
+        record_failure(row)
+        continue
     if override == "nothing_to_examine":
         _nd, _na = len(c["files_deleted"]), len(c["files_absent"])
         row["status"] = "nothing_to_examine"

@@ -40,6 +40,10 @@
 # paths in `changed.txt` do not have to exist: the runner is being asked what
 # the CHECK reported it examined, not what is on disk. An absolute path here
 # would have made the test pass on one machine and refuse on every other one.
+# They hold no slash: since run-checks.sh 1.3 a value spelled as a path under
+# the root counts as a repository path whether or not it exists (B157, R146),
+# and `echo fixture/one.txt` would be refused without the opt-in for a reason
+# that is not this fixture's subject.
 version: 1
 
 policy:
@@ -67,7 +71,7 @@ checks:
     # `no_version` on one machine and `hollow` on another.
     version_command: [echo, "fixture-echo"]
     mode: batch
-    command: [echo, "fixture/one.txt"]
+    command: [echo, "fixture-one.txt"]
     exit_codes:
       pass: [0]
       fail: [1]
@@ -90,7 +94,7 @@ checks:
     requires: [echo]
     version_command: [echo, "fixture-echo"]
     mode: batch
-    command: [echo, "fixture/one.txt", "fixture/two.txt"]
+    command: [echo, "fixture-one.txt", "fixture-two.txt"]
     exit_codes:
       pass: [0]
       fail: [1]

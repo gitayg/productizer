@@ -773,7 +773,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**112 requirements are active**, and they are the whole of what has been
+**114 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-two more are superseded and none withdrawn, and neither kind is listed
@@ -782,7 +782,7 @@ written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
 
-**Always, with no trigger.** Eighteen requirements hold whatever else is
+**Always, with no trigger.** Nineteen requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -821,8 +821,11 @@ happening:
   protected list through an artifact the agent's job never downloads.
 - **R144** — The lifecycle shall hold the data-only list in the plugin and
   never read it from the repository's own configuration.
+- **R146** — The lifecycle shall count a configured argument that holds a
+  slash, holds no whitespace and resolves under the repository root as naming
+  a path inside that repository, whether or not that path exists yet.
 
-**When something arrives.** Thirty-seven things happen on a discrete trigger:
+**When something arrives.** Thirty-eight things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -917,6 +920,9 @@ happening:
 - **R141** — When a lifecycle script is given a relative path option other
   than its root, the lifecycle shall resolve it under the repository root
   rather than the working directory.
+- **R145** — When a configured command is about to run and the configuration
+  has not opted in to running the repository's own commands, the lifecycle
+  shall judge that command against the repository as it stands at that moment.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:

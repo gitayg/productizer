@@ -484,9 +484,15 @@ neuter the check that runs it. A tool that finds and runs repository files by
 itself, with no argument naming them, is gated by neither script: test
 discovery, `.semgrepignore`, `.npmrc`, `conftest.py`, a git alias. With the
 opt-in off `run-checks.sh` does not refuse `.` (the root, by ruling, B154), a
-path with no script extension and no `./` that an earlier check writes during
-the run (B157), a value inside a comma-separated list, or a name a tool
-resolves through node_modules. The data-only list (shellcheck, semgrep, grep,
+value inside a comma-separated list, or a name a tool resolves through
+node_modules. Since 1.3 (v4.72.3, B157) it judges each command again just
+before it runs, so a path an earlier check wrote is refused when a later check
+names it, and it counts a value spelled as a path under the root whether or not
+it exists - so a registry id spelled with a slash (`semgrep --config
+p/default`) needs the opt-in (B159). Still not judged: a file written between
+that judgement and the exec, or by a process an earlier check left running.
+`stage-advance.sh` does not protect a bare option value the base does not hold
+(`--script=gen`, B158). The data-only list (shellcheck, semgrep, grep,
 each voided by named options) rests on the tools' `--help`, read 2026-10-13;
 an option a later release adds is not on it. A `run-checks.sh --config` other than the
 default is not read, and PyYAML, installed in `prepare` to read the set, is

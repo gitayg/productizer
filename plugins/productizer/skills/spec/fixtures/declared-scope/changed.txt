@@ -1,2 +1,2 @@
-fixture/one.txt
-fixture/two.txt
+fixture-one.txt
+fixture-two.txt

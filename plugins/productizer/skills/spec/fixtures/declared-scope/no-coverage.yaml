@@ -42,7 +42,7 @@ checks:
     requires: [echo]
     version_command: [echo, "fixture-echo"]
     mode: batch
-    command: [echo, "fixture/one.txt", "fixture/two.txt"]
+    command: [echo, "fixture-one.txt", "fixture-two.txt"]
     exit_codes:
       pass: [0]
       fail: [1]
