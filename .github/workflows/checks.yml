@@ -396,6 +396,7 @@ jobs:
           python3 plugins/productizer/skills/spec/scripts/check-ci-template.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
           python3 plugins/productizer/skills/spec/scripts/check-release-workflow.py --selftest
+          python3 plugins/productizer/skills/spec/scripts/check-skill-body.py --selftest
           bash plugins/productizer/skills/help/scripts/list-commands.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-dispatch.sh --selftest
           bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest

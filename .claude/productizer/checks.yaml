@@ -413,6 +413,53 @@ checks:
       - It checks the frontmatter of the agent templates only. A key the host silently ignores still reads as valid here.
       - Reviewer write-tools are matched on the frontmatter `name`. A reviewer whose name lacks the word, and a reviewer that writes through Bash or an MCP tool, both pass.
 
+  # --- the skill body a model loads on every trigger ---------------------------
+  #
+  # B162, R153. SKILL.md went from 35,461 bytes to 12,586 when the stage detail
+  # moved into references/stage-*.md and references/scripts.md. ADVISE, not
+  # block: the check is new and has no fire history, and its budget is a
+  # number chosen once, not a measured threshold.
+  - id: skill-body-budget
+    why: the spec skill's body loads whole on every trigger, and one pasted-back section or one renamed reference undoes the split while every other check stays green
+    when:
+      paths:
+        - "plugins/productizer/skills/spec/SKILL.md"
+        - "plugins/productizer/skills/spec/references/**"
+        - "plugins/productizer/skills/spec/scripts/check-skill-body.py"
+    severity: advise
+    requires: [python3]
+    version_command: [python3, ./plugins/productizer/skills/spec/scripts/check-skill-body.py, --version]
+    mode: batch
+    command: [python3, ./plugins/productizer/skills/spec/scripts/check-skill-body.py]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # the body is over 13,000 bytes, names a path that is not there, or names a stage file with no "before"
+      refused: [2]     # usage, or SKILL.md absent or unreadable
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 3 assertions held'
+      min_covered: 1
+      spec_units:
+        - id: R153
+          verdict: Partial
+          reason: >-
+            It holds the size and the links, not the behaviour R153 is for: that a model opens a
+            named reference when it enters a stage is measured by no eval, and a topic that was in
+            the always-loaded further-reading table now takes one more read.
+          evidence: >-
+            check-skill-body.py 1.0 (B162): SKILL.md is 12,586 bytes against a 13,000-byte budget,
+            its 25 references/, scripts/ and templates/ paths resolve under the skill directory,
+            and each of its 6 references/stage-*.md mentions has "before" on its line or the line
+            above - 3 of 3 assertions. Self-test 11 of 11, exit codes 0 1 2. Falsified 2026-10-25
+            per assertion: size rule off, 10 of 11; path rule off, 9 of 11; "before" rule off, 9 of
+            11; the line above ignored, 9 of 11; a copy of the skill with stage-9-maintain.md
+            renamed turns `real-skill-md` red.
+    limitations:
+      - It reads text. Whether a model opens a named reference, and whether the reference says what the body promises, are not measured.
+      - The 13,000-byte budget is a number chosen at B162, about 400 bytes over the body it was set on; the frontmatter (1,250 bytes) and the Templates table build-view.sh parses (1,063 bytes) cannot move.
+      - A path preceded by a word, a dot, a slash or a hyphen is read as another tree's and is not checked, so `.claude/productizer/templates/` and `~/.claude/skills/spec/scripts/` paths are out of its reach.
+
   - id: guide-current
     why: two releases shipped from a hand-edited guide, and a guide describing behaviour the spec never agreed to reads exactly like one that does
     when:
@@ -2575,7 +2622,39 @@ checks:
             `prepare-writes-the-protected-list` - prepare writes the list and the HEAD it read;
             `prepare-refuses-an-unreadable-checks-yaml` exits 3 before any model is called.
             Falsified 2026-10-13 by the building agent: 103 of 105 with the missing-list refusal
-            made never to fire, 104 of 105 with the HEAD comparison neutered.
+            made never to fire, 104 of 105 with the HEAD comparison neutered. Since 1.3
+            (v4.73.0, B161) the same cases hold among 130.
+        - id: R150
+          verdict: Partial
+          reason: >-
+            Never run inside the action. One real call, `claude -p --advisor opus` with claude
+            2.1.295, printed `ok`, exit 0: the flag is accepted headless at launch, and nothing
+            shows an advisor attached or was called. A committed project .claude/settings.json
+            holding advisorModel could turn an advisor on in CI with no models.advisor; unmeasured.
+          evidence: >-
+            build-dispatch.sh 1.3 (B161), 130 cases. `advisor-is-one-line-after-the-model` - a
+            full id reaches the arguments as exactly one `--advisor` line after --model and
+            --effort; `advisor-alias-passes` - `--advisor opus` and nothing else added;
+            `agent-args-passes-the-advisor`; `agent-args-refuses-a-repeated-advisor` - a second
+            --advisor line is exit 3. All four red at f248e3f (112 of 130). Falsified 2026-10-25
+            by the building agent with the line that adds --advisor removed: 127 of 130.
+        - id: R151
+          verdict: Covered
+          evidence: >-
+            `advisor-null-is-no-advisor` - `"advisor": null` writes arguments byte-identical
+            (cmp -s) to the plan run whose config has no advisor key. A regression guard: f248e3f
+            already held it, and it was not observed red.
+        - id: R152
+          verdict: Covered
+          evidence: >-
+            prepare exits 3 naming models.advisor, before any model is called, and writes no
+            claude-args, for a value holding a second flag, a newline, a leading dash, the empty
+            string, `inherit`, a number and an object (`prepare-advisor-refuses-*` with each
+            `advisor-*-wrote-no-args`); agent-args refuses `--advisor` with a flag, a dash value
+            or nothing, exit 3 (`agent-args-refuses-an-advisor-with-a-flag`, `-a-dash-advisor`,
+            `-an-empty-advisor`). The seven prepare refusals were red at f248e3f. Falsified
+            2026-10-25 by the building agent: the model-name check removed, 119 of 130; the
+            agent-args shape widened to any --advisor value, 127 of 130.
         - id: R128
           verdict: Covered
           evidence: >-

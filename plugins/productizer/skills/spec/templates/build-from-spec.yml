@@ -226,7 +226,9 @@ jobs:
           path: .productizer-run
 
       # prepare wrote zero or more lines, one flag each, from a fixed set:
-      # --model and --effort from models.build in config.json; acceptEdits
+      # --model and --effort from models.build in config.json; --advisor from
+      # models.advisor, only when it is set to a model name (B161, advice
+      # the agent may or may not ask for, never a gate); acceptEdits
       # only when the committed settings set no defaultMode; and the Bash
       # deny, which is ALWAYS present (maintainer ruling 2026-10-11, never a
       # shell in CI). build-dispatch.sh agent-args re-checks every line

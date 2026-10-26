@@ -26,9 +26,13 @@ productizer/
 │           ├── import/           # /productizer:import
 │           ├── spec-review/      # /productizer:spec-review, advisory
 │           └── spec/             # /productizer:spec, the lifecycle itself
-│               ├── SKILL.md
+│               ├── SKILL.md      # routing, the stage map, the per-turn rules
 │               ├── fixtures/
-│               ├── references/
+│               ├── references/   # stage-0-bind.md, stage-models.md,
+│               │                 # stage-1-2-intake.md, stage-3-6-build.md,
+│               │                 # stage-7-8-release.md, stage-9-maintain.md
+│               │                 # (each read before its stage), scripts.md
+│               │                 # (the exit codes), further-reading.md
 │               ├── scripts/      # every tool the stages run, among them
 │               │                 # check-citations.sh and stage-advance.sh
 │               └── templates/
@@ -48,7 +52,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.72.4"`.
+`plugin.json` sets `"version": "4.73.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -294,6 +298,12 @@ the model runs with your repository's committed Claude Code settings, which a
 `permissions` input can only narrow - never `bypassPermissions` unless you
 commit it yourself. It has never run end to end on GitHub. See `references/ci-build.md` before
 adopting it, starting with pinning `PRODUCTIZER_SHA`.
+
+An optional `models.advisor` in `.claude/productizer/config.json` - a model
+alias or id - is passed to the build agent as `--advisor`: advice the agent
+may ask a second model for, never a gate, and anything but a model name
+refuses the run. See `references/models.md`, "The advisor". An advisor set
+there has never run in CI.
 
 ### Reporting a change on its pull request
 

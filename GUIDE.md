@@ -119,6 +119,18 @@ Stages never skip forward, and nothing plans from an intent that has not been
 through intake — until then you cannot know whether the work extends the spec or
 contradicts it, and the second one is a stop, not a task.
 
+The skill loads in three layers. Its name and description are always in
+context; the `SKILL.md` body, about 12.6 KB, loads when the skill triggers and
+holds the routing, the stage map and the rules for every turn; the detail of a
+stage is in `references/stage-*.md`, which the body tells the model to read
+before it enters that stage, and the scripts' exit codes are in
+`references/scripts.md`. The body was 35.5 KB until v4.73.0. In tokens that is
+an estimate, from bytes at the repository's calibrated 3.74-4.27 bytes per
+token: about 2,650-3,030 for the body after its frontmatter, down from about
+8,000-9,150. The advisory `skill-body-budget` check holds the body under
+13,000 bytes and every path it names to a file that exists; no eval shows a
+model opens a stage file when it enters the stage.
+
 ## The backlog, in front of all of it
 
 Stage 1 assumes an intent exists. In practice somebody wanted the thing weeks
@@ -738,6 +750,19 @@ Stage 5 takes **no model at all**. It compares coverage arithmetically; a model
 asked *did this check pass* believes the green summary line, which is the
 failure the stage exists to prevent.
 
+**An advisor, optional.** Set `models.advisor` to a model alias or id
+(`"opus"`, say) and the unattended CI build passes it as `--advisor`, so the
+build agent can consult a second model ([Claude Code's
+advisor](https://code.claude.com/docs/en/advisor)). The advisor reads the whole
+transcript, repository content included, and its tokens bill at its own model's
+rates. It is advice, never a gate: nothing forces a call, and no check relies on
+one. Absent or `null` passes nothing; any value that is not a model name refuses
+the run before a model is called. In a session, use `/advisor <model>` or
+`claude --advisor <model>` - Productizer does not read `models.advisor` there.
+A committed project `.claude/settings.json` holding `advisorModel` can turn an
+advisor on in CI without `models.advisor`; `--advisor` overrides it for the
+session.
+
 ## Starting from a repo that already exists
 
 Stage 0c surveys a repo with history — routes, tests, error paths, config — and
@@ -773,7 +798,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**116 requirements are active**, and they are the whole of what has been
+**120 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -782,7 +807,7 @@ written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
 
-**Always, with no trigger.** Nineteen requirements hold whatever else is
+**Always, with no trigger.** Twenty requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -825,8 +850,12 @@ happening:
   slash, holds no whitespace and resolves under the repository root as naming
   a path inside that repository, whether or not that path exists yet, except a
   semgrep registry id that R148 excludes.
+- **R153** — The lifecycle shall keep the spec skill's stage detail in
+  reference files that the skill's body names at the stage that needs them, so
+  that the body loaded on every trigger carries only the routing, the stage
+  map and the per-turn rules.
 
-**When something arrives.** Thirty-eight things happen on a discrete trigger:
+**When something arrives.** Forty things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -924,6 +953,12 @@ happening:
 - **R145** — When a configured command is about to run and the configuration
   has not opted in to running the repository's own commands, the lifecycle
   shall judge that command against the repository as it stands at that moment.
+- **R150** — When `models.advisor` in config.json names a model, the lifecycle
+  shall pass it to the unattended build agent as one `--advisor <model>`
+  argument and as nothing else.
+- **R151** — When `models.advisor` is absent or null, the lifecycle shall pass
+  the unattended build agent the same arguments as a configuration that lacks
+  the key.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
@@ -952,7 +987,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Forty-six defences, written as `If … then`
+**When something goes wrong.** Forty-seven defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1069,6 +1104,9 @@ because a designed path and a defended one are not the same thing:
 - **R148** — If a configured command hands the semgrep data-only tool a
   registry id as its configuration, and no repository path of that name
   exists, then the lifecycle shall not count that id as a repository path.
+- **R152** — If `models.advisor` is set to a value that is not a model name,
+  then the lifecycle shall refuse to dispatch the build before a model is
+  called.
 
 **Only where the feature is present.** Four requirements apply only to a build
 that includes the feature:

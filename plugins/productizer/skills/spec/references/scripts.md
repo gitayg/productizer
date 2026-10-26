@@ -1,0 +1,48 @@
+# The scripts and their exit codes
+
+Read this before running a script whose flags you have not just read, and
+always before wiring one into a gate: the exit-code contracts below differ.
+
+Scripts. **They disagree on exit codes on purpose only where noted** — check the
+contract before wiring one into a gate.
+
+| Script | Does | Exit |
+|---|---|---|
+| `scripts/detect-context.sh` | probes the repo, emits JSON | 0 |
+| `scripts/stage-status.sh` | every stage and where it stands | 0 |
+| `scripts/build-view.sh` | regenerates the published view from the files | 0 |
+| `scripts/scaffold.sh` | copies a template, strips its examples | 0 · 1 refused · 2 usage |
+| `scripts/import-survey.sh` | read-only survey for Stage 0c | 0 |
+| `scripts/run-checks.sh` | runs the declared checks; without `policy.allow_repo_local_tools` it applies the strict rule and recognises no interpreter: it refuses a check whose program resolves inside the repository, any of whose literal arguments (a whole token, an `--opt=` value or a glued short-option value) names a path inside it - the root `.` aside, and a value spelled as a path under the root counting whether or not it exists, bar a semgrep `--config` registry id no tree holds a path for - or whose `{file}`/`{files}` is handed to a program not on the plugin's data-only list; and it judges each command again just before it runs, refusing that check if an earlier one wrote what it names | 0 pass · 3 refused · 2 usage · 1 crash |
+| `scripts/argv-classify.py` | the strict reading of a check's argv, loaded by path by `run-checks.sh` and `stage-advance.sh`: every value a literal argument can name, a dotted name's module paths, and the data-only list - shellcheck, semgrep and grep, each voided by named code-running options, and semgrep's registry ids - which it holds and never reads from the config; `--tokens ARG...`, `--data-only ARG...`, `--selftest` | 0 · 1 self-test failed · 2 usage |
+| `scripts/contradiction-check.py` | second opinion on one pair | 0 no halt · 1 contradiction · 2 usage · 4 FILE mode read no EARS line (the default; `--allow-empty` accepts zero) |
+| `scripts/request-ruling.sh` | raises the ruling a contradiction needs | 0 wrote · 2 usage · 3 unreadable · 4 refused |
+| `scripts/pending-rulings.sh` | which decisions are waiting on a person | 0 none · 1 pending · 2 unknown |
+| `scripts/check-ruling-requested.sh` | every halt actually asked | 0 · 1 findings · 2 could not run |
+| `scripts/record-classification.sh` | the spec commit, hash and ids one classification was made against, written under `--root` whatever the working directory; `--selftest` | 0 wrote · 1 already classified · 2 no hash, so no record, or a spec outside the root |
+| `scripts/check-classification-provenance.sh` | every classification recorded what it read | 0 · 1 findings · 2 could not run, incl. an empty store nothing corroborates |
+| `scripts/check-hygiene.sh` | generic leak rules, plus a private list read at runtime | 0 · 1 findings · 2 could not run |
+| `scripts/check-frontmatter.py` | agent templates' frontmatter does what it says; a reviewer holds no tool that writes a file | 0 · 1 findings · 2 usage · 3 could not run |
+| `scripts/learnings.sh` | observations that are not obligations, cited to `R` ids | 0 · 1 findings · 2 usage · 3 unreadable · 4 cannot determine · 5 never created · 6 refused |
+| `scripts/run-runner.sh` | validates and executes a runner definition | 0 · 1 reported failure · 2 usage · 3 unreadable · 4 refused |
+| `scripts/init.sh` | all of Stage 0 in one command | 0 · 2 usage · 3 prerequisite · 4 refused · 5 partial |
+| `scripts/spec-diff.sh` | the spec **delta** for Build, not just the spec | 0 diff · 2 usage · 3 not a repo · 4 unchanged · 5 no baseline · 6 base unresolved · 7 over cap |
+| `scripts/validate-spec.py` | EARS and id permanence, executable | 0 · 1 errors · 2 usage · 3 strict warnings · 4 not measured |
+| `scripts/drift-reverse.sh` | code with no requirement behind it | 0 measured · 1 crash · 2 usage · 4 cannot determine |
+| `scripts/signals.sh` | typed evidence records, and their hash | 0 · 1 crash · 2 usage |
+| `scripts/score.sh` | judgment over signals, keyed to their hash | 0 scored · 1 crash · 2 usage · 3 refused |
+| `scripts/req-trailer.sh` | `Productizer-Req:` provenance, orphans, coverage | 0 · 2 no spec · 3 findings · 4 cannot determine |
+| `scripts/check-citations.sh` | a citation this change ADDS that resolves to no requirement, and a new citation of a superseded one; advisory | 0 · 1 findings · 2 refused |
+| `scripts/check-sigpipe.sh` | in a file under `set -o pipefail`, an early reader (`head`, `grep -q`/`-m`/`-l`) downstream of a pipe, whose SIGPIPE turns a match into 141; hand it a file or a here-string instead | 0 · 1 findings · 2 unreadable, or an exemption with no reason |
+| `scripts/stage-advance.sh` | may this work item's stage move, on this change's evidence, judged on the paths git applies; call it before any tracker move. A non-ASCII path that reads as a refused one is refused in every mode. An attended move to design may also modify the requirement index and add classification records (B112). `--unattended` (the CI template passes it) also refuses any change to the checks result, any path that is not ASCII or has a component beginning with a dot, bar the backlog, the plan and the spec on their exact paths, a classification record or stage snapshot added, and any file a check declared in `checks.yaml` at the base runs or names as an operand or an option's value. `--print-protected` prints that set, read before the AI; `--protected FILE` hands it back so the decider reads no YAML | 0 allowed · 1 produced nothing · 2 usage · 3 forbidden path · 4 cannot determine · 5 not forward |
+| `scripts/build-dispatch.sh` | **EXPERIMENTAL — the template it serves has never run on a real GitHub runner; its main protection, that the AI gets no shell, was measured only with a local CLI; do not adopt it yet (B113, B121).** Both ends of an unattended run in the copyable CI template: `prepare` before the model (and the PR body, `--body-out`, rendered with no write token), `agent-args` checking the prepared flags against fixed shapes before the agent reads them, `stash-git` and `capture` around it (the agent gets no shell and no git it could configure), `deliver` a draft PR after it, running no repository code. `prepare` also writes the protected list, the files `checks.yaml` runs, and `deliver` takes it as `--protected` and refuses without one for its HEAD. An optional `models.advisor` model name becomes one `--advisor` line; any other value refuses the run (`references/models.md`, "The advisor") | 0 · 2 usage · 3 repo not readable as needed, a `models.advisor` that is not a model name, or no `evals/solver-probe.py` for the body · 4 spec unchanged · 5 no plan committed · 6 refused by stage-advance.sh · 7 delivery failed · 8 capture refused (.git in the tree) |
+| `scripts/check-ci-template.py` | **EXPERIMENTAL template (never run on a real GitHub runner; do not adopt it yet - B113, B121).** The CI template's sixteen static safety properties, on the YAML itself (including that the agent step denies Bash, that a post-agent shell pins `BASH_ENV` empty, that the write job runs no repository code, installs nothing and reads no YAML, that deliver is handed the protected list the agent's job never downloads, that the runtime guards are in place and PRODUCTIZER_SHA is a quoted 40-hex pin) | 0 · 1 findings · 2 could not run |
+| `scripts/check-release-workflow.py` | this repository's release jobs, statically: the job holding a write token checks out nothing and runs no repository code, release-prep is read-only, and the draft release gets a template copy pinned to the tag's commit; run with `python3`, it needs PyYAML; `--selftest` | 0 · 1 findings · 2 could not run |
+| `scripts/check-skill-body.py` | the spec skill's `SKILL.md` stays at most 13,000 bytes, every `references/`, `scripts/` and `templates/` path it names exists, and each `references/stage-*.md` it names has "before" on its line or the line above; `--selftest` | 0 · 1 findings · 2 could not run |
+| `scripts/check-governance-weakening.sh` | a loosened check declaration, a workflow job's own permissions raised, and workflow steps keyed by id, else by name and action with its ref ignored, never by position; advisory | 0 · 1 findings · 2 could not run |
+| `scripts/retrieval-budget.sh` | retrieval regression, deterministic | 0 in band · 4 out of band · 5 no baseline |
+| `scripts/ab-harness.sh` | same model, with the process and without | 0 · 2 usage · 3 no arms · 5 no runs · 6 arm incomplete · 7 did not complete |
+| `scripts/stage-snapshot.sh` | what a stage produced before a human touched it | 0 · 1 exists · 2 usage · 3 no dir · 5 no snapshot · 6 artifact gone · 7 no delta · 8 produced nothing |
+| `scripts/graduate.sh` | repeated corrections into durable guidance; a relative `--work` or `--transcripts` is read under the root; `--selftest` | 0 · 2 usage · 3 no source · 4 unparseable · 5 measured zero · 6 below threshold · 7 apply refused · 8 undo refused |
+| `scripts/usage-audit.sh` | our own scripts' error rate and contract | 0 |
+| `scripts/build-release-notes.sh` | Stage 8 evidence, and what was unavailable | 0 · 2 usage · 3 not a repo |

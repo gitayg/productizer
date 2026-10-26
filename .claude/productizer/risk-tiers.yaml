@@ -218,6 +218,14 @@ rules:
     why: the instructions a model loads and acts on; wrong here is wrong behaviour, not wrong prose
 
   - tier: amber
+    glob: "plugins/*/skills/*/references/stage-*.md"
+    why: the stage text the skill body sends a model to read before it acts; wrong here is wrong behaviour, as in SKILL.md
+
+  - tier: amber
+    glob: "plugins/*/skills/*/references/scripts.md"
+    why: the exit-code contracts a gate is wired against; a wrong code here is a gate wired wrong
+
+  - tier: amber
     glob: "plugins/*/commands/**"
     why: a slash command is an entry point with a tool grant attached
 

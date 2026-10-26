@@ -239,7 +239,7 @@ skill's own `templates/threshold.sh` follows the same convention.
 
 ## When there is no runner
 
-Run stages 3-6 from `SKILL.md` and say that is what you are doing. The prose
+Run stages 3-6 from `SKILL.md` and `references/stage-3-6-build.md` and say that is what you are doing. The prose
 covers the same ground: plan mode before implementation, verification before
 done, a written review policy, and a production gate as a hook. What it does not
 do is enforce, so the human review gate carries more weight when the runner is

@@ -350,7 +350,7 @@ repository. It has **never run on GitHub**: this repository is public, holds no
 model secrets, and a run costs model spend. What is measured is its static
 properties (`check-ci-template.py`, 16 of 16) and both ends of
 `build-dispatch.sh` against local repositories, with `gh` stubbed and origin a
-local bare repository (105 of 105). Not measured: the action itself, a real
+local bare repository (130 of 130 since 1.3). Not measured: the action itself, a real
 `gh`, that a draft stays a draft, and that GitHub runs the template's calls of
 the script as written (check-ci-template.py asserts the call text since B118,
 not its execution). A pull request it opens with the workflow's
@@ -436,8 +436,8 @@ This workflow has never run on a real GitHub runner. Its main protection, that
 the AI gets no shell, was measured only with a local CLI. Do not adopt it yet.
 
 That statement heads `templates/build-from-spec.yml`, `references/ci-build.md`,
-the README section on the template and the SKILL.md rows for the two scripts
-that serve it. It stays until the runner measurements it waits on are made:
+the README section on the template, the `references/scripts.md` rows for the
+two scripts that serve it, and SKILL.md's Stage 6. It stays until the runner measurements it waits on are made:
 B113 (whether the action honours the repository's committed permission
 settings) and B121 (the no-shell template measured end to end on GitHub). Each
 guarantee the template states - no shell for the agent, no write token beside
@@ -622,3 +622,30 @@ proven only by a real tag push. Its repository-code rule is the lexical one
 alias, or code a system tool or another repository's action runs, is not seen;
 the lines that pin the copy are matched in order, not as control flow. It needs
 PyYAML, so it runs with `python3`, not `python3 -I`, which hides the user site.
+
+## Added in v4.73.0
+
+### 32 · An advisor set in `models.advisor` has never run in CI
+
+`build-dispatch.sh` 1.3 passes `models.advisor` to the unattended build as one
+`--advisor` argument (B161). An advisor set there has never run in CI; a set
+key is not evidence an advisor was called. One local `claude -p --advisor opus`
+call printed `ok`, exit 0, which shows the flag is accepted at launch and
+nothing more: whether the action passes it through, whether an advisor
+attaches, and when the model consults it are unmeasured, and the timing is the
+model's choice, so nothing can force or cap a call. Claude Code's
+`advisorModel` setting can be set in any settings file, so a committed project
+`.claude/settings.json` holding it could turn an advisor on in CI with no
+`models.advisor` (unmeasured); `--advisor` overrides it for the session. The
+advisor reads the whole transcript, repository content included, and bills at
+its own model's rates. Attended sessions do not read `models.advisor`.
+
+### 33 · Nothing shows a model reads the stage file the skill body names
+
+Since v4.73.0 (B162) the spec skill's `SKILL.md` keeps the routing, the stage
+map and the per-turn rules, and each stage's detail is in a
+`references/stage-*.md` file the body says to read before that stage. The
+advisory `skill-body-budget` check holds the size and that each named file
+exists; no eval shows a model opens the named reference when it enters a
+stage. A topic that was in the always-loaded further-reading table now takes
+one more read. The token savings are an estimate from bytes, not a count.

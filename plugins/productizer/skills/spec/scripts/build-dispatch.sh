@@ -124,6 +124,18 @@
 # and the action's default model runs. `cheap` names no model in CI and is
 # refused rather than guessed at.
 #
+# THE ADVISOR (B161). models.advisor in config.json, optional: a string naming
+# the model Claude Code consults as its advisor (references/models.md,
+# "The advisor"), passed as one line `--advisor <model>`. Absent or null passes
+# nothing, so the args are byte-identical to a config without the key. Any
+# other value is refused (exit 3) before any model is called, never passed
+# through: it must be a JSON string matching the same model-name shape
+# models.build.model is held to - a letter or digit first, then letters,
+# digits and . _ : @ - only, so no space, newline or leading `-` can add an
+# argument - and not one of the words inherit, cheap or none, which name no
+# model. The advisor is advice, never a gate: when, and whether, it is called
+# is the model's choice and cannot be forced.
+#
 # THE AGENT'S PERMISSIONS (maintainer rulings, 2026-10-10 and 2026-10-11). The
 # agent gets the permission rules the repository owner committed for Claude Code
 # - .claude/settings.json and .claude/settings.local.json - EXCEPT that Bash is
@@ -162,6 +174,8 @@
 #   2  usage
 #   3  the repository cannot be read as needed: not a work tree, a shallow
 #      clone, an unreadable config, HEAD is not the default-branch tip,
+#      (prepare) models.advisor is set to something that is not a model
+#      name (references/models.md, "The advisor"), or
 #      (prepare --body-out) there is no evals/solver-probe.py, which the
 #      body requires, or the body could not be rendered, or the files
 #      checks.yaml runs could not be listed, or
@@ -182,7 +196,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="build-dispatch 1.2"
+VERSION="build-dispatch 1.3"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$HERE/$(basename -- "${BASH_SOURCE[0]}")"
 
@@ -436,6 +450,42 @@ JSON
   drive prepare-cheap-refused 3 "names no model in CI" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-x" \
     --spec-base "$(G "$R" rev-parse HEAD~2)"
+
+  # B161. models.advisor: a valid name becomes exactly one --advisor line after
+  # the model flags; null is the same as no key; anything else is refused
+  # before a single flag is written, never passed through.
+  newrepo adv; R="$ST/adv"
+  adv_conf() { printf '{ "models": { "build": %s, "advisor": %s } }\n' "$1" "$2" > "$R/.claude/productizer/config.json"; commit_push "$R" "advisor $3"; }
+  adv_conf '{ "model": "claude-x-1", "effort": "high" }' '"claude-opus-5-5"' full-id
+  drive prepare-advisor-full-id 0 "prepared plan for issue #7" \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-adv-id"
+  also advisor-is-one-line-after-the-model "models.advisor reaches the args as exactly one --advisor line, after --model and --effort" \
+    args_are "$ST/out-adv-id/claude-args" $'--model claude-x-1\n--effort high\n--advisor claude-opus-5-5\n--permission-mode acceptEdits\n--disallowedTools Bash'
+  adv_conf '{ "model": "inherit" }' '"opus"' alias
+  drive prepare-advisor-alias 0 "prepared plan for issue #7" \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-adv-alias"
+  also advisor-alias-passes "an alias is a model name: --advisor opus, and nothing else added" \
+    args_are "$ST/out-adv-alias/claude-args" $'--advisor opus\n--permission-mode acceptEdits\n--disallowedTools Bash'
+  adv_conf '{ "model": "inherit" }' 'null' null
+  drive prepare-advisor-null 0 "prepared plan for issue #7" \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-adv-null"
+  also advisor-null-is-no-advisor "advisor null: byte-identical to a config with no advisor key" \
+    cmp -s "$ST/out-adv-null/claude-args" "$ST/out-plan/claude-args"
+  # Each refusal: exit 3 naming models.advisor, and no claude-args written.
+  adv_refused() { # adv_refused <name> <json value> <text>
+    adv_conf '{ "model": "inherit" }' "$2" "$1"
+    drive "prepare-advisor-refuses-$1" 3 "models.advisor is not a model name this script will pass on: $3" \
+      prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-adv-$1"
+    also "advisor-$1-wrote-no-args" "a refused advisor writes no claude-args" \
+      test ! -e "$ST/out-adv-$1/claude-args"
+  }
+  adv_refused second-flag '"opus --dangerously-skip-permissions"' '"opus --dangerously-skip-permissions"'
+  adv_refused newline '"opus\n--permission-mode bypassPermissions"' '"opus\n--permission-mode bypassPermissions"'
+  adv_refused leading-dash '"--model"' '"--model"'
+  adv_refused empty '""' '""'
+  adv_refused inherit '"inherit"' '"inherit"'
+  adv_refused not-a-string '7' '7'
+  adv_refused object '{ "model": "opus" }' '{"model": "opus"}'
 
   newrepo ahead; R="$ST/ahead"
   printf 'x\n' > "$R/local.txt"; G "$R" add -A; G "$R" commit --quiet -m local
@@ -734,7 +784,7 @@ STUB
   done
   # shellcheck disable=SC2016  # $1/$2 are expanded by the inner sh, on purpose
   also agent-args-accepts-every-prepare-output "agent-args accepted all $n claude-args files prepare wrote${bad:+; refused:$bad}" \
-    sh -c 'test -z "$1" && test "$2" -ge 5' _ "$bad" "$n"
+    sh -c 'test -z "$1" && test "$2" -ge 12' _ "$bad" "$n"
   rm -rf "$ST/aa-ok"; mkdir -p "$ST/aa-ok"; cp -R "$ST/out-build" "$ST/aa-ok/.productizer-run"
   : > "$ST/aa-ok.gho"
   drive agent-args-ok 0 "permissions repo-settings; flags: --model claude-x-1 --effort high --permission-mode acceptEdits --disallowedTools Bash" \
@@ -762,6 +812,23 @@ STUB
   aa_ws crlf '--disallowedTools Bash\r\n'
   drive agent-args-refuses-a-crlf-line 3 "holds a line that is not a shape build-dispatch.sh writes: \$'--disallowedTools Bash\\r'" \
     agent-args "$ST/aa-crlf" --out "$ST/aa-crlf.gho"
+  # B161. agent-args holds --advisor to the same name shape prepare does.
+  rm -rf "$ST/aa-adv"; mkdir -p "$ST/aa-adv"; cp -R "$ST/out-adv-id" "$ST/aa-adv/.productizer-run"
+  : > "$ST/aa-adv.gho"
+  drive agent-args-passes-the-advisor 0 "flags: --model claude-x-1 --effort high --advisor claude-opus-5-5 --permission-mode acceptEdits --disallowedTools Bash" \
+    agent-args "$ST/aa-adv" --out "$ST/aa-adv.gho"
+  aa_ws adv-two '--disallowedTools Bash\n--advisor opus --dangerously-skip-permissions\n'
+  drive agent-args-refuses-an-advisor-with-a-flag 3 "holds a line that is not a shape build-dispatch.sh writes: --advisor\\ opus\\ --dangerously-skip-permissions" \
+    agent-args "$ST/aa-adv-two" --out "$ST/aa-adv-two.gho"
+  aa_ws adv-dash '--disallowedTools Bash\n--advisor --permission-mode\n'
+  drive agent-args-refuses-a-dash-advisor 3 "holds a line that is not a shape build-dispatch.sh writes: --advisor\\ --permission-mode" \
+    agent-args "$ST/aa-adv-dash" --out "$ST/aa-adv-dash.gho"
+  aa_ws adv-empty '--disallowedTools Bash\n--advisor \n'
+  drive agent-args-refuses-an-empty-advisor 3 "holds a line that is not a shape build-dispatch.sh writes: --advisor\\ " \
+    agent-args "$ST/aa-adv-empty" --out "$ST/aa-adv-empty.gho"
+  aa_ws adv-repeat '--disallowedTools Bash\n--advisor opus\n--advisor sonnet\n'
+  drive agent-args-refuses-a-repeated-advisor 3 "repeats --advisor" \
+    agent-args "$ST/aa-adv-repeat" --out "$ST/aa-adv-repeat.gho"
   rm -rf "$ST/aa-missing"; mkdir -p "$ST/aa-missing"
   drive agent-args-refuses-no-file 3 "no claude-args at" \
     agent-args "$ST/aa-missing" --out "$ST/aa-missing.gho"
@@ -780,7 +847,7 @@ STUB
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f&&/^#      /{next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: that the template hands deliver the body and the protected list prepare wrote and not others (check-ci-template.py'"'"'s protected-list guard asserts deliver passes --protected and the agent job never downloads the body artifact, but not the artifact paths, and GitHub'"'"'s artifact immutability is not measured here); that a protected list beside a matching protected-head is the one prepare wrote (deliver checks the HEAD, and stage-advance.sh validates the list as data); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing; the probe refusal when the spec was created in the root commit (the check comes before that branch, and no case drives it); that a probe which exists prints the counts the body reads (pr-spec-comment.sh renders NOT MEASURED for that, it does not refuse).\n'
+  printf '    NOT ASSERTED: that the template hands deliver the body and the protected list prepare wrote and not others (check-ci-template.py'"'"'s protected-list guard asserts deliver passes --protected and the agent job never downloads the body artifact, but not the artifact paths, and GitHub'"'"'s artifact immutability is not measured here); that a protected list beside a matching protected-head is the one prepare wrote (deliver checks the HEAD, and stage-advance.sh validates the list as data); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the CLI inside the action accepts --advisor, attaches the advisor or ever calls it (the cases here assert only the line prepare writes and agent-args passes; models.advisor is advice, never a gate); that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing; the probe refusal when the spec was created in the root commit (the check comes before that branch, and no case drives it); that a probe which exists prints the counts the body reads (pr-spec-comment.sh renders NOT MEASURED for that, it does not refuse).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -808,7 +875,7 @@ if [ "$CMD" = agent-args ]; then
   PERMS_FILE="$ROOT/.productizer-run/permissions"
   [ -f "$ARGS_FILE" ] && [ ! -L "$ARGS_FILE" ] \
     || fail 3 "no claude-args at $ARGS_FILE (a regular file prepare writes); refusing to run the agent on flags nobody checked"
-  ARG_SHAPE='^(--model [A-Za-z0-9][A-Za-z0-9._:@-]*|--effort (low|medium|high|xhigh|max)|--permission-mode acceptEdits|--disallowedTools Bash)$'
+  ARG_SHAPE='^(--model [A-Za-z0-9][A-Za-z0-9._:@-]*|--effort (low|medium|high|xhigh|max)|--advisor [A-Za-z0-9][A-Za-z0-9._:@-]*|--permission-mode acceptEdits|--disallowedTools Bash)$'
   CHECKED=(); SEEN=" "; DENIES_BASH=0
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ $ARG_SHAPE ]] \
@@ -962,9 +1029,10 @@ done
 
 # --- config ------------------------------------------------------------------
 CONF="$(python3 -I - "$CONFIG_REL" <<'PY'
-import json, os, sys
+import json, os, re, sys
 path = sys.argv[1]
 art, model, effort = "docs/sdlc/<slug>", "inherit", "inherit"
+advisor, advisor_bad = None, None
 if os.path.exists(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -981,14 +1049,27 @@ if os.path.exists(path):
         if isinstance(b, dict):
             model = str(b.get("model", "inherit"))
             effort = str(b.get("effort", "inherit"))
+        v = m.get("advisor") if isinstance(m, dict) else None
+        if v is not None:
+            if (isinstance(v, str) and v not in ("inherit", "cheap", "none")
+                    and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@-]*", v)):
+                advisor = v
+            else:
+                advisor_bad = json.dumps(v)
 print("ART\t" + art.rstrip("/"))
 print("MODEL\t" + model)
 print("EFFORT\t" + effort)
+if advisor is not None:
+    print("ADVISOR\t" + advisor)
+if advisor_bad is not None:
+    print("ADVISOR_BAD\t" + advisor_bad)
 PY
 )" || fail 3 "cannot read $CONFIG_REL; the reason is above"
 ART="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="ART"{print $2}')"
 MODEL="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="MODEL"{print $2}')"
 EFFORT="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="EFFORT"{print $2}')"
+ADVISOR="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="ADVISOR"{print $2}')"
+ADVISOR_BAD="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="ADVISOR_BAD"{print $2}')"
 PLAN_PATH="$(printf '%s' "$ART" | sed "s/<[^>]*>/issue-$ISSUE/g")/plan.md"
 
 # --- the base ----------------------------------------------------------------
@@ -1026,6 +1107,9 @@ if [ "$CMD" = prepare ]; then
     low|medium|high|xhigh|max) ARGS_LINES+=("--effort $EFFORT") ;;
     *) fail 3 "models.build.effort is not one of low, medium, high, xhigh, max, inherit: $EFFORT" ;;
   esac
+  [ -z "$ADVISOR_BAD" ] \
+    || fail 3 "models.advisor is not a model name this script will pass on: $ADVISOR_BAD. Set a model alias or id (references/models.md, \"The advisor\"), or remove the key or set it to null for no advisor. Refusing the run before any model is called."
+  [ -z "$ADVISOR" ] || ARGS_LINES+=("--advisor $ADVISOR")
 
   # The repository's committed Claude Code settings decide the permission
   # mode. A settings.local.json that is committed is read too, and wins, as

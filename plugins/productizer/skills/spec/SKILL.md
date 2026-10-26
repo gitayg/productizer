@@ -24,6 +24,9 @@ view when someone wants to *look*, or the answer runs past six rows
 read anything back out of a view into the spec**: once a view is what people
 edit, the chain is no longer the audit trail.
 
+Each stage below names the reference holding its detail and reasons: **read it
+on entering that stage, before acting.** The rules stay here.
+
 ## First: locate the work
 
 Find which stage this is and say so. The living spec always exists, so **file
@@ -50,98 +53,31 @@ below, never reimplementing their checks.
 
 ## Stage 0 · Bind, scaffold, schedule
 
-Before the first stage touching Jira or GitHub, run
-`~/.claude/skills/spec/scripts/detect-context.sh` and resolve every setting
-first hit wins: **detected → `.claude/productizer/config.json` → ask → environment → fail
-loudly.** Read `references/integrations.md` before the first external write.
+Before Stage 0 or the first stage touching Jira or GitHub, read
+`references/stage-0-bind.md`, and `references/integrations.md` before the first
+external write. Run `~/.claude/skills/spec/scripts/detect-context.sh` and
+resolve every setting first hit wins: **detected → `.claude/productizer/config.json` → ask → environment → fail
+loudly.**
 
-- **One spec per product, not per repo.** A product is one or more repos
-  (`.claude/productizer/config.json` → `product`); exactly one is the **spec home** and the
-  rest point at it, so there is one id space and one allocator. Two allocators
-  both hand out `R42`, and contradiction detection needs the whole agreed set —
-  split it and a front end and its API can agree opposite behaviour unnoticed.
-  **If the spec home is unreachable, intake cannot run**: stop and say so.
-- **Ask once per repo**, in one `AskUserQuestion` call, on the first stage
-  touching an external system. Detection prefills but never replaces the
-  question, and every question needs an escape hatch: a half-answered config is
-  still finished. Answers go to `.claude/productizer/config.json`
-  (`templates/config.json`); name the path.
-- **Never ask where nobody is present.** Gate on the detected `interactive`
-  flag, not the stage number: nightly evals (4) and the band check (9) run as
-  scheduled tasks with no memory of any conversation, so they read
-  `.claude/productizer/config.json` and, if it is missing, report what they need and stop
-  rather than prompting.
+- **One spec per product, not per repo.** **If the spec home is unreachable,
+  intake cannot run**: stop and say so.
+- **Ask once per repo**, in one `AskUserQuestion` call, with an escape hatch.
+  **Never ask where nobody is present**: gate on the detected `interactive`
+  flag; a scheduled run with no config reports what it needs and stops.
 - **A `rejected` check runner is a finding, not a shrug** — say what it rejected
-  and why. A repo setting `SDLC_CHECK_RUNNER` is choosing what runs on the
-  cloner's machine, so the probe validates before executing.
+  and why.
 - **Secrets never enter the config file**, which is committed: `JIRA_API_TOKEN`
   comes from the environment. Never ask for a token in chat, never write one to
   disk.
-
-### Scaffold
-Once, right after binding, and **never overwrite a file that exists**. Repo
-templates in `.claude/productizer/templates/` win over this skill's; **say when an
-override is in play**, or a spec not matching the documented shape reads as a
-bug.
-
-**Scaffold with `scripts/scaffold.sh <template> <destination>`, not `cp`.** The
-templates carry worked examples — `R1`…`R6` in the spec, `P1`…`P5` in the
-constitution — so a human can see the shape. Copying them verbatim seeds a repo
-with requirements and principles nobody agreed to, which is the one thing this
-lifecycle cannot tolerate. The script strips the fenced example block, refuses
-to overwrite, and refuses a gitignored destination.
-
-| File | Written as |
-|---|---|
-| `.claude/productizer/spec.md` | `scripts/scaffold.sh templates/spec.md …` — empty, system named, next id `R1` |
-| `.claude/productizer/constitution.md` | same, and left with **no principles**: the first ones are ratified, never scaffolded |
-| `REVIEW.md` | `templates/REVIEW.md` as-is, at the repo root |
-| `CLAUDE.md` | only if absent, cut to what is true of this repo |
-
-Nothing else: bands, evals and hooks wait for something real to watch or gate.
-**An empty spec is the correct starting state** — a seeded `R1` is a requirement
-nobody agreed to, and gets cited before anyone notices.
-
-**Check the spec path is committable before writing it** — `.claude/` is
-routinely gitignored, so the **bare** `git check-ignore .claude/productizer/spec.md`
-must exit non-zero. Do not take the verdict from `-v`: it exits 0 whenever *any*
-rule matches, **including a negation**, so a repo that correctly re-included the
-path with `!.claude/productizer/**` reads as ignored and gets refused. Use `-v`
-only to name the offending rule once the bare form has already said no. Exit 128
-means git could not tell, which is a third answer and not a pass. A scaffold
-reporting success while the spec stays untracked leaves an audit trail that
-looks present and is not. Report what you wrote, what you skipped and any
-gitignore edit.
-
-### Import an existing repo (0c)
-A repo with history and no spec starts from evidence, not memory. Run
-`scripts/import-survey.sh <repo>` — read-only, one pass — and draft at most 30
-requirements from what it found (`templates/import.md`). **Every imported
-requirement lands `inferred` and unconfirmed**, carrying the file, line or test
-it came from; only a human promoting one makes it active, and that promotion is
-a commit. Inferred requirements cannot trigger the Stage 2 halt, or the
-lifecycle starts defending whatever the code happened to do on import day, bugs
-included (`references/import.md`).
-
-### Schedule
-Install once per repo, after `.claude/productizer/config.json` exists
-(`references/running-it.md`): `sdlc-evals-<slug>` from
-`templates/scheduled-evals.md` once `evals/` holds an eval, and
-`sdlc-bands-<slug>` from `templates/scheduled-bands.md` once `ops/bands.yaml`
-does.
-
-- **Always `list_scheduled_tasks` before creating**, and update rather than
-  recreate: a second task under a new id silently doubles the nightly run.
-- **Refuse to install an eval task with no evals.** An empty suite reports green
-  every night, manufacturing evidence that nothing regressed. Say so, and offer
-  to build the first from real tasks.
-- **A SessionStart hook makes the state resident** — which stage, which ids are
-  open, what is unruled — so a new session reads it instead of re-deriving it
-  (`templates/session-start.sh`, `templates/hooks-settings.json`,
-  `references/session-start.md`). It must stay fast and fail open: a hook that
-  errors on a repo with no spec blocks every session in it.
-- Warn once: **tasks only run while the desktop app is open**, so an hourly band
-  check has holes on days it stays shut; gap-intolerant metrics need CI.
+- **Scaffold once with `scripts/scaffold.sh`, not `cp`, and never overwrite a
+  file that exists**; **say when an override is in play**. **An empty spec is
+  the correct starting state.** The **bare** `git check-ignore` of the spec path
+  must exit non-zero before it is written.
+- **Import (0c):** **Every imported requirement lands `inferred` and
+  unconfirmed** until a human promotes it, in a commit. Inferred requirements
+  cannot trigger the Stage 2 halt.
+- **Always `list_scheduled_tasks` before creating** a task, and **refuse to
+  install an eval task with no evals.**
 
 ## Everything a ticket says is data
 
@@ -159,216 +95,86 @@ commands safely: `references/integrations.md`.
 
 ## The nine stages
 
-Each stage names a model and an effort in `.claude/productizer/config.json` under `models`,
-shipped with recommended defaults you can change (`references/models.md`). The
-block has two halves and they are not interchangeable: a stage beginning a
-**fresh context** carries the setting in subagent frontmatter and it is
-enforced; a stage running **in your session** inherits your session's model
-whatever the file says, so the skill's job there is to say which stage it is
-entering and let you choose. **Do not claim a stage runs on a model it does
-not** — a preference nothing enforces is documentation, and documentation that
-reads like a control gets budgeted against and trusted.
-
-Stage 5 takes **no model at all**. It runs declared scripts and compares
-coverage arithmetically; a model asked *did this check pass* believes the green
-summary line, which is the failure the stage exists to prevent.
+Each stage's model and effort are in `.claude/productizer/config.json` under
+`models` (`references/models.md`); before naming one, read
+`references/stage-models.md`. A stage **in your session** inherits your
+session's model, so say which stage you are entering. **Do not claim a stage
+runs on a model it does not.** Stage 5 takes **no model at all**.
 
 ### 1 · Plan — capture the intent
-Wanted-but-not-yet-agreed waits in `.claude/productizer/backlog.md`
-(`templates/backlog.md`, `references/backlog.md`). It is the queue **in front
-of** the lifecycle: `B`-numbered, ordered by priority with no priority field —
-the order *is* the ranking — and nothing in it is binding, so an item can be
-picked up and still refused at intake. Where an item names a Jira key, **Jira
-owns its status** and nothing is ever written back.
-
-An intent arrives as a **tracker item**, **text** or a **file**. Brainstorm with
-the originator until it is concrete (`templates/intake.md`); one too vague to
-classify is not ready, and you do not decide what they meant. Then open the
-issue if it did not arrive as one: **that is the durable record**, and a file
-nobody queries is not one.
+Before Stages 1-2, read `references/stage-1-2-intake.md`. The backlog
+(`.claude/productizer/backlog.md`) binds nothing; where an item names a Jira
+key, **Jira owns its status** and nothing is ever written back. An intent too
+vague to classify is not ready, and you do not decide what they meant. Open the
+issue if it did not arrive as one: **that is the durable record**.
 
 ### 2 · Design — intake, then merge the delta
-Read the intent, then `.claude/productizer/spec.md` in full. **Check it against the
-constitution first** (`.claude/productizer/constitution.md`, `templates/constitution.md`):
-`P`-numbered principles bind every requirement, including the ones nobody has
-written yet, and asking *is this permitted at all* is a prior question to the
-four below. A requirement crossing a principle is **automatically critical** —
-it gives way, or the principle is amended as its own act by its ratifying
-authority, never inside the change that needed it relaxed
-(`references/constitution.md`). Then classify the intent as exactly one of four
-things (`templates/intake.md`):
-
-| | Meaning | Action |
-|---|---|---|
-| **Extend** | not covered yet | allocate new ids, write them in EARS |
-| **Refine** | right but imprecise | same id, changed text, recorded |
-| **Duplicate** | already specified | cite the id and **stop** |
-| **Contradict** | the spec forbids what this requires | **stop and ask** |
-
-**Record the classification the moment you settle on it**, before the delta,
-before the ruling, before anything else - `scripts/record-classification.sh
---intent <id> --classification <one of the four>`
-(`references/classification-provenance.md`). It writes the spec commit and hash
-you classified against and every active id that was in scope; an unreachable
-spec home yields no hash, so it refuses to write rather than record a guess,
-which is the only half of R19 a script can hold. **This is a step of the stage,
-not a nicety at the end of it** - a classification with no record is one nothing
-can ever check, and `check-classification-provenance.sh` reports an empty store
-in a repo that classified as a finding rather than a pass. The same file also
-holds R6's one-per-intent rule at the filename, so classifying an intent twice
-is a collision the writer refuses.
-
-**A contradiction is a stop, not a merge.** Quote both requirement ids, state
-the conflict in one sentence, ask which wins, and say plainly nothing was
-merged.
-
-**Write the ruling before you ask.** Run `scripts/request-ruling.sh` at the
-moment you classify contradict - it allocates the `D` and `C` ids, drafts the
-file from `templates/ruling.md` with both sides and both columns of costs, and
-prints the path to name in your message. Asking first and writing after is the
-failure this is for: the session can end before anything is written, the halt
-leaves no trace, and the work stops and stays stopped with nobody holding a
-question. A stop that nobody was asked to answer is indistinguishable from a
-stop that was abandoned. Never supersede silently, and never prefer a requirement for being newer
-— that changes agreed behaviour with nobody approving it, leaving a spec that is
-confidently wrong rather than obviously incomplete.
-
-State the change for review as a **spec delta** in the PR body
-(`templates/spec-delta.md`) — every id that moved, quoted, with its constitution
-check. It is never committed as a file, because a per-change copy of the spec
-drifts the first time someone edits one and not the other. A contradiction a
-human decides is recorded as a **ruling** (`templates/ruling.md`,
-`references/rulings.md`), so the decision outlives the conversation that made it.
-
-`scripts/contradiction-check.py` is a deterministic **second opinion** on
-numeric bounds and mutually exclusive responses (`references/solver.md`). It may
-halt on its own, but **its `CONSISTENT` means *not decided*, never *cleared***:
-wiring it to let the model skip a pair reintroduces the silent miss with a
-solver's authority attached.
-
-Merging is a spec edit: new requirements take the next ids, replaced ones are
-marked superseded with a pointer and never deleted, and each active one keeps a
-row in the acceptance criteria table. **Ids are never reused and never
-renumbered** — plans, tests, findings and PR titles cite them, and a reused id
-silently redirects all of them.
-
-**Requirements are written in EARS** (`references/ears.md`): one per sentence,
-one `shall` each, response observable from outside. Unquantified adjectives are
-arguments deferred to review, and a spec with no `If <trigger>, then …`
-requirements has not considered failure — a gap the tests inherit. Apply policy
-skills **while writing**, not afterwards; name conflicts and both owners. Only
-the **delta** goes to build.
+- Read the intent, then `.claude/productizer/spec.md` in full. **Check it against the
+  constitution first**: `P`-numbered principles bind every requirement,
+  including the ones nobody has written yet. A requirement crossing a principle
+  is **automatically critical**; a principle is never amended inside the change
+  that needed it relaxed (`references/constitution.md`).
+- Classify as exactly one: **Extend** (new ids, in EARS), **Refine** (same id,
+  changed text), **Duplicate** (cite the id and **stop**), **Contradict**
+  (**stop and ask**). **Record the classification the moment you settle on it**,
+  before the delta: `scripts/record-classification.sh`, a step, not a nicety.
+- **A contradiction is a stop, not a merge.** Quote both requirement ids, state
+  the conflict in one sentence, ask which wins, and say plainly nothing was
+  merged. **Write the ruling before you ask** (`scripts/request-ruling.sh`).
+  Never supersede silently, and never prefer a requirement for being newer.
+- `scripts/contradiction-check.py`: **its `CONSISTENT` means *not decided*, never *cleared***.
+- The **spec delta** goes in the PR body, never committed as a file. **Ids are
+  never reused and never renumbered**; a replaced one is marked superseded, never
+  deleted, and each active one keeps an acceptance-criteria row.
+- **Requirements are written in EARS** (`references/ears.md`). Unquantified
+  adjectives are arguments deferred to review. Only the **delta** goes to build.
 
 ### 3 · Build — plan first, knowledge as files
-- **Plan mode is not optional.** Read-only first, then `plan.md`
-  (`templates/plan.md`) naming files, order of work, risks and proof,
-  interrogated until an unfamiliar engineer could build from it. Commit it, then
-  build.
-- **`CLAUDE.md`** holds day-one knowledge under one page: when a mistake happens
-  twice, the correction lands here. **Skills** carry inconsistently enforced
-  policy; **hooks** what must be deterministic.
-- **Parallel work** splits along files; tasks sharing one stay sequential, each
-  in its own worktree.
+Before Stages 3-6, read `references/stage-3-6-build.md` and
+`references/delegation.md`. Build is handed the delta by `scripts/spec-diff.sh`
+(`references/build-diff.md`). **Plan mode is not optional**: read-only first,
+then `plan.md`; commit it, then build.
 
 ### 4 · Test — verify before a human looks
-- One command runs all checks, listed in `CLAUDE.md` with healthy example output
-  and a quantifiable target (`templates/verification-section.md`).
-- Bug fix: **write the failing test first and commit it before the fix.** A hook
-  blocks test-file edits during the fix — the test is not the thing to fix.
+- Bug fix: **write the failing test first and commit it before the fix.**
 - **Never report a task done without running the checks and pasting the
-  output.**
-- Agent config is regression-tested nightly, and every production incident earns
-  a permanent eval. A schedule reports, it does not block — gating a merge needs
-  CI (`templates/agent-evals.yml`).
-- Keep refusal and crash distinguishable in the exit code, or a gate saying no
-  reads like one that fell over and the wrong thing gets fixed.
+  output.** Keep refusal and crash distinguishable in the exit code.
 
 ### 5 · Check — the checks are declared, not built in
-
-Declared in `templates/checks.yaml` and `references/checks.md`. Each names an id, an **argv** command — never a shell
-string, since the file is committed and a string would let anyone landing a
-commit choose what runs on the puller's machine — a `when` trigger of `always`,
-path globs or **requirement tags**, `block` or `advise`, mapped exit codes, and
-a mandatory **coverage** assertion. Tags are what makes scrutiny per-item: an
-auth requirement earns the auth ruleset, a copy edit does not.
-`scripts/run-checks.sh` runs them and fails closed seven ways — bad config,
-missing tool, timeout, unmapped exit code, nothing triggered, and **hollow**: a
-check that exited clean having examined less than it declared. That last one is
-the point. A scanner reporting *Grade A (100/100)* after opening one file of
-forty-eight is not a pass, and without a coverage assertion it is indent-for-
-indent identical to one.
+Declared in `checks.yaml` (`references/checks.md`): an **argv** command, never a
+shell string, and a mandatory **coverage** assertion; `scripts/run-checks.sh`
+fails closed, **hollow** included. Before wiring a script into a gate, read
+its exit codes in `references/scripts.md`.
 
 ### 6 · Deploy — review both ways, gate hard
-- Review policy is written down (`templates/REVIEW.md`) and **dispatched to a
-  subagent with a clean context** (`templates/agent-reviewer.md`): the session
-  that wrote the code never reviews it, because asked to it re-derives its own
-  reasoning and calls that confirmation.
-- **Resolve the diff base before any pass runs**, and state it: a wrong base
-  makes every finding confidently wrong.
+- Review goes to a clean-context subagent: the session that wrote the code
+  never reviews it. **Resolve the diff base before any pass runs**, and state it.
 - **The agent never approves its own code.** Output arrives as a PR through
-  branch protection; there is no route to push main. **Production is a hook, not
-  a convention** (`templates/production-gate.sh`), and in regulated environments
-  the non-negotiables live in `templates/managed-settings.json`, which engineers
-  cannot override.
-- **Secret checks go pre-push, not in CI.** A required check runs after the
-  push, by which time the secret is on the remote and must be rotated: blocking
-  a merge is the whole remedy for a bad base, and none at all for a secret.
+  branch protection; there is no route to push main. **Production is a hook,
+  not a convention.** **Secret checks go pre-push, not in CI.**
+- Call `scripts/stage-advance.sh` before any tracker move. The unattended CI
+  build template (`references/ci-build.md`) is **EXPERIMENTAL — do not adopt it
+  yet (B113, B121).**
 
 ### 7 · Document — regenerate the guide, per release
-The user guide is generated **once per release**, not per intent
-(`templates/user-guide.md`, `references/release.md`). Per-intent docs produce a
-changelog with headings: every entry accurate, the document as a whole
-describing no product. Sections map to **active** requirement ids, so behaviour
-that was superseded or withdrawn leaves the guide without anyone remembering to
-delete it, and the mapping table names the **actives with no section** — an
-omission and full coverage look identical unless the gap is stated.
-**Screenshots come from the released build, in this session, with the version in
-the filename.** A screenshot from the previous release is a lie with a picture
-attached, and it is the one thing in a document that gets published unreviewed.
+Before Stages 7-8, read `references/stage-7-8-release.md`. The guide is
+generated **once per release**, mapped to **active** ids. **Screenshots come from the released build, in this session, with the version in
+the filename.**
 
 ### 8 · Announce — agent-driven, human-gated
-The release post and the release email are drafted from the spec deltas and the
-merged PRs (`templates/release-blog.md`, `templates/release-email.md`). Different
-audiences: the post is for people who do not use the product, the email is for
-people who do and may **have to act**, so its action-needed block comes first or
-is deleted outright. **Every claim traces to a merged PR or a requirement id,
-every number was measured, and the release names what it does not do.** Scrub
-customer names, repo names, internal hostnames and the employer's name — from
-the screenshots too, where a title bar or a sidebar carries more than whoever
-captured it intended.
-
-**The stage runs as an agent stage; the publish waits on a person.** The agent does the
-whole job — writes both artefacts, captures the screenshots from the released
-build, verifies the version is live and installable, runs the pre-publish
-checklist and reports which items it could not verify itself. What it does not do
-is decide. It shows the draft, names what it could not verify, and asks; on an
-explicit yes it runs the command itself. The person owns the judgement, not the
-typing - handing them something to paste makes approval a chore, and a chore
-becomes a rubber stamp. `templates/publish-gate.sh` blocks the commands that reach an
-audience — `gh release create`, `npm publish`, a tag push, a mail API, a site
-deploy — and lets everything the agent needs for its own work through.
-
-Same shape as Stage 6, and for the same reason: every other artefact in this
-lifecycle is a commit somebody can revert. A post is indexed and forwarded
-within minutes, and mail cannot be recalled.
+**Every claim traces to a merged PR or a requirement id, every number was
+measured, and the release names what it does not do.** Scrub customer names,
+repo names, internal hostnames and the employer's name, screenshots included.
+**The publish waits on a person**: show the draft, name what you could not
+verify, ask; on an explicit yes run the command yourself
+(`templates/publish-gate.sh` blocks the rest).
 
 ### 9 · Maintain — close the loop
-Detection is deterministic — no model in that path — tiers in version-controlled
-config (`templates/bands.yaml`): 1σ log, 2σ diagnose read-only, 3σ act via PR or
-pre-approved runbook. A finding is **opened as an issue**, the same door Stage 1
-uses, carrying the anomaly, the evidence, the proposed outcome and the open
-questions, and goes through intake like any other intent, which stops a
-production signal silently contradicting the spec. Dismissals tune the bands;
-when a fix ships, add the eval. A human triages it.
-
-**Drift is the other loop** (`references/drift.md`, `templates/converge.md`):
-the code and the spec disagree, and the answer is not automatically to update
-the spec to match the code — that ratifies whatever shipped. A finding names
-which side is wrong and opens a NEW work item that starts at intent, as a
-Stage 9 finding does. It never moves an existing item back: stage moves are
-forward-only (R55), so re-entering an item at Stage 1 is refused. Where a
-spec lives when a product spans several repos, and what breaks when it is
-split: `references/spec-stores.md`.
+Before Stage 9, read `references/stage-9-maintain.md`. Detection is
+deterministic — no model in that path. A finding is **opened as an issue** and
+goes through intake; a human triages it. On drift, the answer is not
+automatically to update the spec to match the code — that ratifies whatever
+shipped. A finding opens a NEW work item at intent, never moving one back (R55).
 
 ## Non-negotiables
 
@@ -386,81 +192,7 @@ split: `references/spec-stores.md`.
 
 ## Further reading
 
-| Topic | Read |
-|---|---|
-| Governance, measurement, autonomy | `references/stages.md` |
-| Jira/GitHub wiring, untrusted values | `references/integrations.md` |
-| EARS, id lifecycle, classification | `references/ears.md` |
-| Principles above requirements | `references/constitution.md` |
-| How a contradiction is decided | `references/rulings.md` |
-| Observations that are not requirements | `references/learnings.md` |
-| Importing a repo that has no spec | `references/import.md` |
-| Declared checks, coverage, hollow passes | `references/checks.md` |
-| Deterministic contradiction detection | `references/solver.md` |
-| Which control obligations the artifacts evidence | `references/compliance-map.md` |
-| Spec-versus-code drift | `references/drift.md` |
-| Where a spec lives across repos | `references/spec-stores.md` |
-| Resident state at session start | `references/session-start.md` |
-| Delegating 3-5, exit codes | `references/delegation.md` |
-| Views, page skeleton | `references/views.md` |
-| Surfaces, CI vs hook, task install | `references/running-it.md` |
-| Docs and go-to-market, per release | `references/release.md` |
-| Which model runs a stage, and what is enforced | `references/models.md` |
-| Intent classification | `templates/intake.md` |
-| What a classification was made from | `references/classification-provenance.md` |
-| The queue in front of intake | `references/backlog.md` |
-| Onboarding an existing repo, end to end | `references/onboarding.md` |
-| The spec diff handed to Build | `references/build-diff.md` |
-| Building from the spec in CI, unattended (optional template) | `references/ci-build.md` |
-| The normative spec grammar | `references/format-spec.md` |
-| Evidence and judgment, split | `references/signals.md` |
-| Requirement-to-commit traceability | `references/traceability.md` |
-| Reviewing the whole spec against itself (advisory) | `references/spec-review.md` |
-| Does the process help? measuring it | `references/measurement.md` |
-| Corrections graduated into guidance | `references/graduation.md` |
-
-Scripts. **They disagree on exit codes on purpose only where noted** — check the
-contract before wiring one into a gate.
-
-| Script | Does | Exit |
-|---|---|---|
-| `scripts/detect-context.sh` | probes the repo, emits JSON | 0 |
-| `scripts/stage-status.sh` | every stage and where it stands | 0 |
-| `scripts/build-view.sh` | regenerates the published view from the files | 0 |
-| `scripts/scaffold.sh` | copies a template, strips its examples | 0 · 1 refused · 2 usage |
-| `scripts/import-survey.sh` | read-only survey for Stage 0c | 0 |
-| `scripts/run-checks.sh` | runs the declared checks; without `policy.allow_repo_local_tools` it applies the strict rule and recognises no interpreter: it refuses a check whose program resolves inside the repository, any of whose literal arguments (a whole token, an `--opt=` value or a glued short-option value) names a path inside it - the root `.` aside, and a value spelled as a path under the root counting whether or not it exists, bar a semgrep `--config` registry id no tree holds a path for - or whose `{file}`/`{files}` is handed to a program not on the plugin's data-only list; and it judges each command again just before it runs, refusing that check if an earlier one wrote what it names | 0 pass · 3 refused · 2 usage · 1 crash |
-| `scripts/argv-classify.py` | the strict reading of a check's argv, loaded by path by `run-checks.sh` and `stage-advance.sh`: every value a literal argument can name, a dotted name's module paths, and the data-only list - shellcheck, semgrep and grep, each voided by named code-running options, and semgrep's registry ids - which it holds and never reads from the config; `--tokens ARG...`, `--data-only ARG...`, `--selftest` | 0 · 1 self-test failed · 2 usage |
-| `scripts/contradiction-check.py` | second opinion on one pair | 0 no halt · 1 contradiction · 2 usage · 4 FILE mode read no EARS line (the default; `--allow-empty` accepts zero) |
-| `scripts/request-ruling.sh` | raises the ruling a contradiction needs | 0 wrote · 2 usage · 3 unreadable · 4 refused |
-| `scripts/pending-rulings.sh` | which decisions are waiting on a person | 0 none · 1 pending · 2 unknown |
-| `scripts/check-ruling-requested.sh` | every halt actually asked | 0 · 1 findings · 2 could not run |
-| `scripts/record-classification.sh` | the spec commit, hash and ids one classification was made against, written under `--root` whatever the working directory; `--selftest` | 0 wrote · 1 already classified · 2 no hash, so no record, or a spec outside the root |
-| `scripts/check-classification-provenance.sh` | every classification recorded what it read | 0 · 1 findings · 2 could not run, incl. an empty store nothing corroborates |
-| `scripts/check-hygiene.sh` | generic leak rules, plus a private list read at runtime | 0 · 1 findings · 2 could not run |
-| `scripts/check-frontmatter.py` | agent templates' frontmatter does what it says; a reviewer holds no tool that writes a file | 0 · 1 findings · 2 usage · 3 could not run |
-| `scripts/learnings.sh` | observations that are not obligations, cited to `R` ids | 0 · 1 findings · 2 usage · 3 unreadable · 4 cannot determine · 5 never created · 6 refused |
-| `scripts/run-runner.sh` | validates and executes a runner definition | 0 · 1 reported failure · 2 usage · 3 unreadable · 4 refused |
-| `scripts/init.sh` | all of Stage 0 in one command | 0 · 2 usage · 3 prerequisite · 4 refused · 5 partial |
-| `scripts/spec-diff.sh` | the spec **delta** for Build, not just the spec | 0 diff · 2 usage · 3 not a repo · 4 unchanged · 5 no baseline · 6 base unresolved · 7 over cap |
-| `scripts/validate-spec.py` | EARS and id permanence, executable | 0 · 1 errors · 2 usage · 3 strict warnings · 4 not measured |
-| `scripts/drift-reverse.sh` | code with no requirement behind it | 0 measured · 1 crash · 2 usage · 4 cannot determine |
-| `scripts/signals.sh` | typed evidence records, and their hash | 0 · 1 crash · 2 usage |
-| `scripts/score.sh` | judgment over signals, keyed to their hash | 0 scored · 1 crash · 2 usage · 3 refused |
-| `scripts/req-trailer.sh` | `Productizer-Req:` provenance, orphans, coverage | 0 · 2 no spec · 3 findings · 4 cannot determine |
-| `scripts/check-citations.sh` | a citation this change ADDS that resolves to no requirement, and a new citation of a superseded one; advisory | 0 · 1 findings · 2 refused |
-| `scripts/check-sigpipe.sh` | in a file under `set -o pipefail`, an early reader (`head`, `grep -q`/`-m`/`-l`) downstream of a pipe, whose SIGPIPE turns a match into 141; hand it a file or a here-string instead | 0 · 1 findings · 2 unreadable, or an exemption with no reason |
-| `scripts/stage-advance.sh` | may this work item's stage move, on this change's evidence, judged on the paths git applies; call it before any tracker move. A non-ASCII path that reads as a refused one is refused in every mode. An attended move to design may also modify the requirement index and add classification records (B112). `--unattended` (the CI template passes it) also refuses any change to the checks result, any path that is not ASCII or has a component beginning with a dot, bar the backlog, the plan and the spec on their exact paths, a classification record or stage snapshot added, and any file a check declared in `checks.yaml` at the base runs or names as an operand or an option's value. `--print-protected` prints that set, read before the AI; `--protected FILE` hands it back so the decider reads no YAML | 0 allowed · 1 produced nothing · 2 usage · 3 forbidden path · 4 cannot determine · 5 not forward |
-| `scripts/build-dispatch.sh` | **EXPERIMENTAL — the template it serves has never run on a real GitHub runner; its main protection, that the AI gets no shell, was measured only with a local CLI; do not adopt it yet (B113, B121).** Both ends of an unattended run in the copyable CI template: `prepare` before the model (and the PR body, `--body-out`, rendered with no write token), `agent-args` checking the prepared flags against fixed shapes before the agent reads them, `stash-git` and `capture` around it (the agent gets no shell and no git it could configure), `deliver` a draft PR after it, running no repository code. `prepare` also writes the protected list, the files `checks.yaml` runs, and `deliver` takes it as `--protected` and refuses without one for its HEAD | 0 · 2 usage · 3 repo not readable as needed, or no `evals/solver-probe.py` for the body · 4 spec unchanged · 5 no plan committed · 6 refused by stage-advance.sh · 7 delivery failed · 8 capture refused (.git in the tree) |
-| `scripts/check-ci-template.py` | **EXPERIMENTAL template (never run on a real GitHub runner; do not adopt it yet - B113, B121).** The CI template's sixteen static safety properties, on the YAML itself (including that the agent step denies Bash, that a post-agent shell pins `BASH_ENV` empty, that the write job runs no repository code, installs nothing and reads no YAML, that deliver is handed the protected list the agent's job never downloads, that the runtime guards are in place and PRODUCTIZER_SHA is a quoted 40-hex pin) | 0 · 1 findings · 2 could not run |
-| `scripts/check-release-workflow.py` | this repository's release jobs, statically: the job holding a write token checks out nothing and runs no repository code, release-prep is read-only, and the draft release gets a template copy pinned to the tag's commit; run with `python3`, it needs PyYAML; `--selftest` | 0 · 1 findings · 2 could not run |
-| `scripts/check-governance-weakening.sh` | a loosened check declaration, a workflow job's own permissions raised, and workflow steps keyed by id, else by name and action with its ref ignored, never by position; advisory | 0 · 1 findings · 2 could not run |
-| `scripts/retrieval-budget.sh` | retrieval regression, deterministic | 0 in band · 4 out of band · 5 no baseline |
-| `scripts/ab-harness.sh` | same model, with the process and without | 0 · 2 usage · 3 no arms · 5 no runs · 6 arm incomplete · 7 did not complete |
-| `scripts/stage-snapshot.sh` | what a stage produced before a human touched it | 0 · 1 exists · 2 usage · 3 no dir · 5 no snapshot · 6 artifact gone · 7 no delta · 8 produced nothing |
-| `scripts/graduate.sh` | repeated corrections into durable guidance; a relative `--work` or `--transcripts` is read under the root; `--selftest` | 0 · 2 usage · 3 no source · 4 unparseable · 5 measured zero · 6 below threshold · 7 apply refused · 8 undo refused |
-| `scripts/usage-audit.sh` | our own scripts' error rate and contract | 0 |
-| `scripts/build-release-notes.sh` | Stage 8 evidence, and what was unavailable | 0 · 2 usage · 3 not a repo |
+Any other topic: `references/further-reading.md`. Scripts: `references/scripts.md`.
 
 Templates, written into a repo at scaffold, installed as config, or pasted into
 a PR. Repo copies in `.claude/productizer/templates/` win over these.

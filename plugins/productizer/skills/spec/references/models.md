@@ -45,6 +45,86 @@ the job — name the actual model id if you want to pin one.
 `templates/agent-spec-reviewer.md`. Enforced only when that agent is installed
 and dispatched as itself; the skill says which happened.
 
+## The advisor
+
+`models.advisor` is optional and is not a stage: it is a string naming a model,
+or `null`. Claude Code's advisor tool (experimental,
+https://code.claude.com/docs/en/advisor) lets the running model consult a
+second, usually stronger model. Per that page, the advisor "receives the full
+conversation, including every tool call and result", and the model "tends to
+consult before committing to an approach, when an error keeps recurring, and
+before declaring a task done, but the timing is model-driven rather than
+rule-based"; "There is no setting to cap or force advisor calls."
+
+**Where Productizer passes it.** Only the unattended CI build
+(`templates/build-from-spec.yml`, `references/ci-build.md`). `build-dispatch.sh
+prepare` adds one line `--advisor <model>` after `--model` and `--effort`, and
+`agent-args` re-checks it. Absent or `null` adds nothing - the flags are
+byte-identical to a config without the key. The value must be a JSON string
+shaped like a model name, held to the same shape as `models.build.model`: a
+letter or digit first, then only letters, digits and `. _ : @ -`. An alias
+(`opus`, `sonnet`, `fable`) or a full id (`claude-opus-5-5`) passes. Anything
+else - empty, a number or object, `inherit`, `cheap`, `none`, a space, a
+newline, a leading `-` - refuses the run (exit 3) before any model is called;
+it is never passed through, because it lands in the agent's argv. Whether the
+pairing is allowed is checked by Claude Code at launch, not by Productizer.
+
+**Advice, never a gate.** Nothing guarantees the advisor is called, and the
+docs say an advisor ranked below the main model is not attached, and a pairing
+the API refuses is dropped "so you see no error and get no advisor calls". No
+Productizer check, stage transition or review may rely on an advisor having
+run. Setting `models.advisor` changes what the build agent may ask, not what
+the lifecycle verifies.
+
+**What it sees and costs.** Every advisor call sends the whole transcript -
+repository files the agent read, the spec diff, every tool result - to the
+advisor model, and its tokens bill at the advisor model's rates on top of the
+main model's; the advisor's read is not prompt-cached. Choose it as you would
+a model you are willing to show the repository to and pay for per call.
+
+**Limits (from the docs, not measured here).** Anthropic API and subscription
+accounts only - not Amazon Bedrock, Claude Platform on AWS, Google Cloud's
+Agent Platform or Microsoft Foundry; through a gateway set by
+`ANTHROPIC_BASE_URL` it depends on the gateway forwarding the request intact.
+It stays off when feature-flag fetching is off (for example `DISABLE_TELEMETRY`
+set). `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` disables it; the flag is then
+accepted with no effect. `claude --help` does not list `--advisor`.
+
+**Accepted pairings**, copied from the docs on 2026-10-25 (an advisor must rank
+at or above the main model; rows run from the lowest-ranked main model):
+
+| Main model | Accepted advisors |
+| - | - |
+| Haiku 4.5 | Fable, Opus, Sonnet, Haiku 5.5 |
+| Sonnet 4.6 | Fable, Opus, Sonnet, Haiku 5.5 |
+| Opus 4.6 | Fable, Opus, Sonnet 5 or later, Haiku 5.5 |
+| Sonnet 5 or Haiku 5.5 | Fable, Opus 4.7 or later, Sonnet 5 or later, Haiku 5.5 |
+| Opus 4.7 or Opus 4.8 | Fable, Opus 4.7 or later, Sonnet 5.5 |
+| Sonnet 5.5 | Fable, Opus 5 or later, Sonnet 5.5 |
+| Opus 5 or Opus 5.5 | Fable, Opus 5 or later |
+| Fable 5 | Fable 5.1 or Fable 5 |
+| Fable 5.1 | Fable 5.1 |
+
+The page adds version floors (for example Haiku 5.5 as main or advisor needs
+Claude Code v2.1.293 or later) and that Haiku 4.5 "can call the advisor but
+can't act as one". The table changes with releases; read the page before
+choosing.
+
+**Measured here** (2026-10-25, local `claude -p` 2.1.295, not in CI):
+`claude --advisor notamodel -p "say hi"` printed `Error: The model "notamodel"
+cannot be used as an advisor.` and exited 1; `claude -p --advisor opus "Reply
+with the single word ok."` with the default model printed `ok` and exited 0.
+That proves the flag is accepted headless, not that an advisor was attached or
+called. Nothing has been run inside the CI action.
+
+**In an attended session** Productizer passes nothing: `models.advisor` is not
+read there. Use `/advisor <model>` (`/advisor off` to stop; it also works with
+`-p` from v2.1.260) or launch with `claude --advisor <model>`. `/advisor` saves
+the choice to `advisorModel` in `~/.claude/settings.json`. The settings
+reference lists `advisorModel` for every settings file, so a committed project
+`.claude/settings.json` could set it too - which the CI build's `repo-settings`
+option would hand the agent; not measured here.
+
 ## Stage 5 takes no model, deliberately
 
 `checks: {model: none}` is not an omission. Stage 5 runs the scripts you

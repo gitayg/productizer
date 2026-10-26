@@ -180,6 +180,24 @@ config.json has no plan key, and `plan.md` is Stage 3 work
 action's default model runs. `cheap` is refused, because no model is named
 `cheap` in CI.
 
+**The advisor (B161, optional).** `models.advisor` in the same file names a
+second model the build agent may consult, passed to Claude Code as one line
+`--advisor <model>` after `--model` and `--effort`. Absent or `null` passes
+nothing, so the flags are byte-identical to a config without the key. Any
+other value - an empty string, a number or object, `inherit`, `cheap` or
+`none`, or a string with anything outside letters, digits and `. _ : @ -` or
+starting with something other than a letter or digit - is refused by
+`prepare` (exit 3) before any model is called. Never passed through: the
+value lands in the agent's argv, so a space, a newline or a leading `-` that
+could add a second flag cannot reach it, and `agent-args` holds the line to the
+same shape again. It is advice, never a gate: the agent decides whether and
+when to call the advisor, nothing can force a call, and no Productizer check
+relies on one having happened. The advisor is sent the whole transcript -
+repository content, the spec diff, every tool result - and is billed at its own
+model's rates. Limits, pairings and the docs are in `references/models.md`,
+"The advisor". Not measured inside the action: that the CLI it runs accepts
+`--advisor`, or that the advisor is attached or called there.
+
 ### The base the spec is diffed against
 
 `spec_base` when it is given. Otherwise the base is the first parent of the
@@ -522,7 +540,8 @@ build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
 `generate` job before the agent step. It re-reads `.productizer-run/claude-args`
 (prepare's output, fetched as an artifact) and refuses it - exit 3 - unless
 every line is one of the fixed shapes prepare writes (`--model <id>`,
-`--effort <level>`, `--permission-mode acceptEdits`, `--disallowedTools Bash`),
+`--effort <level>`, `--advisor <id>`, `--permission-mode acceptEdits`,
+`--disallowedTools Bash`),
 no flag repeats, and the Bash deny is present. Only then does it append the
 lines it checked, not the file as it stands, to `$GITHUB_OUTPUT` as
 `claude_args` under a random heredoc delimiter. Until B118 this was shell inside
@@ -777,6 +796,19 @@ your copy after every edit.
 - **A moved default branch stops delivery.** If the default branch gained a
   commit after the run was dispatched, `deliver` exits 3 rather than push a
   change made against an older tree. Dispatch the run again.
+- **An advisor set in `models.advisor` is unmeasured in CI.** Measured on
+  2026-10-25 against local `claude -p` 2.1.295 only: `--advisor opus` with the
+  default model exits 0 and answers, and `--advisor notamodel` exits 1 with
+  `Error: The model "notamodel" cannot be used as an advisor.` Whether the
+  CLI inside the pinned action accepts the flag, attaches the advisor or ever
+  calls it has not been run (B113/B121). The docs say a pairing the API
+  refuses is dropped silently and an advisor ranked below the main model is
+  not attached, so a set `models.advisor` is not evidence an advisor ran.
+  Separately, the settings reference lists `advisorModel` for every settings
+  file, project `.claude/settings.json` included; the `repo-settings` option
+  hands the agent the committed settings, so a committed `advisorModel` would
+  reach the agent without `models.advisor` (not measured; `--advisor` takes
+  precedence over the key for that session, per the same page).
 - **It has never run end to end here.** This repository is public, holds no
   model secrets, and a run costs model spend. What is measured is the
   template's static properties (`check-ci-template.py`, 16 of 16, actionlint

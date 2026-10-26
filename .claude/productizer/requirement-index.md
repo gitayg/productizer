@@ -175,4 +175,8 @@ marker, because a table left there would be one nothing writes or checks.
 | R147 | unwanted | active | `stage-advance-guard` |
 | R148 | unwanted | active | `checks-stage-runner` |
 | R149 | ubiquitous | active | `checks-stage-runner` |
+| R150 | event | active | `build-dispatch` |
+| R151 | event | active | `build-dispatch` |
+| R152 | unwanted | active | `build-dispatch` |
+| R153 | ubiquitous | active | `skill-body-budget` |
 <!-- productizer:requirement-index:end -->
