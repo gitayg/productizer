@@ -477,10 +477,10 @@ value (a bare word too, since 1.9, B158), and the module paths of a
 dotted name, read by `argv-classify.py`, which `run-checks.sh` shares. A
 placeholder handed to a program off the plugin's data-only list is exit 4
 under `--unattended` (B156); wrap the command in a repository script.
-What is still admitted is the TRANSITIVE file: a
-file a check script calls or sources that `checks.yaml` does not name itself,
-such as a `.py` beside the `.sh` it runs, which an unattended build may edit to
-neuter the check that runs it. A tool that finds and runs repository files by
+Since 1.10 (v4.73.2, B147) every script a protected
+script names by its path is protected too, to any depth (see 37). What is
+still admitted is a script reached through a name built at run time, and a
+data file a check script reads. A tool that finds and runs repository files by
 itself, with no argument naming them, is gated by neither script: test
 discovery, `.semgrepignore`, `.npmrc`, `conftest.py`, a git alias. With the
 opt-in off `run-checks.sh` does not refuse `.` (the root, by ruling, B154), a
@@ -501,8 +501,8 @@ judged: a file written between that judgement and the exec, or by a process an
 earlier check left running. The data-only list (shellcheck, semgrep, grep,
 each voided by named options) rests on the tools' `--help`, read 2026-10-13;
 an option a later release adds is not on it. A `run-checks.sh --config` other than the
-default is not read, and PyYAML, installed in `prepare` to read the set, is
-pinned by version, not by hash. Attended runs apply the list alone. The plugin manifests under `.claude-plugin/` declare hooks
+default is not read. PyYAML, installed in `prepare` to read the set, is
+pinned by hash since v4.73.2 (B148, see 38). Attended runs apply the list alone. The plugin manifests under `.claude-plugin/` declare hooks
 and MCP servers and are refused unattended by their dot; attended they are not
 on the list, because adding them would refuse 22 of this repository's own
 version bumps, and that needs a ruling.
@@ -598,9 +598,9 @@ stays refused.
 when it is `https://github.com/<owner>/<name>` or `git@github.com:<owner>/<name>`
 and both names are GitHub's own characters (letters, digits, `.`, `-`, `_`);
 any other remote - another host, a mirror, a quote in the name - gets no link
-rather than an escaped one (B139). A file path inside such a link is not
-percent-encoded, so a tracked path holding `#`, `?` or `%` links to the wrong
-place (backlog).
+rather than an escaped one (B139). Since 1.2 (v4.73.2, B146) a file path inside
+such a link is percent-encoded, every character but letters, digits, `/` and
+`_.-~`; that GitHub serves an encoded path as that file was not measured.
 
 ### 30 · `CLAUDE_TRANSCRIPTS` is not resolved under the root
 
@@ -686,3 +686,53 @@ file - the check read `refused`, which blocked the run, so nothing passed
 unexamined; measured with shellcheck and semgrep, not with every data-only
 tool. No other path is rewritten, and a tool that reads `./` as something other
 than the current directory is not covered.
+
+## Added in v4.73.2
+
+### 37 · Under `--unattended`, a script is followed only through a name written whole
+
+Since v4.73.2 (B147) `stage-advance.sh` 1.10 protects every script a protected
+script names by its path, read from the base tree, resolved against that
+script's directory and the root, to any depth. A script is a file with an
+executable mode or a script extension. It reads names, not code: a script
+reached through a name built at run time (`"$dir/$name"`, a glob, a variable),
+or spelled with a character outside letters, digits and `_.@+/-`, is not
+followed, and neither is a data file a script reads (a config, a rules file),
+which can steer a check as surely. A script named only in a comment or a string
+it never runs is protected anyway. On this repository the protected list grew
+from 89 paths to 114.
+
+### 38 · PyYAML's hashes were read from PyPI, not from a wheel
+
+Since v4.73.2 (B148) the `checks` and `release-prep` jobs and the CI build
+template's `prepare` job install PyYAML 6.0.2 with `--require-hashes` and
+`--only-binary :all:`. The two hashes are PyPI's, for the CPython 3.12
+manylinux wheels, x86_64 and aarch64, read from PyPI's JSON API on 2026-10-28;
+no wheel was downloaded to check them and no runner has installed with them yet,
+so the next CI run is the first proof. A runner on another architecture or
+another Python would find no wheel whose hash is named, and pip's hash-checking
+mode should then fail the install rather than fall back; that was not run. `yaml-hash-pinned` reads the flags on the `run:` line, not the
+requirements line it writes. semgrep, installed in its own virtual environment,
+is still pinned by version alone, and its dependencies not at all.
+
+### 39 · A kept step's changed body is undecided, never a weakening
+
+Since v4.73.2 (B149) `governance-weakening` compares a job's `needs:` and `if:`
+and the `run:`, `with:`, `env:` and `shell:` of a step whose key did not move.
+A `needs:` that only lost a job, and an `if:` added to a job, are weakenings; a
+rewritten body or condition is UNDECIDED, because whether the new one asserts
+less is not decided here, so a routine edit to a step's `run:` now reads as an
+advisory finding. A job's `runs-on`, `timeout-minutes`, `strategy` and
+`container` are still not compared.
+
+### 40 · Probing self-tests side by side shortens the run, not one probe
+
+Since v4.73.2 (B160) `selftest-coverage` probes four self-tests at once, each
+under its own 180s. Measured here with that limit raised to 900s: one at a time
+at v4.73.1, 63 probes took 1271s at load average 55 to 69; four at a time, 271s
+at 69 to 115, the slowest probe 165s. It does not shorten any one probe: on a
+machine slow enough that a single self-test passes 180s - `stage-advance.sh`
+took 185s one at a time here, and three self-tests did under amd64 emulation -
+the probe still reads `?` and the check refuses. That no two self-tests write
+one shared path is read off their source, not enforced. Its duration on an idle
+machine was not measured.

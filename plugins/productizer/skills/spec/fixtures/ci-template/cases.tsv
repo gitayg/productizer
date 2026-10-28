@@ -41,3 +41,5 @@ write-job-pip-install.yml	1	a job holding a write token installs a package or re
 write-job-setup-python.yml	1	a job holding a write token sets up Python
 agent-downloads-body.yml	1	the agent job downloads productizer-body
 deliver-args-no-protected.yml	1	calls build-dispatch.sh deliver without --protected
+yaml-hashed.yml	0	every assertion held
+yaml-unhashed.yml	1	yaml-hash-pinned jobs.prepare.steps[2]: installs PyYAML without --require-hashes and --only-binary :all:

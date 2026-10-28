@@ -156,6 +156,20 @@
 # its subtree, and matched on the folded key, so a case variant is refused
 # too. A bare tool name (`shellcheck`) is protected as a root file of that
 # name, which costs nothing and holds should PATH ever reach the work tree.
+# Then, since 1.10 (B147), every SCRIPT a protected script names, to any
+# depth: 1.9 protected the `.sh` a check runs and not the `.py` beside it
+# that the `.sh` runs, so an unattended build could neuter the check through
+# its helper. A script is a base-tree file with an executable mode or a
+# script extension (sh, bash, zsh, ksh, py, pyw, js, mjs, cjs, ts, mts, cts,
+# rb, pl, pm, php, lua, awk, sed, jq, tcl, ps1, r). Each protected script -
+# a protected file, or one under a protected directory, that is a script -
+# is read from the base tree, and every run of path characters in it, with
+# each of its suffixes after a `/`, is resolved against the script's own
+# directory and against the root; a script that names resolves to is
+# protected and read in turn. A script named in a comment is protected as
+# well: refusing more is the safe direction. A file that is not a script
+# (data, docs) is never added this way, and a name built at run time from
+# pieces (`"$dir/$name"`, a glob) is not seen.
 # No checks.yaml at the base: nothing extra is protected. One that cannot be
 # read - no PyYAML, not YAML, `checks` not a list, an argv that is not a list
 # of strings, a placeholder as the program or handed to a program neither on
@@ -262,7 +276,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.9"
+VERSION="stage-advance 1.10"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -1010,6 +1024,41 @@ YAML
     "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-lint.patch"
   cp "$WORK/cy-checks.yaml" "$R/.claude/productizer/checks.yaml"
 
+  # --- B147. UNATTENDED, a script a protected script names. 1.9 protected
+  # tools/run.sh, which checks.yaml runs, and allowed a change to the helper
+  # it runs beside it and to the script that helper runs in turn, each exit 0.
+  # A script nothing names, and a data file a protected script names, stay
+  # allowed.
+  newrepo cyt; R="$WORK/cyt"
+  mkdir -p "$R/tools/lib" "$R/docs"
+  printf '#!/usr/bin/env bash\n# notes: docs/notes.md\nexec python3 "$(dirname "$0")/helper.py"\n' > "$R/tools/run.sh"
+  printf 'import subprocess\nsubprocess.run(["bash", "lib/deep.sh"], check=True)\n' > "$R/tools/helper.py"
+  printf 'exit 0\n' > "$R/tools/lib/deep.sh"; printf 'pass\n' > "$R/tools/other.py"; printf 'notes\n' > "$R/docs/notes.md"
+  printf 'version: 1\nchecks:\n  - id: run\n    command: [./tools/run.sh]\n' > "$R/.claude/productizer/checks.yaml"
+  commit "$R"
+  cymod tools/helper.py helper-named; cymod tools/lib/deep.sh helper-deep; cymod tools/other.py helper-unnamed
+  cymod docs/notes.md helper-data
+  drive unattended-checks-helper-named 3 "tools/helper.py $CY a script tools/run.sh names by its path)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-helper-named.patch"
+  drive unattended-checks-helper-transitive 3 "tools/lib/deep.sh $CY a script tools/helper.py names by its path)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-helper-deep.patch"
+  drive attended-checks-helper-allowed 0 "tools/helper.py" \
+    "$R" --from build --to test --mode build --patch "$WORK/cy-helper-named.patch"
+  drive unattended-checks-helper-unnamed-allowed 0 "tools/other.py" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-helper-unnamed.patch"
+  drive unattended-checks-named-data-allowed 0 "docs/notes.md" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-helper-data.patch"
+  drive print-protected-transitive 0 "3 path(s) that .claude/productizer/checks.yaml at HEAD runs" \
+    "$R" --print-protected --base HEAD
+  CASES=$((CASES + 1)); CODES="$CODES 0"
+  if printf 'tools/helper.py\ntools/lib/deep.sh\ntools/run.sh\n' | cmp -s - "$WORK/print-protected-transitive.out"; then
+    HELD=$((HELD + 1)); printf '  ok    %-44s exit 0\n' "print-protected-transitive-set"
+  else
+    printf '  FAIL  %-44s the printed list is not the run script and the two it reaches\n' "print-protected-transitive-set"
+    sed 's/^/          stdout: /' "$WORK/print-protected-transitive.out"
+  fi
+  R="$WORK/cy"
+
   # --- THE PROTECTED LIST. --print-protected prints the reading above, one
   # path per line; --protected hands it back, so the decider needs neither
   # checks.yaml nor PyYAML. A python3 that cannot reach PyYAML (no site
@@ -1242,7 +1291,7 @@ YAML
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); a file a tool runs that no argument names (a test runner discovering tests, a git alias, a config the tool finds by itself), which the strict reading cannot see; a file a change adds under the commit id `{base}` becomes, which this reading cannot know; a value inside a comma-separated list (`--x=a,b`), read as one value; a name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script, a file a check script calls or sources that checks.yaml does not name itself, such as a .py beside the .sh it runs); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); that a --protected list is the one --print-protected wrote for this base (the list is validated as data, not traced to its source; build-dispatch.sh checks the HEAD it was written for); a checks.yaml at the base that is not a regular file, or an argv in it that is not a list of strings; an absolute program path inside the repository; a checks.yaml other than .claude/productizer/checks.yaml (run-checks.sh --config); a check whose program is resolved through a PATH that reaches the work tree; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); a file a tool runs that no argument names (a test runner discovering tests, a git alias, a config the tool finds by itself), which the strict reading cannot see; a script a protected script reaches through a name built at run time ("$dir/$name", a glob) or spelled with a character outside letters, digits and _.@+/-, and a data file it reads (a config, a rules file), which the B147 reading does not follow; a file a change adds under the commit id `{base}` becomes, which this reading cannot know; a value inside a comma-separated list (`--x=a,b`), read as one value; a name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); that a --protected list is the one --print-protected wrote for this base (the list is validated as data, not traced to its source; build-dispatch.sh checks the HEAD it was written for); a checks.yaml at the base that is not a regular file, or an argv in it that is not a list of strings; an absolute program path inside the repository; a checks.yaml other than .claude/productizer/checks.yaml (run-checks.sh --config); a check whose program is resolved through a PATH that reaches the work tree; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -1319,6 +1368,16 @@ CHECKS_YAML=".claude/productizer/checks.yaml"
 CHECKS_RUN=""; CHECKS_YAML_FOUND=0
 PROTECTED_MAX_BYTES=262144
 BG() { if [ -n "$PATCH" ]; then SG "$@"; else git -C "$ROOT" "$@"; fi; }
+# BGENV CMD...: CMD with the environment BG's git reads objects through, so a
+# git it starts reads the base tree a patch was applied against (B147).
+BGENV() {
+  if [ -n "$PATCH" ]; then
+    GIT_INDEX_FILE="$TMP/index" GIT_OBJECT_DIRECTORY="$TMP/objects" \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES="$OBJ" "$@"
+  else
+    "$@"
+  fi
+}
 # read_checks_run <tree-ish>
 read_checks_run() {
   local entry cy_mode cy_oid
@@ -1337,8 +1396,11 @@ read_checks_run() {
   # Every path in the base tree: an operand that names one is protected.
   BG ls-tree -r -z --name-only "$1" > "$TMP/base-tree" \
     || finish 4 "cannot determine which files $CHECKS_YAML runs: git ls-tree could not list the base tree"
-  CHECKS_RUN="$(python3 -I - "$TMP/checks-base.yaml" "$ROOT" "$TMP/base-tree" "$SCRIPT_DIR/argv-classify.py" 2> "$TMP/checks-run.err" <<'PY'
-import os, posixpath, re, site, sys, types, unicodedata
+  # With modes and object ids: a protected script is read by its id (B147).
+  BG ls-tree -r -z "$1" > "$TMP/base-tree-full" \
+    || finish 4 "cannot determine which files $CHECKS_YAML runs: git ls-tree could not list the base tree"
+  CHECKS_RUN="$(BGENV python3 -I - "$TMP/checks-base.yaml" "$ROOT" "$TMP/base-tree" "$SCRIPT_DIR/argv-classify.py" "$TMP/base-tree-full" 2> "$TMP/checks-run.err" <<'PY'
+import os, posixpath, re, site, subprocess, sys, types, unicodedata
 # -I keeps the work tree and PYTHONPATH off sys.path, so a yaml.py the change
 # planted is never imported. It also hides the user site, where PyYAML may be
 # installed: that one directory is appended LAST, as a plain path, so the
@@ -1351,7 +1413,7 @@ try:
     import yaml
 except ImportError:
     fail("python3 has no yaml module (PyYAML), so the checks it declares cannot be read")
-path, root, tree_file, classifier = sys.argv[1:5]
+path, root, tree_file, classifier, full_file = sys.argv[1:6]
 # THE ARGV READING IS SHARED with run-checks.sh, which refuses what this
 # protects: argv-classify.py beside this script, loaded by its path and
 # compiled from its source, so no bytecode cache beside it is ever read.
@@ -1472,6 +1534,61 @@ for i, chk in enumerate(checks):
                 protect(x, "a requires entry of check %s" % cid)
             continue
         argv_walk(v, "%s of check %s" % (field, cid))
+# THE SCRIPTS A PROTECTED SCRIPT NAMES (B147), to any depth. Read by object
+# id from the base tree with git cat-file, so neither the work tree nor the
+# changed tree is read.
+SCRIPT_EXT = {".sh", ".bash", ".zsh", ".ksh", ".py", ".pyw", ".js", ".mjs", ".cjs", ".ts",
+              ".mts", ".cts", ".rb", ".pl", ".pm", ".php", ".lua", ".awk", ".sed", ".jq",
+              ".tcl", ".ps1", ".r"}
+try:
+    with open(full_file, "rb") as fh:
+        listing = [b.decode("utf-8", "surrogateescape") for b in fh.read().split(b"\0") if b]
+except OSError as e:
+    fail("the base tree listing cannot be read (%s)" % e)
+SCRIPTS = {}
+for entry in listing:
+    meta, _, rel = entry.partition("\t")
+    mode, kind, oid = (meta.split(" ") + ["", "", ""])[:3]
+    if kind == "blob" and mode in ("100644", "100755") and (
+            mode == "100755" or posixpath.splitext(rel)[1].lower() in SCRIPT_EXT):
+        SCRIPTS[key(rel)] = (rel, oid)
+def protected_by(k):
+    return any(k == p or k.startswith(p + "/") for p in out)
+NAME_RUN = re.compile(rb"[A-Za-z0-9_.@+/-]+")
+queue = [k for k in SCRIPTS if protected_by(k)]
+read = set()
+while queue:
+    batch = [k for k in dict.fromkeys(queue) if k not in read]
+    queue = []
+    if not batch:
+        break
+    read.update(batch)
+    try:
+        cat = subprocess.run(["git", "-C", root, "cat-file", "--batch"],
+                             input=b"".join(SCRIPTS[k][1].encode() + b"\n" for k in batch),
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as e:
+        fail("git cannot read a protected script from the base tree (%s)" % type(e).__name__)
+    pos = 0
+    for k in batch:
+        head_end = cat.index(b"\n", pos)
+        size = int(cat[pos:head_end].split(b" ")[2])
+        body = cat[head_end + 1:head_end + 1 + size]
+        pos = head_end + 2 + size
+        rel = SCRIPTS[k][0]
+        here = posixpath.dirname(rel)
+        names = set()
+        for run in set(NAME_RUN.findall(body)):
+            run = run.decode("ascii")
+            names.add(run)
+            names.update(run[i + 1:] for i, c in enumerate(run) if c == "/")
+        for name in names:
+            for base_dir in (here, ""):
+                cand = posixpath.normpath(posixpath.join(base_dir, name)) if name else ""
+                ck = key(cand)
+                if ck in SCRIPTS and ck not in out:
+                    protect(SCRIPTS[ck][0], "a script %s names by its path" % rel)
+                    queue.append(ck)
 w = sys.stdout.buffer
 for k in sorted(out):
     rel, why = out[k]

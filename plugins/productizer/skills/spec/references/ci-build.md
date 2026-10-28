@@ -367,8 +367,8 @@ Reading that set means parsing YAML, and the job holding the write token must
 neither parse YAML nor install a package to do it: a package installed there is
 code fetched into the one job that can push, and a YAML reader there is one
 more parser beside the patch it is judging. So `prepare` - no write token,
-before the agent - installs PyYAML and runs `stage-advance.sh --print-protected
---base HEAD`, which prints the path of every file `checks.yaml` runs, one per
+before the agent - installs PyYAML, pinned by hash, and runs
+`stage-advance.sh --print-protected --base HEAD`, which prints the path of every file `checks.yaml` runs, one per
 line, from the same reader the decider uses. It writes them to
 `protected.txt`, with `protected-head` naming the HEAD it read, beside the body
 in the `productizer-body` artifact, which the agent's job never downloads. A
@@ -778,14 +778,19 @@ your copy after every edit.
   outside `artifacts.path` or changed only the backlog, so a run that rewrote
   only `plan.md` no longer opens a pull request. Any other path still counts,
   so a run that edited only a README does.
-- **The protected list covers what `checks.yaml` names, not what those files
-  call.** A file a check script sources or runs that `checks.yaml` does not
-  name itself (a `.py` beside the `.sh` it runs) is not protected, and a
+- **The protected list follows names, not code.** Since `stage-advance.sh` 1.10
+  (B147) it holds what `checks.yaml` names and every script those scripts name
+  by their path, to any depth, but not a script reached through a name built
+  at run time (`"$dir/$name"`, a glob) nor a data file a script reads, and a
   `run-checks.sh --config` other than `.claude/productizer/checks.yaml` is not
   read. Nor is a file a tool finds and runs by itself, with no argument naming
   it - test discovery, `conftest.py`, `.semgrepignore`, `.npmrc`, a git alias;
-  `run-checks.sh`'s `allow_repo_local_tools` gate does not see it either. `prepare` installs PyYAML from PyPI pinned by version, not by hash, in
-  the job with no write token.
+  `run-checks.sh`'s `allow_repo_local_tools` gate does not see it either.
+  `prepare` installs PyYAML 6.0.2 in the job with no write token, pinned by
+  hash and wheels only (B148): the hashes are PyPI's for the CPython 3.12
+  manylinux x86_64 and aarch64 wheels, so on a runner of another architecture
+  or Python the install is expected to fail (not run) until you add the hash
+  of the wheel it takes.
 - **The agent cannot run your tests, by design.** The no-shell rule removes the
   Bash tool, so build mode edits code without running it. Your checks on the
   pull request are what verify it, and they run only once a person pushes

@@ -80,9 +80,16 @@ jobs:
       # is missing rather than guessing what was declared - which is the correct
       # behaviour and is why every run before this one was red. Pinned, because
       # an unpinned install here decides what parses the file that decides what
-      # executes.
+      # executes - and pinned by HASH, not only by version (B148): a file
+      # re-published at 6.0.2 fails the hash rather than being installed. The
+      # two hashes are PyPI's for the CPython 3.12 manylinux wheels, x86_64 and
+      # aarch64, read from PyPI's JSON API for that release;
+      # --only-binary keeps pip from building the sdist, whose build code would
+      # run here.
       - name: PyYAML, which the runner refuses to work without
-        run: python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+        run: |
+          printf '%s\n' 'PyYAML==6.0.2 --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476 --hash=sha256:1f71ea527786de97d1a0cc0eacd1defc0985dcf6b3f17bb77dcfc8c34bec4dc5' > "$RUNNER_TEMP/pyyaml-requirements.txt"
+          python3 -m pip install --disable-pip-version-check --only-binary :all: --require-hashes -r "$RUNNER_TEMP/pyyaml-requirements.txt"
 
       # The declared `sast` check runs semgrep, and a declared tool that is
       # absent refuses the stage. Pinned to the version the check was measured
@@ -734,8 +741,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Pinned by hash, as in the checks job (B148).
       - name: PyYAML, which check-ci-template.py refuses to work without
-        run: python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+        run: |
+          printf '%s\n' 'PyYAML==6.0.2 --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476 --hash=sha256:1f71ea527786de97d1a0cc0eacd1defc0985dcf6b3f17bb77dcfc8c34bec4dc5' > "$RUNNER_TEMP/pyyaml-requirements.txt"
+          python3 -m pip install --disable-pip-version-check --only-binary :all: --require-hashes -r "$RUNNER_TEMP/pyyaml-requirements.txt"
 
       - name: Title, notes and pinned template, made with a read-only token
         env:

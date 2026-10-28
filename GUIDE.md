@@ -798,7 +798,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**123 requirements are active**, and they are the whole of what has been
+**129 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -987,7 +987,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Forty-nine defences, written as `If … then`
+**When something goes wrong.** Fifty-four defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1112,8 +1112,26 @@ because a designed path and a defended one are not the same thing:
   that file as examined by a semgrep check.
 - **R156** — If a changed path that is substituted into a check's command
   begins with `-`, then the lifecycle shall pass it with a `./` prefix.
+- **R157** — If a tracked path that the view builder links to its file on
+  GitHub holds a character other than a letter, a digit, `/` or one of `_.-~`,
+  then the lifecycle shall percent-encode that character in the link.
+- **R158** — If an unattended stage run changes a script that, at the base, a
+  script run by a check declared in `.claude/productizer/checks.yaml` names by
+  its path, directly or through other scripts so named, then the lifecycle
+  shall refuse the stage move.
+- **R159** — If a workflow job that the lifecycle ships or runs installs
+  PyYAML, then the lifecycle shall install only a wheel whose sha256 hash that
+  job names.
+- **R160** — If a workflow job kept between the base and the working tree
+  loses a job from its `needs:` and gains none, or gains an `if:` it did not
+  have, then the lifecycle shall report that move as a weakening of the
+  governance surface.
+- **R161** — If a workflow job kept between the base and the working tree has
+  its `if:` rewritten, or a step that keeps its key has its `if:`, `run:`,
+  `with:`, `env:` or `shell:` changed, then the lifecycle shall report that
+  move as undecided.
 
-**Only where the feature is present.** Five requirements apply only to a build
+**Only where the feature is present.** Six requirements apply only to a build
 that includes the feature:
 
 - **R22** — Where a repository declares its own check tools, the lifecycle
@@ -1128,6 +1146,9 @@ that includes the feature:
 - **R154** — Where a check declares its standard error coverage-only, the
   lifecycle shall write nothing from that stream into the checks result except
   the items its coverage pattern captures.
+- **R162** — Where the self-test coverage check is given a probe job count
+  above one, the lifecycle shall run up to that many self-test probes at once,
+  each under its own probe time limit.
 
 Every id above is permanent. A plan, a test or a PR title naming `R1` will
 still mean this sentence in two years, which is why ids are never reused and

@@ -29,6 +29,7 @@ everything else indented. Exit 0 all held, 1 a finding, 2 could not measure.
 """
 
 import argparse
+import concurrent.futures
 import os
 import re
 import subprocess
@@ -294,6 +295,7 @@ def main():
     ap.add_argument("--workflow", required=True)
     ap.add_argument("--no-probe", dest="probe", action="store_false")
     ap.add_argument("--probe-timeout", type=int, default=30)
+    ap.add_argument("--probe-jobs", type=int, default=1)
     args = ap.parse_args()
 
     root = os.path.abspath(args.root)
@@ -448,12 +450,18 @@ def main():
 
     probed = 0
     if args.probe:
-        for name, rec in tools.items():
-            if not rec.get("flags"):
-                continue
+        # B160: up to --probe-jobs self-tests run at once, each under its own
+        # --probe-timeout. Serially, 62 probes took 644s on a loaded machine
+        # against a 600s budget for the whole check. The results are applied
+        # in the tools' own order, so the report does not depend on which
+        # probe finished first.
+        wanted = [(name, rec) for name, rec in tools.items() if rec.get("flags")]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.probe_jobs) as pool:
+            answers = list(pool.map(
+                lambda item: probe(root, item[0], item[1]["flags"][0], args.probe_timeout),
+                wanted))
+        for (name, rec), (state, detail, output) in zip(wanted, answers):
             probed += 1
-            flag = rec["flags"][0]
-            state, detail, output = probe(root, name, flag, args.probe_timeout)
             if state == "rejected":
                 # The source reads as if it dispatches and the parser says
                 # otherwise. The parser is what runs, so it wins.

@@ -531,14 +531,14 @@ def invocations(steps: List[Tuple[str, Dict[str, Any]]]) -> Dict[str, str]:
     return out
 
 
-def step_body(step: Dict[str, Any]) -> str:
+def step_body(step: Dict[str, Any], keys=("uses", "with", "env", "run", "shell")) -> str:
     """What a step DOES, with its name and its formatting taken out. Steps are
     keyed by name, and a name is documentation: measured on this repository, at
     3b7d2d4 a step was renamed from `... the 2026-09-05 baseline` to
     `... 2026-09-06`, and a reader keyed on the name alone called that a deleted
     step. The body is what decides whether anything stopped happening."""
     parts = []
-    for key in ("uses", "with", "env", "run", "shell"):
+    for key in keys:
         value = step.get(key)
         if isinstance(value, str):
             parts.append("%s=%s" % (key, " ".join(logical_lines(value))))
@@ -721,6 +721,42 @@ def compare_tokens(surface: Surface, base: Dict[str, Any], tree: Dict[str, Any])
                               "the job is gone, and its token with it")
 
 
+def job_needs(job: Dict[str, Any]) -> List[str]:
+    needs = job.get("needs")
+    if isinstance(needs, str):
+        return [needs]
+    if isinstance(needs, list):
+        return [str(x) for x in needs]
+    return []
+
+
+def compare_jobs(surface: Surface, base: Dict[str, Any], tree: Dict[str, Any]) -> None:
+    """A job kept at both ends: what it waits for and when it runs (B149).
+    Before 1.2 neither was read, so dropping `needs: checks` from a release job
+    - the line that keeps it behind the checks - was not reported."""
+    bjobs = base.get("jobs") if isinstance(base.get("jobs"), dict) else {}
+    tjobs = tree.get("jobs") if isinstance(tree.get("jobs"), dict) else {}
+    for jname in sorted(set(bjobs) & set(tjobs)):
+        bjob, tjob = bjobs[jname], tjobs[jname]
+        if not isinstance(bjob, dict) or not isinstance(tjob, dict):
+            continue
+        surface.set_shrank("workflow.jobs[%s].needs" % jname, job_needs(bjob), job_needs(tjob),
+                           "the job no longer waits for those jobs, so it runs, and can "
+                           "finish, where they failed or never ran.")
+        surface.atoms += 1
+        atom = "workflow.jobs[%s].if" % jname
+        if "if" not in bjob and "if" in tjob:
+            surface.weakened(atom, "unconditional", tjob.get("if"),
+                             "the job became conditional, so there are now runs in "
+                             "which none of its steps happen")
+        elif "if" in bjob and "if" not in tjob:
+            surface.tightened(atom, bjob.get("if"), "unconditional")
+        elif bjob.get("if") != tjob.get("if"):
+            surface.undecided(atom, bjob.get("if"), tjob.get("if"),
+                              "the job's condition was rewritten. Whether it now runs "
+                              "in fewer cases is for a person to say")
+
+
 def compare_workflow(surface: Surface, base: Optional[Dict[str, Any]],
                      tree: Optional[Dict[str, Any]], rel: str) -> None:
     if tree is None:
@@ -744,6 +780,7 @@ def compare_workflow(surface: Surface, base: Optional[Dict[str, Any]],
                        "so those pushes and pull requests are unchecked.")
 
     compare_tokens(surface, base, tree)
+    compare_jobs(surface, base, tree)
 
     # A STEP GONE BY NAME IS NOT YET A STEP GONE. Three corrections, each forced
     # by this repository's own history rather than imagined:
@@ -833,6 +870,22 @@ def compare_workflow(surface: Surface, base: Optional[Dict[str, Any]],
         elif "if" in bstep and "if" not in tstep:
             surface.tightened("workflow.step[%s].if" % key, bstep.get("if"),
                               "unconditional")
+        elif bstep.get("if") != tstep.get("if"):
+            surface.undecided("workflow.step[%s].if" % key, bstep.get("if"),
+                              tstep.get("if"),
+                              "the step's condition was rewritten. Whether it now "
+                              "runs in fewer cases is for a person to say")
+        # A STEP THAT KEPT ITS KEY IS NOT YET A STEP THAT KEPT ITS WORK (B149).
+        # Its key is its id, or its name and action, so a rewritten `run:` or
+        # `with:` under the same name was never compared. The action's @ref is
+        # left out, as in the key: a pin bump is the same step.
+        surface.atoms += 1
+        work_b = step_body(bstep, ("with", "env", "run", "shell"))
+        work_t = step_body(tstep, ("with", "env", "run", "shell"))
+        if work_b != work_t:
+            surface.undecided("workflow.step[%s].body" % key, work_b, work_t,
+                              "the step kept its key and what it runs changed. "
+                              "Whether it now asserts less is for a person to say")
     for key in sorted(set(tree_steps) - set(base_steps)):
         if key not in renamed_from:
             surface.tightened("workflow.step[%s]" % key, "absent", "declared")

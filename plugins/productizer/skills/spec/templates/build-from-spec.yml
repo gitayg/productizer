@@ -150,7 +150,12 @@ jobs:
       # makes: prepare lists the files its checks run, so deliver can refuse a
       # change to one without reading YAML or installing anything itself. It is
       # installed HERE, in the job with no write token, before the agent runs
-      # ("read it before the AI", maintainer ruling 2026-10-13).
+      # ("read it before the AI", maintainer ruling 2026-10-13). Pinned by hash
+      # as well as version (B148), so a file re-published at 6.0.2 is refused
+      # rather than installed: PyPI's hashes for the CPython 3.12 manylinux
+      # wheels, x86_64 and aarch64, read from PyPI's JSON API for that release.
+      # --only-binary keeps pip from building the sdist, whose build code would
+      # run here.
       - name: Python for reading checks.yaml
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -159,7 +164,8 @@ jobs:
       - name: PyYAML, in the read-only job only
         run: |
           set -euo pipefail
-          python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+          printf '%s\n' 'PyYAML==6.0.2 --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476 --hash=sha256:1f71ea527786de97d1a0cc0eacd1defc0985dcf6b3f17bb77dcfc8c34bec4dc5' > "$RUNNER_TEMP/pyyaml-requirements.txt"
+          python3 -m pip install --disable-pip-version-check --only-binary :all: --require-hashes -r "$RUNNER_TEMP/pyyaml-requirements.txt"
 
       # Exit 4 (the spec is unchanged) and 5 (build mode, no committed plan)
       # fail the run HERE, before any model is called. The log says which.

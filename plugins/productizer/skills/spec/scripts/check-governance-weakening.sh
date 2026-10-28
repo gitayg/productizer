@@ -54,7 +54,15 @@
 #       same step reappearing in ANOTHER job is a MOVE, judged by the token it
 #       now runs under: the most that token can do first, then scope by scope.
 #     - `continue-on-error` gaining a true - a step that runs and decides
-#       nothing - and an `if:` arriving on a step that had none.
+#       nothing - and an `if:` arriving on a step that had none; an `if:`
+#       rewritten is UNDECIDED.
+#     - a step that KEPT its key while its `run:`, `with:`, `env:` or `shell:`
+#       changed: UNDECIDED, both bodies printed (B149). The action's `@ref` is
+#       not part of it, as it is not part of the key, so a pin bump stays quiet.
+#     - a JOB kept at both ends: a job lost from its `needs:` (a member lost
+#       and none gained) and an `if:` arriving on a job that had none are
+#       weakenings; a `needs:` rewritten or an `if:` rewritten is UNDECIDED
+#       (B149: dropping a release job's `needs: checks` was not reported).
 #     - an INVOCATION lost: any line of any `run:` block naming a `.sh` or `.py`
 #       file. FILE-WIDE, so moving one between steps is not read as a loss.
 #     - an invocation gaining `|| true`, `|| :` or `|| exit 0`.
@@ -173,15 +181,16 @@
 #     pass the merge base of the pull request.
 #   - the `.local` override file `run-checks.sh` reads beside `checks.yaml`.
 #     Uncommitted and outside this comparison.
-#   - what a token is USED for. A job's `if:` and `needs:` are not weighed, so
-#     a scope widened on a job that only runs on a tag reads the same as one on
-#     a job every pull request runs. And a step whose key is unchanged is not
-#     compared body to body: a checkout that gains `persist-credentials: true`
-#     under the same `uses` is not seen.
+#   - what a token is USED for. A job's `if:` and `needs:` are compared as
+#     atoms of their own, not weighed against its token, so a scope widened on
+#     a job that only runs on a tag reads the same as one on a job every pull
+#     request runs. A step body that moved is UNDECIDED, never a claimed
+#     weakening: whether `persist-credentials: true` or a rewritten `run:`
+#     asserts less is not decided here.
 #   - whether a weakening was RIGHT. This reports the move, never the judgement.
 set -euo pipefail
 
-VERSION="check-governance-weakening 1.1"
+VERSION="check-governance-weakening 1.2"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MEASURE="$HERE/governance-weakening.py"
@@ -648,6 +657,56 @@ PY
     --root "$WORK/pin-bumped" --self-id "$SELF_ID_DEFAULT"
   says pin-bumped "Nothing on the governance surface moved down a ladder" \
     "a routine pin bump stays quiet"
+
+  # -- B149. 1.1 compared neither a job's `needs:` nor its `if:`, nor the body
+  # of a step whose key did not move. Each case below exited 0 on 1.1.
+  build needs-dropped
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("  release:\n    needs: checks\n","  release:\n"))' \
+    "$WORK/needs-dropped/$WORKFLOW_REL"
+  drive needs-dropped 1 "the release job's needs: checks removed, so it runs where the checks failed: a weakening 1.1 did not read" \
+    --root "$WORK/needs-dropped" --self-id "$SELF_ID_DEFAULT"
+  says needs-dropped "WEAKENED: workflow.jobs[release].needs" \
+    "it names the job and the needs it lost"
+
+  build job-if-added
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("  release:\n    needs: checks\n","  release:\n    needs: checks\n    if: false\n"))' \
+    "$WORK/job-if-added/$WORKFLOW_REL"
+  drive job-if-added 1 "an if: added to a job that had none, so there are runs in which none of its steps happen" \
+    --root "$WORK/job-if-added" --self-id "$SELF_ID_DEFAULT"
+  says job-if-added "WEAKENED: workflow.jobs[release].if" \
+    "it names the job whose condition arrived"
+
+  # The base is re-committed with an `if:` on the release job and on its Draft
+  # step, so the working tree's rewrite of each is a move between two values.
+  build if-rewritten
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("  release:\n    needs: checks\n","  release:\n    needs: checks\n    if: github.ref_type == '"'"'tag'"'"'\n").replace("      - name: Draft\n","      - name: Draft\n        if: success()\n"))' \
+    "$WORK/if-rewritten/$WORKFLOW_REL"
+  ( cd "$WORK/if-rewritten" \
+    && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git commit --quiet -am "conditions" ) \
+    >> "$WORK/build.log" \
+    || die_unmeasured "could not build the if-rewritten case"
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("github.ref_type == '"'"'tag'"'"'","github.ref_type == '"'"'branch'"'"'").replace("if: success()","if: failure()"))' \
+    "$WORK/if-rewritten/$WORKFLOW_REL"
+  drive if-rewritten 1 "a job's if: and a step's if: each rewritten from one condition to another: which way either moved is not decided here" \
+    --root "$WORK/if-rewritten" --self-id "$SELF_ID_DEFAULT"
+  says if-rewritten "UNDECIDED: workflow.jobs[release].if" "the job's rewritten condition is reported UNDECIDED"
+  says if-rewritten "UNDECIDED: workflow.step[release/Draft].if" "the step's rewritten condition is reported UNDECIDED"
+
+  build step-body-changed
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("          fetch-depth: 0\n","          fetch-depth: 0\n          persist-credentials: true\n"))' \
+    "$WORK/step-body-changed/$WORKFLOW_REL"
+  drive step-body-changed 1 "a checkout that kept its key and gained persist-credentials: true under with: - the same step by name, compared body to body" \
+    --root "$WORK/step-body-changed" --self-id "$SELF_ID_DEFAULT"
+  says step-body-changed "UNDECIDED: workflow.step[release/uses actions/checkout].body" \
+    "it is reported UNDECIDED with both bodies, not as a claimed weakening and not as nothing"
+
+  build run-rewritten
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("gh release create \"$TAG\" --draft","gh release create \"$TAG\""))' \
+    "$WORK/run-rewritten/$WORKFLOW_REL"
+  drive run-rewritten 1 "a run: under an unchanged step name lost --draft, and it names no .sh or .py, so no invocation atom saw it" \
+    --root "$WORK/run-rewritten" --self-id "$SELF_ID_DEFAULT"
+  says run-rewritten "UNDECIDED: workflow.step[release/Draft].body" \
+    "the step is named by its key and both runs are printed"
 
   # -- 1: UNDECIDED. A glob rewritten is a member lost and a member gained in
   # one change, and glob subsumption is not decided here.

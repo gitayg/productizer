@@ -1,7 +1,7 @@
 # cases.tsv - three TAB-separated fields: fixture file, expected exit, a sentence the
 # output must contain. Each other fixture is good.yml with ONE change, named in its
 # first line, so a finding here can only come from that change.
-good.yml	0	8 of 8 assertions held
+good.yml	0	9 of 9 assertions held
 write-job-checkout.yml	1	write-job-no-checkout jobs.release-draft.steps[0]: a job holding write on contents checks out the repository with actions/checkout
 write-job-git-clone.yml	1	write-job-no-checkout jobs.release-draft.steps[1]: a job holding write on contents runs git clone in a run:
 undeclared-permissions.yml	1	write-job-no-checkout jobs.checks.steps[0]: a job holding write on the repository's default token (no permissions declared) checks out
@@ -16,3 +16,5 @@ attach-no-upload.yml	1	attach-pinned jobs.release-draft: no run: carries, in ord
 attach-prep-no-sha-guard.yml	1	attach-pinned jobs.release-prep: no run: carries, in order, the line: if [ "$sha" != "$GITHUB_SHA" ]; then
 unpinned-uses.yml	1	pinned jobs.release-draft.steps[0]: not pinned to a full commit id: actions/download-artifact@v8
 run-injection.yml	1	run-injection jobs.release-draft.steps[1]: an expression is interpolated into the script: ${{ github.ref_name }}
+yaml-hashed.yml	0	9 of 9 assertions held
+yaml-unhashed.yml	1	yaml-hash-pinned jobs.release-prep.steps[1]: installs PyYAML without --require-hashes and --only-binary :all:

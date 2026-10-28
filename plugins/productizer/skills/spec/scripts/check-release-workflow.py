@@ -59,6 +59,11 @@ WHAT IT ASSERTS, each a separate finding:
                  flow, so a line made unreachable by an earlier exit is not seen
   pinned         every `uses:` in the workflow is pinned to a full 40-character
                  commit id
+  yaml-hash-pinned
+                 every pip install in any job's run: that names PyYAML passes
+                 --require-hashes and --only-binary :all: (B148), by
+                 check-ci-template.py's rule, loaded from that file; it reads
+                 the run: text, not whether the hashes are PyPI's
   run-injection  no `${{` expression of any context inside any run: in the
                  workflow; values reach a shell through env:
 
@@ -89,13 +94,13 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-release-workflow 1.0"
+VERSION = "check-release-workflow 1.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(".github", "workflows", "checks.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "release-workflow")
 CI_TEMPLATE = os.path.join(HERE, "check-ci-template.py")
 SHARED = ("write_perms", "walk_uses", "walk_runs", "first_missing", "REPO_CODE_RX",
-          "SOURCE_RX", "DOT_SLASH_RX", "PIN_RX", "INJECT_RX")
+          "SOURCE_RX", "DOT_SLASH_RX", "PIN_RX", "INJECT_RX", "unhashed_yaml_install")
 PREP, DRAFT = "release-prep", "release-draft"
 
 CHECKOUT_RUN_RX = re.compile(
@@ -118,7 +123,8 @@ PREP_LINES = tuple(" ".join(l.split()) for l in PREP_LINES)
 DRAFT_LINES = tuple(" ".join(l.split()) for l in DRAFT_LINES)
 
 ASSERTIONS = ("write-job-no-checkout", "write-job-no-repo-code", "prep-read-only",
-              "draft-needs-prep", "handover", "attach-pinned", "pinned", "run-injection")
+              "draft-needs-prep", "handover", "attach-pinned", "pinned", "yaml-hash-pinned",
+              "run-injection")
 
 
 def die(msg):
@@ -272,6 +278,11 @@ def check(path):
         if m:
             find("run-injection", where, "an expression is interpolated into the script: %s"
                  % m.group(0).strip())
+        line = rules.unhashed_yaml_install(run)
+        if line:
+            find("yaml-hash-pinned", where, "installs PyYAML without --require-hashes and "
+                 "--only-binary :all:, so a file re-published at that version would be "
+                 "installed: %s" % line)
     return findings
 
 
@@ -367,7 +378,8 @@ def selftest():
           "reusable workflow's own file; YAML anchors and merge keys; that an attach-pinned "
           "line is reachable - lines are matched in order, not as control flow; an "
           "expression in a script that is not a run:, such as actions/github-script's "
-          "script:.")
+          "script:; that the hashes a PyYAML install names are PyPI's, or that pip on a "
+          "runner accepts them.")
     if got != doc:
         print("FAIL: reached and documented exit codes differ")
         return 1

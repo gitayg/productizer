@@ -66,6 +66,15 @@ WHAT IT ASSERTS, each a separate finding:
                  trace the --protected path to the artifact prepare uploaded;
                  deliver refuses a list read at another HEAD at run time
   pinned         every `uses:` is pinned to a full 40-character commit id
+  yaml-hash-pinned
+                 every pip install in a run: that names PyYAML passes
+                 --require-hashes and --only-binary :all: (B148), so pip takes
+                 only a wheel whose hash a requirements line names and builds
+                 no sdist; pinned by version alone, a file re-published at that
+                 version would be installed. LIMITS: it reads the run: text,
+                 not the requirements file, so it does not check that the
+                 hashes are PyPI's; a pip spelled through a variable is not
+                 seen; an install that does not name PyYAML is not this rule's
   run-injection  no `${{` expression of any context inside a run: - not only
                  github.event and inputs, but steps, needs, env, matrix,
                  github.head_ref and the rest, any of which can carry
@@ -128,7 +137,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-ci-template 1.1"
+VERSION = "check-ci-template 1.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(HERE, "..", "templates", "build-from-spec.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "ci-template")
@@ -178,6 +187,8 @@ INSTALL_WORDS = ("pip", "pip3", "pipx", "uv", "poetry", "conda", "mamba", "micro
                  "gem", "cargo")
 INSTALL_RX = re.compile(r"(?<![\w./$-])(%s)(?![\w.-])" % "|".join(re.escape(w) for w in INSTALL_WORDS))
 YAML_LIB_RX = re.compile(r"(?i)pyyaml|python3?-yaml|ruamel")
+PIP_INSTALL_RX = re.compile(r"(?<![\w./$-])(?:pip3?|-m\s+pip)\s+install(?![\w-])")
+ONLY_BINARY_RX = re.compile(r"--only-binary(?:\s+|=)[\"']?:all:")
 # A run: that names build-dispatch.sh and the word deliver calls deliver,
 # whether the subcommand follows the script name or sits in an argv array
 # built first (`args=(deliver . ...)`, then `"${args[@]}"`), as the template's
@@ -298,6 +309,18 @@ def first_missing(run, required):
         if i == len(lines):
             return req
         i += 1
+    return None
+
+
+def unhashed_yaml_install(run):
+    """The first pip install line of a run: naming PyYAML that does not pass
+    both --require-hashes and --only-binary :all:; None when every one does."""
+    if not re.search(r"(?i)pyyaml", run):
+        return None
+    for line in guard_lines(run):
+        if PIP_INSTALL_RX.search(line) and not (
+                "--require-hashes" in line.split() and ONLY_BINARY_RX.search(line)):
+            return line
     return None
 
 
@@ -562,6 +585,11 @@ def check(path):
         if m:
             find("run-injection", where, "an expression is interpolated into the script: %s"
                  % m.group(0).strip())
+        line = unhashed_yaml_install(run)
+        if line:
+            find("yaml-hash-pinned", where, "installs PyYAML without --require-hashes and "
+                 "--only-binary :all:, so a file re-published at that version would be "
+                 "installed: %s" % line)
         for label, rx in SWALLOW:
             if rx.search(run):
                 find("swallow", where, "%s hides a failure" % label)
@@ -603,8 +631,8 @@ def check(path):
 
 ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "deny-bash",
               "post-agent-env", "write-job-no-repo-code", "write-job-no-install",
-              "protected-list", "pinned", "run-injection", "swallow", "no-bypass",
-              "perms-input", "tools-pin", "guards")
+              "protected-list", "pinned", "yaml-hash-pinned", "run-injection", "swallow",
+              "no-bypass", "perms-input", "tools-pin", "guards")
 
 
 def report(path):
@@ -708,7 +736,9 @@ def selftest():
           "read; that the --protected path deliver is given is the protected.txt prepare's "
           "artifact carries (protected-list asserts the flag is passed, and deliver "
           "refuses a list read at another HEAD at run time); that a staged script "
-          "installs nothing (write-job-no-install reads the run: text).")
+          "installs nothing (write-job-no-install reads the run: text); that the hashes a "
+          "PyYAML install names are PyPI's, or that pip on a runner accepts them "
+          "(yaml-hash-pinned reads the flags on the run: line).")
     if got != doc:
         print("FAIL: reached and documented exit codes differ")
         return 1

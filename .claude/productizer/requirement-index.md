@@ -182,4 +182,10 @@ marker, because a table left there would be one nothing writes or checks.
 | R154 | optional | active | `checks-stage-runner` |
 | R155 | unwanted | active | `checks-stage-runner` |
 | R156 | unwanted | active | `checks-stage-runner` |
+| R157 | unwanted | active | `view-builder` |
+| R158 | unwanted | active | `stage-advance-guard` |
+| R159 | unwanted | active | `release-workflow-safe`, `ci-template-safe` |
+| R160 | unwanted | active | `governance-weakening` |
+| R161 | unwanted | active | `governance-weakening` |
+| R162 | optional | active | `selftest-coverage` |
 <!-- productizer:requirement-index:end -->

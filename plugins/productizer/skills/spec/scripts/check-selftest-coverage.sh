@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-selftest-coverage.sh [--version] [--help] [--root DIR] [--checks PATH]
 #                           [--workflow PATH] [--no-probe] [--probe-timeout N]
-#                           [--selftest]
+#                           [--probe-jobs N] [--selftest]
 #
 # Asserts R39 and R40, which are two obligations over the same set and must not
 # be collapsed:
@@ -198,6 +198,13 @@
 #     is not seen.
 #   - It reads ONE checks.yaml and ONE workflow file. A second workflow that
 #     runs checks is outside the measurement.
+#   - --probe-jobs runs that many self-tests at once (B160), each still under
+#     its own --probe-timeout. It shortens the whole run, not any one probe:
+#     on a machine loaded enough that one self-test alone passes the
+#     per-probe limit, the probe still reads ? and the run is still exit 2,
+#     and probes running side by side compete for the same cores. Self-tests
+#     that wrote to one shared path would collide; each here builds its own
+#     sandbox, which is read off their source, not enforced.
 #
 # EXIT CODES ARE THE CONTRACT.
 #
@@ -219,7 +226,7 @@
 # could not be driven at all (2).
 set -euo pipefail
 
-VERSION="check-selftest-coverage 1.0"
+VERSION="check-selftest-coverage 1.1"
 
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
@@ -228,6 +235,7 @@ CHECKS=".claude/productizer/checks.yaml"
 WORKFLOW=".github/workflows/checks.yml"
 PROBE=1
 PROBE_TIMEOUT=30
+PROBE_JOBS=1
 MODE="measure"
 
 die_unmeasured() { printf 'check-selftest-coverage: %s\n' "$1" >&2; exit 2; }
@@ -235,7 +243,8 @@ die_unmeasured() { printf 'check-selftest-coverage: %s\n' "$1" >&2; exit 2; }
 usage() {
   printf 'usage: check-selftest-coverage.sh [--version] [--help] [--root DIR]\n'
   printf '                                  [--checks PATH] [--workflow PATH]\n'
-  printf '                                  [--no-probe] [--probe-timeout N] [--selftest]\n'
+  printf '                                  [--no-probe] [--probe-timeout N]\n'
+  printf '                                  [--probe-jobs N] [--selftest]\n'
   printf '  --root DIR         the work tree. Defaults to the git top level, never\n'
   printf '                     to the working directory.\n'
   printf '  --checks PATH      the declared checks, relative to --root.\n'
@@ -244,6 +253,8 @@ usage() {
   printf '                     column then reads - (never run), never 0.\n'
   printf '  --probe-timeout N  seconds one self-test may take. A timeout is ?, not a\n'
   printf '                     failure and not a pass.\n'
+  printf '  --probe-jobs N     self-tests probed at once (default 1), each under its\n'
+  printf '                     own --probe-timeout.\n'
   printf '  --selftest         drive the built-in corpus instead of this repository.\n'
   printf 'exit: 0 every tool carries a self-test and every self-test is run\n'
   printf '      1 at least one does not - 2 could not measure\n'
@@ -262,6 +273,8 @@ while [ "$#" -gt 0 ]; do
     --no-probe) PROBE=0; shift ;;
     --probe-timeout)   [ "$#" -ge 2 ] || die_unmeasured "--probe-timeout needs a number"; PROBE_TIMEOUT="$2"; shift 2 ;;
     --probe-timeout=*) PROBE_TIMEOUT="${1#--probe-timeout=}"; shift ;;
+    --probe-jobs)   [ "$#" -ge 2 ] || die_unmeasured "--probe-jobs needs a number"; PROBE_JOBS="$2"; shift 2 ;;
+    --probe-jobs=*) PROBE_JOBS="${1#--probe-jobs=}"; shift ;;
     --selftest|--self-test) MODE="selftest"; shift ;;
     --) shift; break ;;
     -*) printf 'check-selftest-coverage: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -274,6 +287,10 @@ case "$PROBE_TIMEOUT" in
   ''|*[!0-9]*) die_unmeasured "--probe-timeout must be a whole number of seconds, got: $PROBE_TIMEOUT" ;;
 esac
 [ "$PROBE_TIMEOUT" -gt 0 ] || die_unmeasured "--probe-timeout must be greater than zero"
+case "$PROBE_JOBS" in
+  ''|*[!0-9]*) die_unmeasured "--probe-jobs must be a whole number, got: $PROBE_JOBS" ;;
+esac
+[ "$PROBE_JOBS" -gt 0 ] || die_unmeasured "--probe-jobs must be greater than zero"
 
 # The existence test's only stderr is noise about a question the exit status
 # already answers; check-stderr.sh exempts this shape structurally.
@@ -298,7 +315,8 @@ MEASURE="$HERE/selftest-coverage.py"
 run_measure() {
   # $1 root, $2 checks path, $3 workflow path
   local args
-  args=(--root "$1" --checks "$2" --workflow "$3" --probe-timeout "$PROBE_TIMEOUT")
+  args=(--root "$1" --checks "$2" --workflow "$3" --probe-timeout "$PROBE_TIMEOUT"
+        --probe-jobs "$PROBE_JOBS")
   if [ "$PROBE" -eq 0 ]; then
     args+=(--no-probe)
   fi
@@ -747,6 +765,32 @@ CFG
 
 # listmention: two tools that hold the flag in a list and dispatch on nothing -
 # once in a subprocess argv, once in a docstring. Each is an R39 finding.
+# rendezvous (B160): two self-tests that each wait for the other to start, so
+# they answer only when probed side by side. One at a time, the first waits
+# past --probe-timeout and reads ?, exit 2; under --probe-jobs 2 both answer.
+mk_case rendezvous
+for side in a b; do
+  other=b; [ "$side" = a ] || other=a
+  cat > "$SB/rendezvous/tools/meet-$side.sh" <<TOOL
+#!/usr/bin/env bash
+case "\${1:-}" in
+  --selftest)
+    : > rendezvous-$side.started
+    for _ in \$(seq 1 600); do [ -e rendezvous-$other.started ] && exit 0; sleep 0.2; done
+    exit 1 ;;
+esac
+exit 0
+TOOL
+done
+cat > "$SB/rendezvous/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-meet-a
+    command: [./tools/meet-a.sh, --selftest]
+  - id: fixture-meet-b
+    command: [./tools/meet-b.sh, --selftest]
+CFG
+
 mk_case listmention
 cat > "$SB/listmention/checks.yaml" <<'CFG'
 version: 1
@@ -858,6 +902,9 @@ drive listmention 1 "doc-mention.py carries no self-test"
 # `in` inside a `for` that builds argv is not.
 drive membership  0 "R39: 3 of 3 check tools the suite exercises carry a self-test"
 drive loopmention 1 "loop-mention.py carries no self-test"
+
+# B160: two probes at once. The case passes only if both run side by side.
+drive rendezvous  0 "R39 and R40 hold"                                   --probe-jobs 2 --probe-timeout 20
 
 printf '  cases driven: %d. Cases that did not hold: %d\n' "$CASES" "$FAILED"
 

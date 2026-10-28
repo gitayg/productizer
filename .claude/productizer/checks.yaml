@@ -2410,9 +2410,25 @@ checks:
             change stays inert: `attended-classification-added-beside-code` exits 0. Falsified
             2026-10-13 by the building agent with the refusal made never to fire, at 162 cases:
             159 of 162. NOT driven: a snapshot added alone.
+        - id: R158
+          verdict: Partial
+          reason: >-
+            A script is followed only through a name written whole in its text: a name built at
+            run time ("$dir/$name", a glob), a path holding a character outside letters, digits
+            and _.@+/-, and a data file a script reads (a config, a rules file) are not
+            followed. A script named only in a comment is protected too, which refuses more and
+            never less.
+          evidence: >-
+            stage-advance.sh 1.10 (B147), 224 cases. A check runs ./tools/run.sh, which runs
+            helper.py beside it, which runs lib/deep.sh under it: under --unattended
+            `unattended-checks-helper-named` and `-transitive` exit 3, naming the script that
+            names each; attended, a script nothing names, and a .md the run script names, exit
+            0; `print-protected-transitive-set` prints exactly the three scripts. Falsified
+            2026-10-28 with the closure off: 220 of 224. On this repository --print-protected
+            --base HEAD prints 114 paths where 1.9 printed 89, all 89 among them.
     limitations:
       - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
-      - The forbidden set is a list, not a proof. Attended, nothing but the list applies; under --unattended an ASCII, dot-free file the list does not name (Jenkinsfile, GEMINI.md) is still allowed. Since 1.6 a file a check declared in checks.yaml runs is refused under --unattended (R126), but a file a check script calls or sources that checks.yaml does not name is not protected; a `run-checks.sh --config` other than the default is not read; PyYAML is pinned by version, not hash. A homoglyph is read, not folded - one non-ASCII character as one to two characters - so a reading of three or more, and a homoglyph made of ASCII alone (rn for m), are not refused; and a legitimate non-ASCII name that reads as a rule file is refused attended too. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
+      - The forbidden set is a list, not a proof. Attended, nothing but the list applies; under --unattended an ASCII, dot-free file the list does not name (Jenkinsfile, GEMINI.md) is still allowed. Since 1.6 a file a check declared in checks.yaml runs is refused under --unattended (R126), and since 1.10 every script such a script names by its path (R158, B147), but a script reached through a name built at run time, or a data file a script reads, is not protected; a `run-checks.sh --config` other than the default is not read; PyYAML is pinned by hash (B148), and that the hashes are PyPI's was read from PyPI's JSON API, not checked against a wheel. A homoglyph is read, not folded - one non-ASCII character as one to two characters - so a reading of three or more, and a homoglyph made of ASCII alone (rn for m), are not refused; and a legitimate non-ASCII name that reads as a rule file is refused attended too. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
       - Default-deny over `.claude/**` refuses a design move's change to every `.claude/productizer/` file but the spec, the backlog, bookkeeping ADDED and, since 1.5, the requirement index MODIFIED in an attended design move (B112). An unattended design move may not write the index, because R91 lists the unattended exceptions and it is not among them.
       - A stage other than design or build with evidence of its own is driven by no case.
 
@@ -2684,7 +2700,7 @@ checks:
       refused: [2]     # usage, or a template that could not be read or parsed
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 16 assertions held'
+      pattern: '([0-9]+) of 17 assertions held'
       min_covered: 1
       spec_units:
         - id: R112
@@ -2834,6 +2850,19 @@ checks:
             Fixtures deliver-no-protected.yml, deliver-args-no-protected.yml and
             agent-downloads-body.yml exit 1. Falsified 2026-10-13 with `--protected` removed from
             the shipped template: 15 of 16 assertions held, `protected-list` red.
+        - id: R159
+          verdict: Partial
+          reason: >-
+            The template half only; release-workflow-safe holds this repository's workflow. The
+            hashes were read from PyPI's JSON API, not from a downloaded wheel, and no runner
+            has installed with them yet; the rule reads the flags on the run: line, not the
+            requirements it writes.
+          evidence: >-
+            check-ci-template.py 1.2 (B148), 47 self-test cases. `yaml-hash-pinned`: every pip
+            install in a run: that names PyYAML passes --require-hashes and --only-binary :all:.
+            The template holds 17 of 17; at 81c6031, which pinned by version alone, it fails at
+            jobs.prepare.steps[4]. Fixtures yaml-hashed.yml exit 0 and yaml-unhashed.yml exit 1.
+            Falsified 2026-10-28 with the rule made never to fire: 46 of 47.
     limitations:
       - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
       - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.
@@ -2862,7 +2891,7 @@ checks:
       refused: [2]     # usage, an unreadable or unparseable workflow, no PyYAML, check-ci-template.py not loadable, or no release-prep or release-draft job
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 8 assertions held'
+      pattern: '([0-9]+) of 9 assertions held'
       min_covered: 1
       spec_units:
         - id: R136
@@ -2917,6 +2946,17 @@ checks:
             `write-job-no-checkout` and `write-job-no-repo-code` hold on .github/workflows/checks.yml
             (8 of 8 assertions); fixtures write-job-runs-python.yml and
             write-job-runs-staged-script.yml exit 1.
+        - id: R159
+          verdict: Partial
+          reason: >-
+            This repository's workflow half only; ci-template-safe holds the template. That pip
+            on a GitHub runner accepts the two hashes is proven only by the next CI run.
+          evidence: >-
+            check-release-workflow.py 1.1 (B148), 23 self-test cases, loading
+            `unhashed_yaml_install` from check-ci-template.py. The real workflow holds 9 of 9;
+            at 81c6031 it fails at jobs.checks.steps[3] and jobs.release-prep.steps[2]. Fixtures
+            yaml-hashed.yml exit 0 and yaml-unhashed.yml exit 1. Falsified 2026-10-28 with the
+            rule made never to fire: 22 of 23.
     limitations:
       - It reads one file and runs nothing. Whether GitHub enforces the declared permissions, whether a pinned commit is the release its comment names, and whether the jobs ever ran are not measured.
       - The repository-code rule is lexical and shared with check-ci-template.py, so the two drift together; it is stricter here in one place, refusing bash or sh on any file.
@@ -2987,7 +3027,10 @@ checks:
     # probe past the limit makes this check refuse (exit 2) and R39/R40 read Missing -
     # which is how the v4.65.0 tag run failed while main passed on the same commit.
     # 180 is about three times the slowest measured; a hung self-test still times out.
-    command: ["./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh", "--probe-timeout", "180"]
+    # --probe-jobs 4 (B160): one at a time, the 62 probes took 644s on a loaded macOS
+    # machine against this check's 600s, so the run timed out while every probe held.
+    # Four at a time, each still under its own 180s. Four is a choice, not a measured best.
+    command: ["./plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh", "--probe-timeout", "180", "--probe-jobs", "4"]
     timeout_seconds: 600
     exit_codes:
       pass: [0]
@@ -3054,6 +3097,20 @@ checks:
             the `unreached` case from exit 1 to exit 0, and removing the swallow test takes the
             `swallowed` case from exit 1 to exit 0. A self-test that does not answer inside the
             budget is `?` and exits 2 - unmeasured - and is never counted as a tool without one.
+        - id: R162
+          verdict: Partial
+          reason: >-
+            It shortens the run, not any one probe: a machine slow enough that one self-test
+            alone passes 180s still reads ? and refuses, as stage-advance.sh did one at a time
+            here (184.8s) and three did under amd64 emulation (B160). Probes side by side
+            compete for the same cores.
+          evidence: >-
+            check-selftest-coverage.sh 1.1 (B160), 25 cases. `rendezvous`: two self-tests that
+            each wait for the other to start answer under --probe-jobs 2, exit 0. Falsified
+            2026-10-28 with the pool held to one worker: the first read ? past its 20s and the
+            case exited 2. Measured here on 2026-10-28 with the per-probe limit raised to 900s:
+            one at a time at 81c6031, 63 probes in 1271s at load average 55 to 69; four at a
+            time, 270.9s at 69 to 115, slowest probe 165.4s, the same R39 and R40 lines.
       from: stdout_paths
       pattern: '^(\S+)$'
       min_covered: 20
@@ -3061,6 +3118,7 @@ checks:
       - R39's "reaches each exit code it can return" is COUNTED, NOT ENFORCED, and the claim stays Partial for it - for a smaller reason than before. Superseded 2026-09-07: this said 31 of 34 do not declare and that writing the emitters was follow-up work. All 34 now declare and all 34 are complete. What keeps it Partial is that a declaration is self-reported - this check compares a self-test's two halves against each other and cannot tell a computed reached-list from a hardcoded one, nor whether the `documented:` half is the tool's true contract - a tool that under-documents its codes reads as complete over an incomplete contract.
       - Reachability is static. It reads checks.yaml and one workflow file; an invocation from a Makefile, a git hook or a person is invisible, and a declared check whose tool is absent at run time still reads as reaching the self-test it names.
       - Structural negatives are never executed. A tool dispatching a self-test in an unrecognised shape reads as carrying none, which over-reports the shortfall rather than hiding it.
+      - --probe-jobs 4 shortens the run, not any one probe (B160): a machine slow enough that one self-test alone passes the 180s per-probe limit still reads ? and refuses, and probes side by side compete for the same cores. That no two self-tests write one shared path is read off their source, not enforced.
       - Third-party tools are n/a, not findings. `shellcheck` is a check tool the suite invokes and nobody here can give it a self-test; it is named and counted separately so neither number contaminates the other.
       - Superseded 2026-09-06: it used to report ITSELF as a self-test nothing reaches, because the declared command runs the measurement and not the self-test. The workflow now names `check-selftest-coverage.sh --selftest` on its own line, so the finding is resolved rather than exempted - it was never waived, and the fix was to reach it.
 
@@ -3601,6 +3659,23 @@ checks:
             and reports the move to a read-only job as a tightening, as at ba343ed; `pin-bumped`
             exits 0, a bumped @ref being the same step. Falsified 2026-10-13 by the building agent,
             each rule on its own.
+        - id: R160
+          verdict: Covered
+          evidence: >-
+            check-governance-weakening.sh 1.2 (B149), 86 self-test cases. `needs-dropped` - the
+            release job's needs: checks removed - exits 1 with `WEAKENED:
+            workflow.jobs[release].needs`; `job-if-added` exits 1 with `WEAKENED:
+            workflow.jobs[release].if`. Both exited 0 on 1.1. Falsified 2026-10-28 with the job
+            comparison off: 81 of 86.
+        - id: R161
+          verdict: Covered
+          evidence: >-
+            check-governance-weakening.sh 1.2 (B149). `step-body-changed` (a checkout gaining
+            persist-credentials: true under its key) and `run-rewritten` (the Draft run: losing
+            --draft) exit 1 with `UNDECIDED: workflow.step[...].body`; `if-rewritten` exits 1
+            with the job's and the step's rewritten if: UNDECIDED; `pin-bumped` still exits 0.
+            Falsified 2026-10-28: the body comparison off, 82 of 86; both rewritten-if branches
+            off, 83 of 86.
       from: stdout_paths
       pattern: '^(\S+)$'
       must_cover: none
@@ -3608,7 +3683,7 @@ checks:
     limitations:
       - It reports movement between a base and the work tree. A check that was never strict, and a whole governance surface weak from the day it was written, are invisible to it.
       - Four of its own falsifications came back GREEN on the first attempt, and each was reported as a finding about the test rather than quietly re-run.
-      - Since 1.1 a workflow job's own permissions and its steps are compared (R133, R134), but a step's body is not compared when its key is unchanged, nor a job's `if:` or `needs:`.
+      - Since 1.1 a workflow job's own permissions and its steps are compared (R133, R134), and since 1.2 a job's `needs:` and `if:` and a kept step's body (R160, R161, B149). A changed body or a rewritten `if:` is UNDECIDED, never a claimed weakening: whether a new `run:` asserts less is not decided here, and every routine edit to a step's `run:` now reads as one.
 
   - id: governance-self-footing
     why: a diff that deletes or switches off the check watching for switched-off checks is the one move that cannot be left to advice
@@ -4359,6 +4434,15 @@ checks:
             the crafted root adds 0 non-http hrefs and carries its remote 0 times. Against
             01dbd56's lines it fails - 3 event attributes, 1 non-http href, the remote seen 7
             times - and each of the three fixes reverted alone goes red.
+        - id: R157
+          verdict: Covered
+          evidence: >-
+            build-view.sh 1.2 (B146), 9 cases. `config-links` tracks
+            `q"onmouseover="alert(1).md` and `h#a?b%c d.md` under a GitHub origin and asserts
+            the page links them as `.../q%22onmouseover%3D%22alert%281%29.md` and
+            `.../h%23a%3Fb%25c%20d.md`, with 0 event attributes. Falsified 2026-10-28 with
+            blob() writing the path as it reads: the case said DID NOT LINK for both names, 1 of
+            9 not held. NOT asserted: that GitHub serves the encoded path as that file.
     limitations:
       - The builder's own code reaches the capability object; only what embedded text adds is counted, against a page built without that row.
       - The page script's own escaping and scheme guard for a link it draws is not driven by a browser in the self-test; it was falsified by hand in puppeteer. A GitHub link is drawn only for a remote of the form github.com/<owner>/<name>.

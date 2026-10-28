@@ -117,8 +117,9 @@ while [ $# -gt 0 ]; do
     # Added in v4.70.0 so the check running this builder's self-test can
     # record which builder it ran (B115, B130). 1.1 (B139): a link built from
     # the origin remote, a tracked path or jira.site is an escaped http(s) URL
-    # or no link at all.
-    --version) echo "build-view 1.1"; exit 0 ;;
+    # or no link at all. 1.2 (B146): a tracked path is percent-encoded in a
+    # GitHub file link, so a `#`, `?` or `%` in its name is that name.
+    --version) echo "build-view 1.2"; exit 0 ;;
     # The graph assertion suite. Driven by --selftest as one of its cases and
     # separately runnable, because when it goes red the first question is which
     # of A1..A16 went red and that answer is on its own stdout.
@@ -272,7 +273,9 @@ PYEMB
   # is just "no link"); no link on either page may carry an event attribute;
   # the crafted page may add no non-http href; and the crafted remote is not a
   # GitHub repository, so it appears nowhere on its page - not in an href, and
-  # not in the data block the page script turns into hrefs.
+  # not in the data block the page script turns into hrefs. B146: both file
+  # names reach the href percent-encoded, so a `#`, `?`, `%` or space in a
+  # name is that name and not a fragment, a query or a decoded byte.
   LNK="$(mktemp -d "${TMPDIR:-/tmp}/build-view-links.XXXXXX")"
   for _v in plain crafted; do
     mkdir -p "$LNK/$_v/.claude/productizer"
@@ -285,6 +288,7 @@ PYEMB
     if [ "$_v" = plain ]; then
       _site='https://example.invalid'; _remote='https://github.com/acme/widget.git'
       printf 'quoted\n' > "$LNK/$_v/.claude/productizer/q\"onmouseover=\"alert(1).md"
+      printf 'reserved\n' > "$LNK/$_v/.claude/productizer/h#a?b%c d.md"
     else
       _site='javascript:alert(1)//'; _remote='https://github.com/a"onmouseover="alert(1)/b.git'
     fi
@@ -320,12 +324,15 @@ def read(p):
 
 plain, crafted = read(sys.argv[1]), read(sys.argv[2])
 odd = lambda a: [h for h in a.hrefs if not h.startswith(('#', 'https://', 'http://'))]
-gh = ('https://github.com/acme/widget/blob/HEAD/.claude/productizer/q"onmouseover="alert(1).md'
+gh = ('https://github.com/acme/widget/blob/HEAD/.claude/productizer/q%22onmouseover%3D%22alert%281%29.md'
       in plain.hrefs)
+pct = ('https://github.com/acme/widget/blob/HEAD/.claude/productizer/h%23a%3Fb%25c%20d.md'
+       in plain.hrefs)
 jira = 'https://example.invalid/browse/ABC-1' in plain.hrefs
-print('the plain root %s its quoted file name and %s its Jira key; the links carry %d event '
+print('the plain root %s its quoted file name, %s its #?%% file name and %s its Jira key; the links carry %d event '
       'attribute(s); the crafted root added %d non-http href(s) and carries its remote %d time(s)'
-      % ('linked' if gh else 'DID NOT LINK', 'linked' if jira else 'DID NOT LINK',
+      % ('linked' if gh else 'DID NOT LINK', 'linked' if pct else 'DID NOT LINK',
+         'linked' if jira else 'DID NOT LINK',
          plain.on + crafted.on, len(odd(crafted)) - len(odd(plain)),
          crafted.raw.count('onmouseover')))
 PYLNK
@@ -334,7 +341,7 @@ PYLNK
   DRIVEN=$((DRIVEN + 1))
   CODES="$CODES$_rc
 "
-  _need='the plain root linked its quoted file name and linked its Jira key; the links carry 0 event attribute(s); the crafted root added 0 non-http href(s) and carries its remote 0 time(s)'
+  _need='the plain root linked its quoted file name, linked its #?% file name and linked its Jira key; the links carry 0 event attribute(s); the crafted root added 0 non-http href(s) and carries its remote 0 time(s)'
   if [ "$_rc" -eq 0 ] && grep -qF -- "$_need" <<<"$_out"; then
     printf '  ok   %-20s exit 0, and it said: %s\n' config-links "$_need"
   else
@@ -428,6 +435,7 @@ python3 - "$ROOT" "$TMP" "$TEMPLATE" "$OUT" "$STALE_AFTER" "$REGEN_CMD" "$HERE" 
 # -*- coding: utf-8 -*-
 """Render the lifecycle dashboard. Reads only; writes one HTML file."""
 import io, json, os, re, shutil, subprocess, sys, tempfile, time
+from urllib.parse import quote
 
 ROOT, TMP, TEMPLATE, OUT, STALE_AFTER, REGEN_CMD, SCRIPTS = sys.argv[1:8]
 MODE, ARCH_FILE, SKILL_HOME = sys.argv[8:11]
@@ -1859,7 +1867,7 @@ def jdata(v, **kw):
 
 def blob(path):
     if GH and path in tracked:
-        return 'https://github.com/%s/blob/HEAD/%s' % (GH, path)
+        return 'https://github.com/%s/blob/HEAD/%s' % (GH, quote(path, safe='/'))
     return ''
 
 EXTLINK = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" '
