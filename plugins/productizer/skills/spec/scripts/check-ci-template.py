@@ -76,18 +76,28 @@ WHAT IT ASSERTS, each a separate finding:
                  split into commands at `;`, `&`, `&&`, `||`, `|`, a
                  parenthesis, a backquote and a line end, a comment is cut
                  where bash starts one - since 1.4 (B179) never right after a
-                 `)` or a backquote that closes a substitution, which bash
-                 reads as part of a word, and inside backquotes only up to
-                 the closing one - and a redirection's file is no
-                 argument; any --no-binary, an --only-binary whose value is
-                 not :all:, a pip install seen only inside a larger word (a
-                 quoted $(...), `sh -c "..."`) and a run: that does not split
-                 into shell words are each a finding. LIMITS: it reads the
+                 backquote that closes a substitution, which bash reads as
+                 part of a word, since 1.5 (B182) never right after any `)`,
+                 a subshell's included, which over-reports, and inside
+                 backquotes only up to the closing one - and a redirection's
+                 file is no argument; any --no-binary, an --only-binary whose
+                 value is not :all:, a pip install seen only inside a larger
+                 word (a quoted $(...), `sh -c "..."`) and a run: that does
+                 not split into shell words are each a finding. Since 1.5 a
+                 run: is not read, and is a finding, when it holds a `#` that
+                 may begin a comment and shell this reading does not follow:
+                 a heredoc, `case`, `${`, `((`, `[`, an alias or posix mode,
+                 a $'...' string, a substitution inside double quotes, a
+                 quote or a backslash inside backquotes, a `(` inside a word,
+                 an unmatched `)` or backquote, or a quote or a backslash
+                 after `)#`. LIMITS: it reads the
                  run: text, not the requirements file, so it does not check
                  that the hashes are PyPI's, nor a --no-binary written in that
                  file or in PIP_NO_BINARY; a pip spelled through a variable is
-                 not seen; an install that does not name PyYAML is not this
-                 rule's
+                 not seen, nor an alias, alias expansion or posix mode turned
+                 on by a word spelled through quotes or a variable or in a
+                 sourced file; an install that does not name PyYAML is not
+                 this rule's
   run-injection  no `${{` expression of any context inside a run: - not only
                  github.event and inputs, but steps, needs, env, matrix,
                  github.head_ref and the rest, any of which can carry
@@ -151,7 +161,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-ci-template 1.4"
+VERSION = "check-ci-template 1.5"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(HERE, "..", "templates", "build-from-spec.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "ci-template")
@@ -202,6 +212,21 @@ INSTALL_WORDS = ("pip", "pip3", "pipx", "uv", "poetry", "conda", "mamba", "micro
 INSTALL_RX = re.compile(r"(?<![\w./$-])(%s)(?![\w.-])" % "|".join(re.escape(w) for w in INSTALL_WORDS))
 YAML_LIB_RX = re.compile(r"(?i)pyyaml|python3?-yaml|ruamel")
 PIP_INSTALL_RX = re.compile(r"(?<![\w./$-])(?:pip3?|-m\s+pip)\s+install(?![\w-])")
+# A `#` that bash could read as beginning a comment: at the start of the run:
+# or after a blank, a line end, `;`, `&`, `|`, a parenthesis, `<`, `>` or a
+# backquote, in or out of quotes.
+MAYBE_COMMENT_RX = re.compile(r"(?<![^ \t\n;&|()<>`])#")
+# Shell the comment reading does not follow, inside which a `#` after a blank
+# need not begin a comment or a quote need not open a string (B182). A run:
+# holding one of these beside such a `#` is not read; it is a finding.
+UNFOLLOWED = ((re.compile(r"<<"), "a heredoc"),
+              (re.compile(r"(?<![\w-])case(?![\w-])"), "a `case`"),
+              (re.compile(r"\$\{"), "a `${`"),
+              (re.compile(r"\(\("), "a `((`"),
+              (re.compile(r"\["), "a `[`"),
+              (re.compile(r"(?<![\w-])(?:alias|expand_aliases|BASH_ALIASES|posix|POSIXLY_CORRECT)"
+                          r"(?![\w-])"), "an alias or posix mode"))
+QUOTE_OR_ESCAPE_RX = re.compile(r"['\"`\\]")
 # A run: that names build-dispatch.sh and the word deliver calls deliver,
 # whether the subcommand follows the script name or sits in an argv array
 # built first (`args=(deliver . ...)`, then `"${args[@]}"`), as the template's
@@ -342,24 +367,49 @@ def shell_text(run):
     `$(`, `<(` and a `(` inside a word are not. A comment begun inside
     backquotes ends at the closing backquote, where bash ends the command it
     reads out of them: 1.3 cut `echo `#x`; pip install pyyaml` to the line
-    end."""
+    end.
+
+    1.4 counted parentheses to tell a subshell's `)` from a substitution's,
+    and a `case` pattern's `)` or a `(` in a heredoc's body put the count out
+    of step with bash, so `#; pip install pyyaml` after a substitution's `)`
+    was cut (B182). Since 1.5 a `#` right after any `)` starts no comment, and
+    the reading stops where it cannot follow bash: a run: with a `#` that may
+    begin a comment and a heredoc, `case`, `${`, `((`, `[`, an alias or posix
+    mode, a `$'...'` string, a substitution inside double quotes, a quote or
+    a backslash inside backquotes, a `(` inside a word, a `)` or a backquote
+    unmatched, or a quote or a backslash after `)#` on its line raises
+    ValueError rather than guess. Only space, tab and a line end are blanks,
+    as in bash; 1.4 read a no-break space as one."""
+    maybe = MAYBE_COMMENT_RX.search(run)
+    for rx, what in UNFOLLOWED:
+        if maybe and rx.search(run):
+            raise ValueError("a `#` that bash may not read as a comment, beside %s, "
+                             "which this reading does not follow" % what)
     out, quote, word_start, i = [], "", True, 0
-    parens, in_bq = [], False
+    depth, in_bq, doubt = 0, False, ""
     while i < len(run):
         c = run[i]
         if quote == "'":
             out.append(c)
             quote = "" if c == "'" else quote
         elif c == "\\" and i + 1 < len(run):
+            if in_bq and not quote:
+                doubt = doubt or "a backslash inside backquotes"
             if run[i + 1] != "\n":
                 out.append(run[i:i + 2])
                 word_start = False
             i += 2
             continue
         elif quote == '"':
+            if c == "`" or run[i:i + 2] == "$(":
+                doubt = doubt or "a substitution inside double quotes"
             out.append(c)
             quote = "" if c == '"' else quote
         elif c in "'\"":
+            if in_bq:
+                doubt = doubt or "a quote inside backquotes"
+            elif c == "'" and run[i - 1:i] == "$":
+                doubt = doubt or "a $'...' string"
             out.append(c)
             quote = c
         elif c == "#" and word_start:
@@ -376,13 +426,25 @@ def shell_text(run):
             in_bq = not in_bq
             word_start = in_bq
         elif c == "(":
-            parens.append(word_start and run[i - 1:i] not in ("<", ">"))
+            if not word_start and run[i - 1:i] not in ("$", "<", ">"):
+                doubt = doubt or "a `(` inside a word"
+            depth += 1
             word_start = True
         elif c == ")":
-            word_start = parens.pop() if parens else False
+            if not depth:
+                doubt = doubt or "a `)` with no `(` open"
+            if run[i + 1:i + 2] == "#" and QUOTE_OR_ESCAPE_RX.search(run[i + 2:].split("\n", 1)[0]):
+                doubt = doubt or "a quote or a backslash after `)#`"
+            depth = max(depth - 1, 0)
+            word_start = False
         else:
-            word_start = c.isspace() or c in ";&|<>"
+            word_start = c in " \t\n;&|<>"
         i += 1
+    if depth or in_bq:
+        doubt = doubt or "a `(` or a backquote left open"
+    if doubt and maybe:
+        raise ValueError("a `#` that bash may not read as a comment, beside %s, which "
+                         "this reading does not follow" % doubt)
     return "".join(out)
 
 
@@ -877,7 +939,10 @@ def selftest():
           "PyYAML install names are PyPI's, or that pip on a runner accepts them "
           "(yaml-hash-pinned reads the flags as arguments of the pip install in the run: "
           "text); a --no-binary in a requirements file or in PIP_NO_BINARY; a pip install "
-          "inside `sh -c` or `eval` read for its flags (it is reported, never passed).")
+          "inside `sh -c` or `eval` read for its flags (it is reported, never passed); "
+          "bash's whole grammar - a run: holding a `#` beside shell the comment reading "
+          "does not follow is reported, not read, and an alias turned on through a "
+          "quoted or variable word or a sourced file is not seen.")
     if got != doc:
         print("FAIL: reached and documented exit codes differ")
         return 1

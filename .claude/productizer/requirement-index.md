@@ -216,4 +216,5 @@ marker, because a table left there would be one nothing writes or checks.
 | R188 | unwanted | active | `stage-advance-guard` |
 | R189 | unwanted | active | `stage-advance-guard` |
 | R190 | unwanted | active | `view-builder` |
+| R191 | unwanted | active | `ci-template-safe`, `release-workflow-safe` |
 <!-- productizer:requirement-index:end -->

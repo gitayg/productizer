@@ -2934,17 +2934,41 @@ checks:
           verdict: Partial
           reason: >-
             It follows bash's word starts for a `#`, not bash's whole grammar: a comment inside
-            $(...) runs to the line end here as in bash, and an unbalanced or case-pattern `)`
-            starts no comment here, which over-reports and never hides.
+            $(...) runs to the line end here as in bash, and since 1.5 (B182) a `#` right after
+            any `)`, a subshell's included, starts no comment here, which over-reports and never
+            hides; where it cannot follow bash it reports the run: as not read (R191).
           evidence: >-
-            check-ci-template.py 1.4 (B179), 63 self-test cases. Three fixtures, each
+            check-ci-template.py 1.5 (B179, B182), 84 self-test cases. Four fixtures, each
             yaml-hash-mid-word.yml with its line changed to `echo $(true)#;`, to the same with
-            backquotes, and to a comment inside backquotes, each before an unhashed install,
-            exit 1 naming the install; a fourth, the hashed install then a subshell whose `)` is
-            followed by a comment naming an unhashed install, exits 0. The template holds 17 of
-            17. Falsified 2026-10-28: the 1.3 word-start rule restored, 60 of 63; a `)` always a
-            word start, a closing backquote a word start, a comment in backquotes cut to the line
-            end, and a subshell's `)` never a word start, each 62 of 63.
+            backquotes, to a comment inside backquotes, and to a `#` after a no-break space, each
+            before an unhashed install, exit 1 naming the install; a fifth, the hashed install
+            then a subshell whose `)` is followed by a comment naming an unhashed install, exits 1
+            naming it too, a deliberate over-report. The template holds 17 of 17. Falsified
+            2026-10-28 in a copied skill directory: a `)` a word start again, 82 of 84; Python's
+            whitespace read as a blank, 83 of 84; a comment in backquotes cut to the line end, 83
+            of 84, that fixture still exiting 1 through the unclosed backquote R191 reports.
+        - id: R191
+          verdict: Partial
+          reason: >-
+            It lists the shell its comment reading does not follow, not bash's grammar; an alias
+            or posix mode turned on through a quoted or variable word or a sourced file is not
+            seen, and only GNU bash 5.3 and 3.2 on macOS ran the fixtures, not a runner.
+          evidence: >-
+            check-ci-template.py 1.5 (B182), 84 self-test cases. Twenty fixtures, each the
+            substitution fixture with its line changed - the two reproductions, a `case` pattern's
+            `)` and a heredoc's `(` inside a substitution, a heredoc body holding a quote, a
+            heredoc before an install whose flags follow a `#`, a $'...' string, a substitution
+            and a backquote substitution inside double quotes, `${` inside double quotes, unquoted
+            and hiding an install, `((`, a `[[ =~ ]]` pattern, an extended glob, a quote and an
+            escaped backquote inside backquotes, an alias, a quote after `)#`, an unmatched `)`,
+            a substitution and a backquote left open - each exit 1 reporting the run: as not read
+            and naming what it does not follow. Bash 5.3 ran the unhashed install in all but the
+            last three, which it refuses; 1.4 held 17 of 17 on fifteen of those. The template
+            holds 17 of 17. Falsified 2026-10-28, each reading removed alone: heredoc and `${`,
+            81 of 84; a substitution inside double quotes and a `(` or backquote left open, 82 of
+            84; `((`, `[`, alias, $'...', a quote or a backslash inside backquotes, a `(` inside a
+            word, an unmatched `)` and a quote after `)#`, each 83 of 84; `case`, 83 of 84, the
+            reproduction still exiting 1 through the unmatched `)`.
     limitations:
       - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
       - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.
@@ -3056,11 +3080,24 @@ checks:
             This repository's workflow half, by check-ci-template.py's scanner; it follows bash's
             word starts for a `#`, not bash's whole grammar, as ci-template-safe says.
           evidence: >-
-            check-release-workflow.py 1.3 (B179), 39 self-test cases, loading the scanner from
-            check-ci-template.py 1.4: the same four fixtures over the release-prep job, three exit
-            1 naming the install and the subshell comment exits 0. The real workflow holds 9 of
-            9. Falsified 2026-10-28 in check-ci-template.py: the 1.3 word-start rule restored, 36
-            of 39; each of the four single rules, 38 of 39.
+            check-release-workflow.py 1.4 (B179, B182), 60 self-test cases, loading the scanner
+            from check-ci-template.py 1.5: the same five fixtures over the release-prep job, each
+            exits 1 naming the install, the subshell comment's a deliberate over-report. The real
+            workflow holds 9 of 9. Falsified 2026-10-28 in check-ci-template.py: a `)` a word
+            start again, 58 of 60; Python's whitespace a blank, 59 of 60; a backquote comment cut
+            to the line end, 59 of 60.
+        - id: R191
+          verdict: Partial
+          reason: >-
+            This repository's workflow half, by check-ci-template.py's scanner, which lists the
+            shell it does not follow rather than reading bash's grammar, as ci-template-safe says.
+          evidence: >-
+            check-release-workflow.py 1.4 (B182), 60 self-test cases, loading the scanner from
+            check-ci-template.py 1.5: the same twenty fixtures over the release-prep job, each
+            exits 1 reporting the run: as not read; 1.3 held 9 of 9 on fifteen. The real workflow
+            holds 9 of 9. Falsified 2026-10-28 in check-ci-template.py, each reading removed
+            alone: heredoc and `${`, 57 of 60; a substitution inside double quotes and a `(` or
+            backquote left open, 58 of 60; each other reading, 59 of 60.
     limitations:
       - It reads one file and runs nothing. Whether GitHub enforces the declared permissions, whether a pinned commit is the release its comment names, and whether the jobs ever ran are not measured.
       - The repository-code rule is lexical and shared with check-ci-template.py, so the two drift together; it is stricter here in one place, refusing bash or sh on any file.

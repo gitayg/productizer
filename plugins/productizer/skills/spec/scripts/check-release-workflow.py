@@ -65,8 +65,11 @@ WHAT IT ASSERTS, each a separate finding:
                  of that same command, and no --no-binary or other
                  --only-binary value (B177), by check-ci-template.py's rule,
                  loaded from that file, which since its 1.4 (B179) starts no
-                 comment at a `#` right after a `)` or a backquote that closes
-                 a substitution; it reads the run: text, not whether
+                 comment at a `#` right after a backquote that closes a
+                 substitution, since its 1.5 (B182) none right after any `)`,
+                 and reports a run: holding a `#` beside shell it does not
+                 follow (a heredoc, `case`, `${`, a quote inside backquotes
+                 and the rest); it reads the run: text, not whether
                  the hashes are PyPI's
   run-injection  no `${{` expression of any context inside any run: in the
                  workflow; values reach a shell through env:
@@ -98,7 +101,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-release-workflow 1.3"
+VERSION = "check-release-workflow 1.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(".github", "workflows", "checks.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "release-workflow")

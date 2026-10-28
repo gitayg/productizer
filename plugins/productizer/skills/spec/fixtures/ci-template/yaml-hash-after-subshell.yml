@@ -1,4 +1,4 @@
-# Fixture for check-ci-template.py: good.yml with ONE change - prepare installs PyYAML pinned by hash, wheels only, then a subshell whose `)` is followed by a comment naming an unhashed install, which bash does not run (B179).
+# Fixture for check-ci-template.py: good.yml with ONE change - prepare installs PyYAML pinned by hash, wheels only, then a subshell whose `)` is followed by a comment naming an unhashed install, which bash does not run but which is reported: since 1.5 a `#` right after any `)` starts no comment here, a deliberate over-report (B179, B182).
 name: fixture
 on:
   workflow_dispatch:

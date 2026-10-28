@@ -733,9 +733,23 @@ bash cuts them and a redirection's file is no argument, so a flag handed to
 `)` or the backquote that closes a command substitution is part of a word, as
 bash reads it, and a comment begun inside backquotes ends at the closing one;
 1.3 cut both to the line end and hid an unhashed install written after them.
-The comment reading follows bash's word starts, not its whole grammar: a `)`
-it cannot match, such as a `case` pattern's, starts no comment, which reports
-more than bash runs and never less. It is still a reading of shell text, not
+The comment reading follows bash's word starts, not its whole grammar, and
+1.4's guess at that grammar was wrong: it counted parentheses to tell a
+subshell's `)` from a substitution's, and a `case` pattern's `)` or a `(` in a
+heredoc's body put the count out of step, so an install after `)#` was hidden
+again (B182). Since v4.75.2 a `#` right after any `)` starts no comment, a
+subshell's included - a comment there is read as commands, a deliberate
+over-report - and only space, tab and a line end are blanks, as in bash. Where
+the reading cannot follow bash it does not guess: a `run:` holding a `#` that
+may begin a comment beside a heredoc, `case`, `${`, `((`, `[`, an alias or
+posix mode, a `$'...'` string, a substitution inside double quotes, a quote or
+a backslash inside backquotes, a `(` inside a word, an unmatched `)` or
+backquote, or a quote after `)#` is reported as not read, even where bash would
+run nothing wrong. Reading such a `run:` with no comment cut at all was tried
+and rejected: a flag written in a real comment then counted. The list is what
+probing found, not a proof that bash has nothing else; an alias or posix mode
+turned on through a quoted or variable word or a sourced file is not seen, and
+only GNU bash 5.3 and 3.2 on macOS ran the fixtures. It is still a reading of shell text, not
 bash: a pip install inside `sh -c` or `eval`, or inside a quoted `$(...)`, is
 reported rather than read, a pip spelled through a variable is not seen, and a
 `--no-binary` written into the requirements file or `PIP_NO_BINARY` is not
