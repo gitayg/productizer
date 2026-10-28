@@ -188,4 +188,15 @@ marker, because a table left there would be one nothing writes or checks.
 | R160 | unwanted | active | `governance-weakening` |
 | R161 | unwanted | active | `governance-weakening` |
 | R162 | optional | active | `selftest-coverage` |
+| R163 | unwanted | active | `review-record-checker` |
+| R164 | unwanted | active | `review-record-checker` |
+| R165 | unwanted | active | `review-record-checker` |
+| R166 | unwanted | active | `review-record-checker` |
+| R167 | unwanted | active | `review-record-checker` |
+| R168 | unwanted | active | `review-record-checker` |
+| R169 | unwanted | active | `review-record-checker` |
+| R170 | unwanted | active | `review-record-checker` |
+| R171 | unwanted | active | `plan-record-checker` |
+| R172 | unwanted | active | `plan-record-checker`, `plan-record` |
+| R173 | unwanted | active | `approval-rules-checker` |
 <!-- productizer:requirement-index:end -->

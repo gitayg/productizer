@@ -4516,3 +4516,246 @@ checks:
     limitations:
       - 34 of the 39 measured records have zero fires and pass with nothing to rule. Several rest on small denominators - 3, 6, 9, 12 and 14 verdicts. Zero fires over a small window proves little, and the record says so in its counts.
       - It reads no git. A record can go stale as the branch moves and this will not notice.
+
+  # --- a review finding nobody answered, a plan nobody can undo, an approver
+  # --- nobody named (B166 to B169, B172) ---------------------------------------
+  #
+  # Three new tools, each with a self-test that reaches 0, 1 and 2. The
+  # self-tests are what this repository runs: it keeps no review records, no
+  # docs/sdlc plans and no CODEOWNERS, so the adopter-facing declarations below
+  # them are declared here as the template ships them (B51) and read
+  # not_triggered or disabled, never passed.
+
+  - id: review-record-checker
+    why: a review finding with no location, a round with no count, a bug re-found every round and an Important finding nobody answered all read as a review until something reads the record
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-review-record.py, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-review-record.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-review-record.py, --selftest]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 39 cases held'
+      min_covered: 39
+      spec_units:
+        - id: R163
+          verdict: Covered
+          evidence: >-
+            check-review-record.py 1.0 (B166, B167), 39 cases. `no-line`, `absolute-location` and
+            `parent-location` exit 1 with FINDING finding-shape; `range-location` passes
+            path:9-14; `bad-severity` and `no-class` exit 1; `template-placeholders-refused` fails
+            the shipped templates/review-record.md. Falsified 2026-10-28: location cut to the
+            regex alone 37 of 39, severity rule off 38 of 39, class rule off 38 of 39.
+        - id: R164
+          verdict: Covered
+          evidence: >-
+            `count-wrong`, `no-issues-with-findings`, `count-zero-not-no-issues` and `count-blank`
+            exit 1 with FINDING count. Falsified 2026-10-28: `0` accepted for none 38 of 39; a
+            non-zero count not compared 37 of 39.
+        - id: R165
+          verdict: Covered
+          evidence: >-
+            REVIEW.md's `## Ignored paths` read as fnmatch globs: `ignored-glob`, `ignored-dir`
+            and `ignored-suffix` exit 1; `no-ignored-section` passes saying none listed;
+            `absent-policy` exits 2. Falsified 2026-10-28 with the glob loop emptied: 36 of 39.
+        - id: R166
+          verdict: Covered
+          evidence: >-
+            `fourth-round-no-rethink` and `fourth-round-placeholder-rethink` exit 1;
+            `three-rounds-no-rethink` and `fourth-round-rethink` pass. Falsified 2026-10-28 with
+            the cap removed: 37 of 39.
+        - id: R167
+          verdict: Covered
+          evidence: >-
+            `round-base-gap` and `round-base-other-commit` exit 1 with FINDING round-base;
+            `round-base-long-head` passes an abbreviated id against a longer one. Falsified
+            2026-10-28 with the comparison off: 37 of 39.
+        - id: R168
+          verdict: Covered
+          evidence: >-
+            `re-reported` - round 2 repeating round 1's location and class, differing in case -
+            exits 1; `same-place-other-class` passes. Falsified 2026-10-28 with the rule off: 38
+            of 39.
+        - id: R169
+          verdict: Covered
+          evidence: >-
+            `important-open` exits 1 with FINDING important-open; `two-records-one-bad` fails the
+            run. Through run-checks.sh in a scratch repository with the template's review-record
+            declaration, 2026-10-28: FAIL exit 1, and with a waiver naming review-record, FAIL ·
+            WAIVED BY the named authority. Falsified 2026-10-28 with the rule off: 37 of 39.
+        - id: R170
+          verdict: Covered
+          evidence: >-
+            `closed-without-reason` and `unknown-status` exit 1 with FINDING answered;
+            `answered-tally` prints the five counts. Falsified 2026-10-28 with the reason rule
+            off: 38 of 39.
+    limitations:
+      - It reads the record's text. Whether a finding is true, whether a fix fixed it, whether a reason is a good one and whether the review happened are not measured; a review nobody recorded is invisible.
+      - Ignored paths are fnmatch globs, where `*` crosses `/`, not gitignore patterns. A cell holding a literal `|` splits its row.
+      - The same bug at a moved line is not a re-report to it.
+
+  - id: plan-record-checker
+    why: a change whose plan cannot say how it was shown to work or how to undo it has its rollback invented during the incident
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-plan-record.py, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-plan-record.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-plan-record.py, --selftest]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 17 cases held'
+      min_covered: 17
+      spec_units:
+        - id: R171
+          verdict: Covered
+          evidence: >-
+            check-plan-record.py 1.0 (B168), 17 cases. `plan-no-revert`,
+            `plan-placeholder-revert`, `plan-empty-revert`, `plan-no-proof` and
+            `plan-proof-runs-into-revert` exit 1; `plan-template-is-placeholder` fails the shipped
+            plan.md. Falsified 2026-10-28: revert rule off 10 of 17, tested rule off 13 of 17,
+            placeholder accepted 11 of 17.
+        - id: R172
+          verdict: Partial
+          reason: >-
+            A pull request body lives on GitHub and nothing in the lifecycle fetches one: this reads
+            a body saved to a file, and the template's plan-record check reads only the plan.
+          evidence: >-
+            Under --kind pr-body, `body-no-tested`, `body-placeholder-revert` and `plan-as-body`
+            exit 1, `body-good` passes, and `body-template-is-placeholder` fails the shipped
+            templates/pull-request.md.
+    limitations:
+      - It reads text. Whether the tests named were run, and whether the revert path works, are not measured.
+
+  - id: approval-rules-checker
+    why: a CODEOWNERS that leaves the spec, the checks or the workflows without a human owner makes an agent's change to them approvable by anyone with write access
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py, python3, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py, --selftest]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 21 cases held'
+      min_covered: 21
+      spec_units:
+        - id: R173
+          verdict: Partial
+          reason: >-
+            This repository has no CODEOWNERS, so its own approval-rules declaration is disabled
+            and nothing here holds it on a real tree. The branch protection settings that make a
+            CODEOWNERS bind are on GitHub and NOT MEASURED. A bot is recognised only by a `[bot]`
+            suffix: a plain user name counts as a person and a team as people.
+          evidence: >-
+            check-approval-rules.py 1.0 (B172), 21 cases in temporary repositories. `no-codeowners`,
+            `unowned-later-pattern`, `bot-owner`, `later-glob-takes-file`, `only-one-dir-owned`,
+            `added-file-probe` and `case-sensitive` exit 1; `shipped-template-holds` passes the
+            shipped templates/CODEOWNERS; `single-star-stays-in-dir` follows GitHub's `docs/*`
+            example. Falsified 2026-10-28: first match instead of last 17 of 21, bots counted
+            human 19 of 21, the added-file probe off 20 of 21, a `*` crossing directories 20 of
+            21, the no-CODEOWNERS finding off 20 of 21.
+    limitations:
+      - It reads CODEOWNERS only. Code owner review, stale-approval dismissal, most-recent-push approval and whether GitHub Actions may approve are settings, not files.
+
+  # The three adopter-facing declarations, as templates/checks.yaml ships them.
+  # review-record and plan-record read docs/sdlc/**, which this repository does
+  # not have, so they read not_triggered and start running the day one lands.
+  - id: review-record
+    why: an Important review finding nobody answered merges exactly like one that was fixed, and a reviewer re-finding old bugs every round reads as diligence
+    when:
+      paths:
+        - "docs/sdlc/**/review.md"
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-review-record.py]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-review-record.py, --version]
+    mode: per_file
+    command: [./plugins/productizer/skills/spec/scripts/check-review-record.py, --policy, REVIEW.md, "{file}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]     # this repository has no REVIEW.md, so a record landing here refuses until one does
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - Not triggered here today. It covers nothing until a review record lands under docs/sdlc/.
+
+  - id: plan-record
+    why: a change nobody can say how to revert is a change whose rollback is invented during the incident
+    when:
+      paths:
+        - "docs/sdlc/**/plan.md"
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-plan-record.py]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-plan-record.py, --version]
+    mode: per_file
+    command: [./plugins/productizer/skills/spec/scripts/check-plan-record.py, "{file}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - Not triggered here today. It covers nothing until a plan lands under docs/sdlc/.
+
+  # DISABLED, and not by when.paths: its paths include .claude/productizer/**,
+  # which nearly every change here touches, and this repository has no
+  # CODEOWNERS, so enabled it would fail every such change. Whether this
+  # repository commits a CODEOWNERS and turns on code owner review is the
+  # maintainer's decision about its own GitHub settings (B172); measured
+  # 2026-10-28, check-approval-rules.py on this tree exits 1, `no CODEOWNERS`,
+  # 69 paths probed.
+  - id: approval-rules
+    enabled: false
+    why: DISABLED because this repository has no CODEOWNERS and adopting one, with code owner review, is the maintainer's decision about its own GitHub settings
+    when:
+      paths:
+        - ".github/CODEOWNERS"
+        - "CODEOWNERS"
+        - "docs/CODEOWNERS"
+        - ".claude/productizer/**"
+        - ".github/workflows/**"
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'probed ([0-9]+) path\(s\)'
+      min_covered: 2
+    limitations:
+      - Disabled. It covers nothing.

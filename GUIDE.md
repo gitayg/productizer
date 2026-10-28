@@ -798,7 +798,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**129 requirements are active**, and they are the whole of what has been
+**140 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -987,7 +987,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Fifty-four defences, written as `If … then`
+**When something goes wrong.** Sixty-five defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1130,6 +1130,41 @@ because a designed path and a defended one are not the same thing:
   its `if:` rewritten, or a step that keeps its key has its `if:`, `run:`,
   `with:`, `env:` or `shell:` changed, then the lifecycle shall report that
   move as undecided.
+- **R163** — If a finding in a review record names no file and line, no
+  severity of Important, Nit or Pre-existing, or no bug class, then the
+  lifecycle shall fail that review record.
+- **R164** — If a review round in a review record states a finding count other
+  than the number of findings it records, or records none and does not state
+  `no issues`, then the lifecycle shall fail that review record.
+- **R165** — If a finding in a review record is located under a path the
+  review policy lists as ignored, then the lifecycle shall fail that review
+  record.
+- **R166** — If a review record holds more than three review rounds and does
+  not state the approach that replaced patching, then the lifecycle shall fail
+  that review record.
+- **R167** — If a review round after the first in a review record does not
+  start from the commit at which the round before it ended, then the lifecycle
+  shall fail that review record.
+- **R168** — If a review record holds a finding at the location and of the bug
+  class of a finding from an earlier round, then the lifecycle shall fail that
+  review record.
+- **R169** — If a review record holds an Important finding whose status is
+  open, then the lifecycle shall fail that review record.
+- **R170** — If a finding in a review record has a status other than open,
+  fixed, rejected, intentional or irrelevant, or a status other than open with
+  no reason stated, then the lifecycle shall fail that review record.
+- **R171** — If a change's plan has no section saying how the change is shown
+  to work or no section saying how to revert it, or holds only the template's
+  placeholder in either, then the lifecycle shall fail that plan.
+- **R172** — If a pull request body handed to the lifecycle has no section
+  saying how the change was tested or no section saying how to revert it, or
+  holds only the template's placeholder in either, then the lifecycle shall
+  fail that body.
+- **R173** — If no CODEOWNERS file is where GitHub reads one, or the one
+  GitHub reads leaves a file under `.claude/productizer/` or
+  `.github/workflows/`, or a file a change adds there, with no owner other
+  than a bot, then the lifecycle shall report that file as having no human
+  code owner.
 
 **Only where the feature is present.** Six requirements apply only to a build
 that includes the feature:

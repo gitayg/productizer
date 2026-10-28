@@ -110,11 +110,12 @@ policy:
   # (shellcheck, semgrep, grep). The list ships with the plugin and is never
   # read from this file.
   #
-  # 16 of the 19 checks below need it on: the 13 whose program is a script in
+  # 19 of the 22 checks below need it on: the 16 whose program is a script in
   # this repository (pii-log-scan, stderr-suppression, spec-home,
   # ruling-requested, template-frontmatter, guide-current, view-read-only,
   # missing-tool-reported, acceptance-rows, import-marking,
-  # classification-provenance, superseded-text, pending-ruling-scope), and
+  # classification-provenance, superseded-text, pending-ruling-scope,
+  # review-record, plan-record, approval-rules), and
   # sast, sast-auth and secure-coding-controls, whose `coverage.rules_command`
   # names a committed file. secret-scan, shell-lint and dependency-audit run
   # with it off.
@@ -1086,3 +1087,110 @@ checks:
       min_covered: 1
     limitations:
       - The incoming behaviour merged under a sentence with a different EARS trigger than the contested requirement is not recognised. Closing it needs a similarity threshold, which starts refusing unrelated intents - the failure rulings.md names.
+
+  # --- a review finding nobody answered ---------------------------------------
+  #
+  # B166, B167, B169. A review's findings were advisory and nothing tracked
+  # them: a finding with no location, a summary with no count, the same bug
+  # re-found round after round, an Important finding that merged unanswered.
+  # The review record (templates/review-record.md) is committed beside the
+  # change's plan.md, and this reads it against REVIEW.md's `## Ignored paths`.
+  #
+  # An Important finding still `open` FAILS this check, and a blocking check is
+  # what holds the stage. The way past is the existing waiver of THIS check id
+  # (templates/waiver.md): a named person, a reason, an expiry, and the run
+  # still reads FAIL · WAIVED, never PASS.
+  #
+  # Per file, so every record the change touches is watched being read. The
+  # glob is the default artifacts.path; change it with yours.
+  - id: review-record
+    why: an Important review finding nobody answered merges exactly like one that was fixed, and a reviewer re-finding old bugs every round reads as diligence
+    when:
+      paths:
+        - "docs/sdlc/**/review.md"
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-review-record.py]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-review-record.py, --version]
+    mode: per_file
+    command: [./plugins/productizer/skills/spec/scripts/check-review-record.py, --policy, REVIEW.md, "{file}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a finding with no location, severity or class; a wrong count; an ignored path; a re-reported finding; a fourth round with no rethink; an unanswered or unexplained status; an Important finding still open
+      refused: [2]     # no REVIEW.md, or a record that could not be read
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - It reads the record's text. Whether a finding is true, whether a fix fixed it and whether a reason is a good one are a person's to judge; a review that was never recorded is invisible to it.
+
+  # --- a plan that cannot be undone -------------------------------------------
+  #
+  # B168. The plan says how the change will be shown to work (`Proof`) and how
+  # to undo it once merged (`Revert`). An agent may draft both; the author
+  # answers for them. A pull request body saved to a file is read the same way
+  # with `--kind pr-body` (templates/pull-request.md); the body itself lives on
+  # GitHub, not in the tree, so this check reads the plan.
+  - id: plan-record
+    why: a change nobody can say how to revert is a change whose rollback is invented during the incident
+    when:
+      paths:
+        - "docs/sdlc/**/plan.md"
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-plan-record.py]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-plan-record.py, --version]
+    mode: per_file
+    command: [./plugins/productizer/skills/spec/scripts/check-plan-record.py, "{file}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # no Proof or no Revert section, or one holding only the placeholder
+      refused: [2]     # a plan that could not be read
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+    limitations:
+      - It reads text. Whether the tests named were run, and whether the revert path works, are not measured.
+
+  # --- the files that judge a change, approvable by anyone --------------------
+  #
+  # B172. A person must approve a change to the spec, the checks and the
+  # workflows, and branch protection's "Require review from Code Owners" does
+  # that only for a path CODEOWNERS gives an owner. This reads the CODEOWNERS
+  # GitHub would read, as GitHub reads it, and fails when a file under
+  # .claude/productizer/ or .github/workflows/ - or one a change adds there -
+  # has no owner or only a bot. templates/CODEOWNERS is the starting file.
+  #
+  # The settings that make CODEOWNERS bind (code owner review, stale-approval
+  # dismissal, most-recent-push approval, Actions not approving) live on GitHub
+  # and are NOT MEASURED here; every run says so.
+  - id: approval-rules
+    why: a change an agent authored to the files that judge it is approvable by anyone with write access unless CODEOWNERS names a person for them
+    when:
+      paths:
+        - ".github/CODEOWNERS"
+        - "CODEOWNERS"
+        - "docs/CODEOWNERS"
+        - ".claude/productizer/**"
+        - ".github/workflows/**"
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-approval-rules.py]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # no CODEOWNERS, a `!` or `[ ]` line, or a probed path with no human owner
+      refused: [2]     # not a git work tree, or a CODEOWNERS that could not be read
+    coverage:
+      from: stdout_count
+      pattern: 'probed ([0-9]+) path\(s\)'
+      min_covered: 2
+    limitations:
+      - The branch protection settings are NOT MEASURED - they are on GitHub, not in the tree.
+      - A plain user name counts as a person whether a person or a machine holds it, and a team counts as people whatever its members are.

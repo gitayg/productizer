@@ -6,9 +6,13 @@ SKILL.md keeps the rules of these stages; this is them as a whole.
 
 ### 3 · Build — plan first, knowledge as files
 - **Plan mode is not optional.** Read-only first, then `plan.md`
-  (`templates/plan.md`) naming files, order of work, risks and proof,
-  interrogated until an unfamiliar engineer could build from it. Commit it, then
-  build.
+  (`templates/plan.md`) naming files, order of work, risks, proof and how to
+  revert it, interrogated until an unfamiliar engineer could build from it.
+  Commit it, then build. `scripts/check-plan-record.py` fails a plan whose
+  `Proof` or `Revert` is missing or still the placeholder, and with
+  `--kind pr-body` a pull request body (`templates/pull-request.md`) missing
+  *How it was tested* or *How to revert*. An agent may draft both; the author
+  answers for them.
 - **`CLAUDE.md`** holds day-one knowledge under one page: when a mistake happens
   twice, the correction lands here. **Skills** carry inconsistently enforced
   policy; **hooks** what must be deterministic.
@@ -50,6 +54,21 @@ indent identical to one.
   reasoning and calls that confirmation.
 - **Resolve the diff base before any pass runs**, and state it: a wrong base
   makes every finding confidently wrong.
+- **Every round is recorded and every finding answered.** The caller writes
+  each round's findings into the change's review record
+  (`templates/review-record.md`, beside `plan.md`): a `path:line`, a severity
+  of Important, Nit or Pre-existing, the whole bug class, and a status of open,
+  fixed, rejected, intentional or irrelevant with a reason. The `review-record`
+  check (`scripts/check-review-record.py`) fails a record with an Important
+  finding still open, so it blocks the stage; a waiver of that check is the
+  only way past, and it still reads failed and waived. The tally of how
+  findings were answered is the measure of the reviewer's noise.
+- **Cap the rounds between an agent author and an agent reviewer.** A later
+  round reviews only the diff since the last round's head and never re-reports
+  a finding at the same location and class. After three rounds the author
+  rethinks the approach instead of patching: a fourth round fails the record
+  until its `Rethink:` line names the new approach. The cap holds the loop in a
+  session; the CI build template runs no reviewer, so it has no loop to cap.
 - **The agent never approves its own code.** Output arrives as a PR through
   branch protection; there is no route to push main. **Production is a hook, not
   a convention** (`templates/production-gate.sh`), and in regulated environments
@@ -58,3 +77,30 @@ indent identical to one.
 - **Secret checks go pre-push, not in CI.** A required check runs after the
   push, by which time the secret is on the remote and must be rotated: blocking
   a merge is the whole remedy for a bad base, and none at all for a secret.
+
+### Approval rules for an agent-authored change
+A setup step in the adopter's repository, not runner code: the lifecycle ships
+the template and a check, and a person with admin rights sets the rules. On the
+default branch, in branch protection or a ruleset:
+
+- **Require a pull request review, and "Require review from Code Owners".**
+  GitHub: a pull request "that affects code with a code owner must be approved
+  by that code owner". Commit `templates/CODEOWNERS` as `.github/CODEOWNERS`,
+  owning `.claude/productizer/` and `.github/workflows/` by a person or a team
+  of people. `scripts/check-approval-rules.py` (the `approval-rules` check)
+  fails a CODEOWNERS that leaves a file under either directory, or a file a
+  change adds there, with no owner or only a bot.
+- **Dismiss stale pull request approvals when new commits are pushed**, and
+  **require approval of the most recent reviewable push**, so a new commit
+  dismisses earlier approvals and the person who pushed last cannot approve it.
+- **Do not let a bot approval stand for a person.** Keep "Allow GitHub Actions
+  to create and approve pull requests" off where nothing needs it. The CI build
+  template opens its draft with `GITHUB_TOKEN`, which needs that setting on,
+  and the one setting covers both creating and approving; whether an approval
+  by `GITHUB_TOKEN` counts toward required reviews is not stated in GitHub's
+  documentation and was not measured here.
+- **Do not allow bypassing the above settings**, administrators included.
+
+None of these settings is in the tree, so `approval-rules` cannot see them and
+says so on every run. Whether the person who dispatched an agent run counts as
+a required reviewer of its pull request is an open question (B173).

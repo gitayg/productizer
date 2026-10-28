@@ -13,3 +13,7 @@ Risks
 
 Proof
 - <the test that shows this works; the command that runs it>
+
+Revert
+- <how to undo this change once merged: the commit to revert, any data,
+  migration or configuration to restore, and what stops working meanwhile>

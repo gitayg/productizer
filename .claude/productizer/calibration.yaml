@@ -502,3 +502,23 @@ checks:
     status: uncalibrated
     reason: "measured nothing - it triggered on 30 of the 30 commits and returned a verdict on none: 30 refused, 0 undeclared exit, 0 tool absent at that commit, 0 timed out. Every refusal is python3 finding no check-release-workflow.py, which did not exist before v4.72.0, so no past commit carries it"
     measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-13", config: "checks.yaml in the working tree, with release-workflow-safe declared", command: "measure-check-overfire.sh --check release-workflow-safe --commits 30 --history empty"}
+  - id: review-record-checker
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.74.0 change replayed at the window's head, which is not merged history. check-review-record.py did not exist before v4.74.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.74.0 change", command: "measure-check-overfire.sh --check review-record-checker --commits 30 --history empty"}
+  - id: plan-record-checker
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.74.0 change replayed at the window's head, which is not merged history. check-plan-record.py did not exist before v4.74.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.74.0 change", command: "measure-check-overfire.sh --check plan-record-checker --commits 30 --history empty"}
+  - id: approval-rules-checker
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.74.0 change replayed at the window's head, which is not merged history. check-approval-rules.py did not exist before v4.74.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.74.0 change", command: "measure-check-overfire.sh --check approval-rules-checker --commits 30 --history clone"}
+  - id: review-record
+    status: uncalibrated
+    reason: "measured nothing - it triggered on none of the 30 commits: this repository has never held a docs/sdlc/**/review.md, so the range says nothing about whether it over-fires"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.74.0 change", command: "measure-check-overfire.sh --check review-record --commits 30 --history empty"}
+  - id: plan-record
+    status: uncalibrated
+    reason: "measured nothing - it triggered on none of the 30 commits: this repository has never held a docs/sdlc/**/plan.md, so the range says nothing about whether it over-fires"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.74.0 change", command: "measure-check-overfire.sh --check plan-record --commits 30 --history empty"}

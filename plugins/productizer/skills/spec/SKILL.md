@@ -149,6 +149,8 @@ its exit codes in `references/scripts.md`.
 ### 6 · Deploy — review both ways, gate hard
 - Review goes to a clean-context subagent: the session that wrote the code
   never reviews it. **Resolve the diff base before any pass runs**, and state it.
+- **Every finding is recorded and answered** (`templates/review-record.md`); an
+  open Important one blocks the stage. After three rounds, rethink.
 - **The agent never approves its own code.** Output arrives as a PR through
   branch protection; there is no route to push main. **Production is a hook,
   not a convention.** **Secret checks go pre-push, not in CI.**
@@ -204,10 +206,10 @@ a PR. Repo copies in `.claude/productizer/templates/` win over these.
 | 0c · import | `import.md` |
 | 1 · intent | `backlog.md` `intent.md` `jira-intent.md` |
 | 2 · design | `intake.md` `spec-delta.md` `spec-command.md` `ruling.md` |
-| 3 · build | `plan.md` `build-from-spec.yml` |
+| 3 · build | `plan.md` `pull-request.md` `build-from-spec.yml` |
 | 4 · test | `verification-section.md` `agent-verifier.md` `agent-evals.yml` `threshold.sh` |
 | 5 · checks | `checks.yaml` |
-| 6 · deploy | `agent-reviewer.md` `production-gate.sh` `triage-step.yml` `SKILL-secure-api-review.md` |
+| 6 · deploy | `agent-reviewer.md` `review-record.md` `CODEOWNERS` `production-gate.sh` `triage-step.yml` `SKILL-secure-api-review.md` |
 | 7 · document | `user-guide.md` |
 | 8 · announce | `release-blog.md` `release-email.md` `publish-gate.sh` |
 | 9 · maintain | `bands.yaml` `converge.md` |

@@ -736,3 +736,50 @@ took 185s one at a time here, and three self-tests did under amd64 emulation -
 the probe still reads `?` and the check refuses. That no two self-tests write
 one shared path is read off their source, not enforced. Its duration on an idle
 machine was not measured.
+
+## Added in v4.74.0
+
+### 41 · A review record is checked; the review it describes is not
+
+Since v4.74.0 (B166, B167, B169) `check-review-record.py` reads a change's
+review record (`templates/review-record.md`) and fails one whose finding has
+no location, severity or class, whose count is wrong or not `no issues`, whose
+finding sits under an ignored path or repeats an earlier round's, whose fourth
+round names no rethought approach, whose round does not start from the last
+round's head, whose answer has no reason, or whose Important finding is still
+open. It reads text. Whether a finding is true, whether a fix fixed it, whether
+a reason is a good one, and whether a review happened at all are not measured:
+a review nobody recorded is invisible, and an author can mark an Important
+finding `rejected` with any reason. The same bug at a moved line is not a
+re-report to it. Ignored paths are fnmatch globs, where `*` crosses `/`, not
+gitignore patterns, and a cell holding a literal `|` splits its row. The round
+cap holds the in-session Stage 6 loop; the CI build template runs no reviewer.
+The template's `review-record` check triggers on `docs/sdlc/**/review.md`, the
+default artifacts path, and reads not_triggered in this repository, which keeps
+no review records.
+
+### 42 · A pull request body is read only when someone saves it to a file
+
+Since v4.74.0 (B168) `check-plan-record.py` fails a plan with no `Proof` or no
+`Revert` beyond the template's placeholder, and with `--kind pr-body` a body
+with no *How it was tested* or *How to revert*. The template's `plan-record`
+check reads plans; a body lives on GitHub and nothing in the lifecycle fetches
+one. Whether the tests named were run, and whether the revert path works, are
+not measured.
+
+### 43 · CODEOWNERS is checked; the settings that make it bind are not
+
+Since v4.74.0 (B172) `check-approval-rules.py` reads the CODEOWNERS GitHub
+would read and fails when a file under `.claude/productizer/` or
+`.github/workflows/`, or one a change adds there, has no owner other than a
+bot. Code owner review, stale approvals dismissed on a new commit,
+most-recent-push approval, no bypass, and whether GitHub Actions may approve a
+pull request are settings on GitHub, named in
+`references/stage-3-6-build.md` from GitHub's documentation and measured by
+nothing here; whether an approval made with `GITHUB_TOKEN` counts toward
+required reviews is not stated in that documentation. A bot is recognised only
+by a `[bot]` suffix, so a machine user with a plain name reads as a person and
+a team as people. This repository has no CODEOWNERS: its own `approval-rules`
+check is declared disabled, and the self-test alone runs. Requiring the person
+who dispatched an agent run as a reviewer of its pull request is not built
+(B173).

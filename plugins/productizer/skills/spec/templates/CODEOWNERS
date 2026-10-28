@@ -1,0 +1,18 @@
+# CODEOWNERS - the people who must approve a change to the files that judge a
+# change. Copy to .github/CODEOWNERS and replace @your-github-user with a
+# person's GitHub user name or an @org/team of people. Never a bot: a bot's
+# approval is not a person deciding.
+#
+# GitHub reads the first of .github/CODEOWNERS, CODEOWNERS and docs/CODEOWNERS
+# that exists, and the last matching pattern wins. Keep these lines LAST, so no
+# later pattern takes one of these files away from its owner, and never leave a
+# pattern under them with no owner: that leaves its files approvable by anyone
+# with write access.
+#
+# This file does nothing by itself. Branch protection (or a ruleset) on the
+# default branch must "Require review from Code Owners"; see
+# references/stage-3-6-build.md, "Approval rules for an agent-authored change".
+# scripts/check-approval-rules.py reads this file; it cannot read the settings.
+
+/.claude/productizer/ @your-github-user
+/.github/workflows/ @your-github-user

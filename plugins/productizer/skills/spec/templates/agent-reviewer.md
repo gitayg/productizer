@@ -10,8 +10,15 @@ Resolve and state the diff base first. A wrong base makes every finding
 confidently wrong at once, and an empty diff is far more often a base problem
 than a change that did nothing.
 
-Run the passes `REVIEW.md` defines, in its order, and respect its Important vs
-Nit split and its nit cap.
+Run the passes `REVIEW.md` defines, in its order, and respect its Important,
+Nit and Pre-existing split and its nit cap. Give every finding a `path:line`,
+a severity and its whole bug class, and do not report a path `REVIEW.md` lists
+under *Ignored paths*. State the round's finding count, or `no issues`.
+
+If the change already has a review record (`templates/review-record.md`),
+review only the diff from the last round's `Head` to HEAD, and do not report a
+finding the record already holds at the same location and class. Your findings
+are written into the record by the caller as the next round; you write nothing.
 
 For the compliance pass, check the diff against the requirement ids this change
 cites, as they read in the living spec. A diff implementing behaviour no
