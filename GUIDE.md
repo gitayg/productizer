@@ -798,7 +798,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**120 requirements are active**, and they are the whole of what has been
+**123 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -987,7 +987,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Forty-seven defences, written as `If … then`
+**When something goes wrong.** Forty-nine defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1107,8 +1107,13 @@ because a designed path and a defended one are not the same thing:
 - **R152** — If `models.advisor` is set to a value that is not a model name,
   then the lifecycle shall refuse to dispatch the build before a model is
   called.
+- **R155** — If semgrep does not list a file under `paths.scanned`, or names
+  it under `errors` or `paths.skipped`, then the lifecycle shall not count
+  that file as examined by a semgrep check.
+- **R156** — If a changed path that is substituted into a check's command
+  begins with `-`, then the lifecycle shall pass it with a `./` prefix.
 
-**Only where the feature is present.** Four requirements apply only to a build
+**Only where the feature is present.** Five requirements apply only to a build
 that includes the feature:
 
 - **R22** — Where a repository declares its own check tools, the lifecycle
@@ -1120,6 +1125,9 @@ that includes the feature:
 - **R30** — Where a published view hands over its evidence as a file, the
   lifecycle shall use a capability that writes only to the viewer's own
   device.
+- **R154** — Where a check declares its standard error coverage-only, the
+  lifecycle shall write nothing from that stream into the checks result except
+  the items its coverage pattern captures.
 
 Every id above is permanent. A plan, a test or a PR title naming `R1` will
 still mean this sentence in two years, which is why ids are never reused and

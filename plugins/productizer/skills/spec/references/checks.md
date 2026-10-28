@@ -126,6 +126,13 @@ writes is caught. semgrep named by a path, with `--allow-local-builds`, or
 spelled `-f`, `--conf` or `-cVALUE` gets no exception. `stage-advance.sh` still
 protects the id, so an unattended change cannot add a `p/default`.
 
+**A path that begins with `-` is handed over as `./-...`** (v4.73.1, B165,
+R156), in `{file}` and in `{files}`, so the tool reads it as a file and not as
+an option. Measured: a changed `-x.sh` reached shellcheck bare and was parsed as
+`-x` and `-.`, exit 3; semgrep refused `-v.py` as `unknown option '-.'`. No
+other path is rewritten, and coverage matches `./-x.sh` to `-x.sh` because the
+runner strips a leading `./` from what a tool reports.
+
 ### Testing this class of bug
 
 Two ways a test can agree with itself while all of the above is live, both
@@ -499,6 +506,26 @@ ways to obtain the number, in rough order of how hard they are to fake:
 | `stdout_paths` | it names each file it scanned; compared against the change | a tool that lies in its own report |
 | `command` | a separate enumeration command lists what it would cover | a stale enumeration |
 | `stdout_count` | it prints how many items it processed | any tool that prints a number regardless |
+
+**`stdout_paths` can read a JSON report instead of a pattern** (v4.73.1,
+B164). `json_paths` names, as a dotted key path, the list the tool says it
+examined, and `json_not_examined` the keys whose paths are taken back out; a
+list met on the way is walked element by element. The semgrep checks read
+`json_paths: paths.scanned` less `errors.path`, `errors.spans.file` and
+`paths.skipped.path` (R155): semgrep 1.171.0 listed a file with a syntax error
+both in `paths.scanned` and in `errors[]`, and the quoted-path pattern they used
+before counted any path quoted anywhere in the report. A check declares
+`pattern` or `json_paths`, never both. The paths taken back out are recorded as
+`coverage.observed.listed_not_examined`.
+
+**A check's standard error can be read for coverage and never kept** (v4.73.1,
+B163). `stderr: coverage_only` sends the command's standard error to a file the
+coverage pattern reads, standard error first, then standard output; the
+result's `output_tail`, and the lines printed under a row that did not pass,
+come from standard output alone (R154). `merged`, the default, folds the two
+together as before. `secret-scan` declares it because gitleaks at
+`--log-level trace` writes a skipped candidate's value to standard error,
+unredacted despite `--redact`.
 
 Prefer `per_file_exit` where the cost is bearable. It is the only one that does
 not take the tool's word for anything: the runner watches each file be accepted

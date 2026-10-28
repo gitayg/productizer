@@ -180,8 +180,12 @@ checks:
   #                    nothing later says it was skipped.
   #   SARIF on stdout  trace prints the text of candidates gitleaks SKIPS,
   #                    unredacted despite `--redact`, and debug prints decoded
-  #                    file content. The runner stores the tail of the output;
-  #                    the redacted SARIF report comes last and fills it.
+  #                    file content, both on standard error. `stderr:
+  #                    coverage_only` keeps that stream out of the result and
+  #                    the printed tail: coverage is read from it, and the
+  #                    stored tail is the redacted SARIF report alone. Before
+  #                    it, a `.gitleaks.toml` with few rules made the report
+  #                    short enough that a skipped value reached the tail.
   #   rules_command    a `.gitleaksignore` or `.gitleaks.toml` in the scanned
   #                    tree, or GITLEAKS_CONFIG in the environment, changes or
   #                    empties what runs with no edit to this file. This counts
@@ -203,6 +207,7 @@ checks:
     requires: [gitleaks]
     version_command: [gitleaks, version]
     mode: batch
+    stderr: coverage_only
     command: [gitleaks, dir, --no-banner, --no-color, --redact, --ignore-gitleaks-allow, --exit-code, "3", --log-level, trace, --report-format, sarif, --report-path, "-", "."]
     timeout_seconds: 300
     exit_codes:
@@ -356,9 +361,13 @@ checks:
       # Semgrep names each file it scanned in `paths.scanned`. Compare that
       # against the files this change actually touched: a parse failure makes
       # semgrep skip a file and still exit 0, which is a silent hole exactly
-      # the shape of the one that motivated this whole stage.
+      # the shape of the one that motivated this whole stage. A file with a
+      # syntax error is listed in `paths.scanned` AND in `errors[]` (semgrep
+      # 1.171.0), so the paths `errors` and `paths.skipped` name are taken
+      # back out. A pattern over the JSON counted any quoted path in it.
       from: stdout_paths
-      pattern: '"([^"]+\.(py|js|ts|go))"'
+      json_paths: paths.scanned
+      json_not_examined: [errors.path, errors.spans.file, paths.skipped.path]
       must_cover: all_triggering
       min_covered: 1
       # A ruleset that failed to download is an empty ruleset, and an empty
@@ -390,7 +399,8 @@ checks:
       refused: [2, 4, 7]
     coverage:
       from: stdout_paths
-      pattern: '"([^"]+\.(py|js|ts|go))"'
+      json_paths: paths.scanned
+      json_not_examined: [errors.path, errors.spans.file, paths.skipped.path]
       must_cover: all_triggering
       min_covered: 1
       min_rules: 10
@@ -604,7 +614,8 @@ checks:
       refused: [2, 4, 7]
     coverage:
       from: stdout_paths
-      pattern: '"([^"]+\.(py|js|ts|go))"'
+      json_paths: paths.scanned
+      json_not_examined: [errors.path, errors.spans.file, paths.skipped.path]
       must_cover: all_triggering
       min_covered: 1
       # Was 10. p/secure-defaults loaded ONE rule over a Python file, so a floor

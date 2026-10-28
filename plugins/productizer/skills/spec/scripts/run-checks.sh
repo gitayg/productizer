@@ -238,7 +238,7 @@ on_exit() {
 trap on_exit EXIT
 
 die_usage() { printf 'run-checks: %s\n' "$1" >&2; exit 2; }
-VERSION="run-checks 1.4"
+VERSION="run-checks 1.5"
 
 # Echoes the git work tree containing $1, or nothing. git's own explanation is
 # kept in GIT_WHY rather than discarded: a fallback that cannot say why it fell
@@ -369,6 +369,19 @@ done
 #                 B89: a blocking check that refuses with a reason of
 #                 its own; the summary prints that reason under its
 #                 row, not only the status word                        -> 3
+#   stderr-kept-out
+#                 B163: a check declaring `stderr: coverage_only` whose
+#                 standard error carries a value: coverage is read off
+#                 it, and neither the result nor the printed tail
+#                 holds it; `stderr-merged` is the control that does   -> 3
+#   json-paths    B164: a semgrep-shaped report read through
+#                 `json_paths`: a file under errors[] and one under
+#                 paths.skipped are not examined, so it is hollow;
+#                 `json-pattern` reads the same report the old way and
+#                 passes, `json-paths-clean` passes on the good file,
+#                 `json-and-pattern` is refused at load                -> 3
+#   dash-path     B165: a changed file named `--b165-dash.txt`, per
+#                 file and in a batch, reaches grep as ./--b165-dash.txt -> 0
 #
 # IT NEVER RUNS THE DECLARED SUITE OVER THIS REPOSITORY. That takes minutes and
 # writes over `policy.output`, so a self-test that did it would be slower than
@@ -567,6 +580,181 @@ checks:
       must_cover: none
       min_covered: 1
 SELFTEST_CFG_REASON
+
+  # B163 - A STREAM READ FOR COVERAGE AND NEVER KEPT. grep is handed the clean
+  # file, which it prints on standard output, and an input that is not there,
+  # whose name it prints on standard error - the stand-in for a gitleaks trace
+  # line carrying a skipped candidate's value. Exit 2 is mapped `fail`, so the
+  # summary prints the tail under the row and that print is read too. The
+  # coverage pattern reads standard error only, and captures text other than
+  # the value, so `covered_items` cannot carry it either. The `merged` copy is
+  # the control: the same check with the key left out keeps the value, which
+  # is the premise that the value is really on standard error.
+  cat > "$SB/checks-stderr-kept-out.yaml" <<'SELFTEST_CFG_STDERR'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  mode: batch
+  severity: block
+checks:
+  - id: stderr-kept-out
+    why: its standard error names a value the result must not keep, and its coverage is read from that stream
+    when:
+      paths: ["fixture/clean.txt"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: batch
+    stderr: coverage_only
+    command: [grep, -H, -e, RUN-CHECKS-SELFTEST-NEEDLE, "{files}", B163-STDERR-ONLY-VALUE]
+    exit_codes:
+      pass: [0]
+      fail: [2]
+      refused: [1]
+    coverage:
+      from: stdout_paths
+      pattern: '^grep: [^:]+: (No such file or directory)$'
+      must_cover: none
+      min_covered: 1
+SELFTEST_CFG_STDERR
+  grep -v '^    stderr: coverage_only$' "$SB/checks-stderr-kept-out.yaml" > "$SB/checks-stderr-merged.yaml"
+  grep -q 'stderr:' "$SB/checks-stderr-merged.yaml" &&
+    self_unmeasured "the merged control still declares stderr, so it would be the coverage_only case twice. Unmeasured, not a pass"
+
+  # B164 - PATHS FROM A JSON DOCUMENT'S DECLARED LIST. grep prints a
+  # hand-written semgrep-shaped report, modelled on what semgrep 1.171.0
+  # printed for a JavaScript file with a syntax error: that file is listed in
+  # `paths.scanned` AND in `errors[]` as PartialParsing. A third file is under
+  # `paths.skipped`. All three are quoted somewhere in the document, so the
+  # pattern every semgrep check used before 1.5 counted all three. The report
+  # is a file in the root, which the repo-local gate counts as naming the
+  # repository, so the opt-in is on: these cases are about reading coverage.
+  mkdir -p "$SB/fixture/json"
+  printf 'eval(x)\n' > "$SB/fixture/json/good.js"
+  printf 'function ((( {\n' > "$SB/fixture/json/broken.js"
+  printf 'eval(y)\n' > "$SB/fixture/json/skipped.js"
+  printf '%s\n' '{"version": "1.171.0", "results": [], "errors": [{"code": 3, "level": "warn", "type": ["PartialParsing", [{"path": "fixture/json/broken.js", "start": {"line": 1, "col": 1, "offset": 0}, "end": {"line": 1, "col": 15, "offset": 14}}]], "message": "Syntax error at line fixture/json/broken.js:1", "path": "fixture/json/broken.js", "spans": [{"file": "fixture/json/broken.js", "start": {"line": 1, "col": 1, "offset": 0}, "end": {"line": 1, "col": 15, "offset": 14}}]}], "paths": {"scanned": ["fixture/json/broken.js", "fixture/json/good.js"], "skipped": [{"path": "fixture/json/skipped.js", "reason": "exceeded_size_limit"}]}}' \
+    > "$SB/b164-semgrep-shaped.json"
+  printf 'fixture/json/good.js\nfixture/json/broken.js\nfixture/json/skipped.js\n' > "$SB/changed-json.txt"
+  printf 'fixture/json/good.js\n' > "$SB/changed-json-good.txt"
+  cat > "$SB/checks-json-paths.yaml" <<'SELFTEST_CFG_JSON'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+  allow_repo_local_tools: true
+defaults:
+  timeout_seconds: 30
+  mode: batch
+  severity: block
+checks:
+  - id: json-paths
+    why: its output is a semgrep-shaped report naming one file it examined, one it failed to parse and one it skipped
+    when:
+      paths: ["fixture/json/*.js"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: batch
+    command: [grep, -h, -e, version, b164-semgrep-shaped.json]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: stdout_paths
+      json_paths: paths.scanned
+      json_not_examined: [errors.path, errors.spans.file, paths.skipped.path]
+      must_cover: all_triggering
+      min_covered: 1
+SELFTEST_CFG_JSON
+  # The reading every semgrep check used before 1.5, over the same report.
+  cat > "$SB/checks-json-pattern.yaml" <<'SELFTEST_CFG_JSON_PATTERN'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+  allow_repo_local_tools: true
+defaults:
+  timeout_seconds: 30
+  mode: batch
+  severity: block
+checks:
+  - id: json-pattern
+    why: the same report read with the quoted-path pattern the semgrep checks used before
+    when:
+      paths: ["fixture/json/*.js"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: batch
+    command: [grep, -h, -e, version, b164-semgrep-shaped.json]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: stdout_paths
+      pattern: '"([^"]+\.(py|js|ts|go))"'
+      must_cover: all_triggering
+      min_covered: 1
+SELFTEST_CFG_JSON_PATTERN
+  sed 's/^      json_not_examined: .*$/      pattern: x(y)/' "$SB/checks-json-paths.yaml" > "$SB/checks-json-both.yaml"
+
+  # B165 - A CHANGED PATH THAT BEGINS WITH `-`. Its name is an option grep
+  # does not have, so handed over bare it is refused (exit 2) and not read.
+  printf 'RUN-CHECKS-SELFTEST-NEEDLE\n' > "$SB/--b165-dash.txt"
+  printf -- '--b165-dash.txt\n' > "$SB/changed-dash.txt"
+  printf -- 'fixture/clean.txt\n--b165-dash.txt\n' > "$SB/changed-dash-both.txt"
+  cat > "$SB/checks-dash.yaml" <<'SELFTEST_CFG_DASH'
+version: 1
+policy:
+  empty_run: refuse
+  spec_coverage: "off"
+defaults:
+  timeout_seconds: 30
+  severity: block
+checks:
+  - id: dash-per-file
+    why: the one changed file's name begins with a dash, which a tool reads as an option unless it is handed over as a path
+    when:
+      paths: ["--b165-*.txt"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: per_file
+    command: [grep, -q, RUN-CHECKS-SELFTEST-NEEDLE, "{file}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: per_file_exit
+      examined_when_exit_in: [0, 1]
+      must_cover: all_triggering
+      min_covered: 1
+  - id: dash-batch
+    why: the same file, with an ordinary one beside it, handed over in one batch
+    when:
+      paths: ["--b165-*.txt", "fixture/clean.txt"]
+    severity: block
+    requires: [grep]
+    version_command: [grep, --version]
+    mode: batch
+    command: [grep, -l, RUN-CHECKS-SELFTEST-NEEDLE, "{files}"]
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: stdout_paths
+      pattern: '^(\S+)$'
+      must_cover: all_triggering
+      min_covered: 1
+SELFTEST_CFG_DASH
 
   cat > "$SB/checks-off.yaml" <<'SELFTEST_CFG_OFF'
 version: 1
@@ -1377,6 +1565,83 @@ SELFTEST_ASSERT_AT
   fi
   SELF_ASSERTS=$((SELF_ASSERTS + 1))
 
+  # B163 - a `coverage_only` standard error is read for coverage and kept out
+  # of the result and of the printed tail; the `merged` control keeps it.
+  # $1 file, $2 text it must NOT hold, $3 what that asserts.
+  self_assert_absent() {
+    SELF_ASSERTS=$((SELF_ASSERTS + 1))
+    if grep -qF -- "$2" "$1"; then
+      printf '  FINDING: assert %-20s %s - %s holds it\n' "absent" "$3" "${1##*/}"
+      SELF_FAILED=$((SELF_FAILED + 1))
+    else
+      printf '  held:    assert %-20s %s\n' "absent" "$3"
+    fi
+  }
+  self_drive stderr-kept-out 3 \
+    "a check whose standard error is coverage_only fails: 3, and the summary prints its tail" \
+    --config "$SB/checks-stderr-kept-out.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --out "$SB/stderr-kept-out.json"
+  self_assert "$SB/stderr-kept-out.json" status '"fail"' \
+    "the check ran and its exit 2 read as the fail it is mapped to"
+  self_assert_at "$SB/stderr-kept-out.json" checks.0.coverage.observed.covered_items '["No such file or directory"]' \
+    "coverage was read off standard error, the only stream the pattern can match"
+  self_assert "$SB/stderr-kept-out.json" output_tail '"fixture/clean.txt:RUN-CHECKS-SELFTEST-NEEDLE\n"' \
+    "output_tail holds standard output and nothing else"
+  # The line grep wrote, not the bare value: the value is in the argv, which
+  # the row records, and that is not the stream under test.
+  self_assert_absent "$SB/stderr-kept-out.json" "B163-STDERR-ONLY-VALUE: No such file" \
+    "the line on standard error is nowhere in the result file"
+  self_assert_err "$SB/stderr-kept-out.err" "| fixture/clean.txt:RUN-CHECKS-SELFTEST-NEEDLE" \
+    "the summary still prints the check's standard output under its row"
+  self_assert_absent "$SB/stderr-kept-out.err" "B163-STDERR-ONLY-VALUE: No such file" \
+    "and not the line on standard error"
+  self_drive stderr-merged 3 \
+    "the control: the same check with no stderr key" \
+    --config "$SB/checks-stderr-merged.yaml" --root "$SB" \
+    --changed "$SB/changed-clean.txt" --out "$SB/stderr-merged.json"
+  self_assert_err "$SB/stderr-merged.json" "B163-STDERR-ONLY-VALUE: No such file" \
+    "merged, the value reaches output_tail - the premise that the case above had one to keep out"
+
+  # B164 - only `paths.scanned`, less what `errors[]` and `paths.skipped` name.
+  self_drive json-paths 3 \
+    "a semgrep-shaped report scanning one file, failing to parse one and skipping one: hollow" \
+    --config "$SB/checks-json-paths.yaml" --root "$SB" \
+    --changed "$SB/changed-json.txt" --out "$SB/json-paths.json"
+  self_assert "$SB/json-paths.json" status '"hollow"' \
+    "it exited 0 and is hollow"
+  self_assert_at "$SB/json-paths.json" checks.0.coverage.observed.covered_items '["fixture/json/good.js"]' \
+    "only the file scanned and named in no error counts as examined"
+  self_assert_at "$SB/json-paths.json" checks.0.coverage.observed.listed_not_examined '["fixture/json/broken.js"]' \
+    "the file both scanned and under errors[] is taken back out, and named"
+  self_assert_at "$SB/json-paths.json" checks.0.coverage.observed.not_examined '["fixture/json/broken.js", "fixture/json/skipped.js"]' \
+    "the errored and the skipped file are the two not examined"
+  self_drive json-pattern 0 \
+    "the control: the same report read with the old quoted-path pattern passes, counting all three" \
+    --config "$SB/checks-json-pattern.yaml" --root "$SB" \
+    --changed "$SB/changed-json.txt" --out "$SB/json-pattern.json"
+  self_drive json-paths-clean 0 \
+    "the json reading over the one file the report examined: a pass, so the hollow above is the exclusions'" \
+    --config "$SB/checks-json-paths.yaml" --root "$SB" \
+    --changed "$SB/changed-json-good.txt" --out "$SB/json-paths-clean.json"
+  self_drive json-and-pattern 2 \
+    "json_paths and pattern together: refused at load, because one check reads paths one way" \
+    --config "$SB/checks-json-both.yaml" --root "$SB" \
+    --changed "$SB/changed-json.txt" --out "$SB/json-both.json"
+  self_assert_err "$SB/json-and-pattern.err" "declares both \`pattern\` and \`json_paths\`" \
+    "and says which rule refused it"
+
+  # B165 - a changed path that begins with `-` reaches the tool as `./-...`.
+  self_drive dash-path 0 \
+    "a changed file named --b165-dash.txt, per_file and in a batch: both read it as a file" \
+    --config "$SB/checks-dash.yaml" --root "$SB" \
+    --changed "$SB/changed-dash-both.txt" --out "$SB/dash.json"
+  self_assert_at "$SB/dash.json" checks.0.coverage.observed.covered_items '["--b165-dash.txt"]' \
+    "per_file: the file's exit was 0, so it counts as examined under its own name"
+  self_assert_at "$SB/dash.json" checks.1.output_tail '"./--b165-dash.txt\nfixture/clean.txt\n"' \
+    "batch: the dash path was handed over as ./--b165-dash.txt, and the ordinary path unchanged"
+  self_assert_at "$SB/dash.json" checks.1.coverage.satisfied 'true' \
+    "and coverage matched ./--b165-dash.txt to the changed path"
+
   # B150 - THE REPO-LOCAL GATE READS EVERY POSITION THAT CAN SELECT CODE. Each
   # shape below ran a repository file with `allow_repo_local_tools` off at
   # 6627bcf, measured with the payload's marker: an option's value taken for
@@ -1937,6 +2202,7 @@ SELFTEST_CFG_RL_DATA
   printf '  NOW ASSERTED (B150, then the strict rule of 2026-10-13): with `allow_repo_local_tools` off every case exits 2 with the marker absent, and with it on runs with the marker present. Clause 1, the program: a relative path, an absolute path under the root, a bare name the root holds found through PATH. Clause 2, a literal argument, handed to a stub outside the work tree that runs nothing: ./x, x//y, x/../y, a trailing slash, --opt=VALUE, a value glued to a short option and one glued after a cluster, a path only the base tree holds, one only the work tree holds, an absolute path outside the root through a symlink pointing inside, `docs/{base}` judged as the path it becomes, the same argument in version_command, coverage.command and coverage.rules_command, a dotted name (`python3 -m rlpkg.mod`) read as the module path it resolves to, and a script-shaped path neither tree holds yet; a case variant, refused or run as this disk folds case or not. Clause 3: a placeholder handed to a program not on the data-only list, and grep, on it, with --filter; a config that names its own program as data-only, in the policy and in the check, is refused all the same, because the list is the plugin'"'"'s (`rl-ph-config-list`). The B150 shapes stay as regression cases (-W ignore, a versioned or absolute interpreter, -X dev -m, perl -I, sed -f, python3 {file}). Controls run with the opt-in off: `rl-data-allowed` (grep, on the list, with {files}) and `rl-not-inside-allowed` (`.`, a word with no slash, /dev/null); `rl-a-registry-id` (`p/default`) is refused since 1.3, counted by its spelling. `rl-no-shared-reading` refuses with no argv-classify.py beside the runner. NOT ASSERTED here: a file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself; the root itself or a directory above it as an argument, which is not refused because the checks already run there; a value inside a comma-separated list (`--x=a,b`); a bare name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); a tool on the data-only list whose installed version gained an option that runs code; shellcheck and semgrep with a placeholder, which are on the list but not on every machine.\n'
   printf '  NOW ASSERTED (B157): a path an earlier check writes during the run. Each `wtn-*` case ran the written file at b84994b; with the opt-in off it is now refused and the marker absent, with it on it runs and the marker appears. Judged again just before it runs, exit 3 with wtn-b `refused`: a bare program a PATH entry into the tree finds, an argument and an --opt=VALUE with no slash, the same in version_command, coverage.command and coverage.rules_command, and a per_file `{file}` invocation of shellcheck a PATH entry into the tree now finds. Counted by its spelling when the config is read, exit 2: an extension-less path under a directory the tree holds and under one it does not, as --opt=VALUE and glued to a short option. NOT ASSERTED: a file written while a check runs by a process that outlives the check, or between the judgement and the exec; a file the later check reads that no argument names.\n'
   printf '  NOW ASSERTED (B159, ruling 2026-10-14): semgrep'"'"'s --config, --config= or -c value spelled as a registry id is not a repository path while neither tree holds a file or directory by that name. With the opt-in off, `sg-registry-runs` (--config p/default), `sg-config-equals` (--config=p/x) and `sg-short-c` (-c r/abc) run a semgrep stub outside the work tree, each refused at a0c7f6e; `sg-work-tree-holds` and `sg-base-holds` refuse it when the work tree or the base tree holds p/default, `sg-case-variant` refuses or runs as this disk folds case or not, and `wtn-registry` refuses it when semgrep comes to run after an earlier check wrote p/default (exit 3, the row `refused`). No exception for semgrep named by a path (`sg-path-program`), with --allow-local-builds (`sg-voided`), or another program (`rl-a-registry-id`). NOT ASSERTED: what the real semgrep reads for a registry id - measured by hand with semgrep 1.171.0 on 2026-10-14 (it fetched the registry and did not read a local p/default), not here; a registry id after -f, an abbreviated --conf or a glued -cVALUE, which stay paths.\n'
+  printf '  NOW ASSERTED (B163, B164, B165): `stderr-kept-out` reads a check'"'"'s coverage off its standard error and finds the line it wrote there in neither the result file nor the printed tail, while its standard output is the whole of output_tail and is printed; `stderr-merged`, the same check with no key, keeps the line. `json-paths` counts only the file a semgrep-shaped report lists under paths.scanned and names under no error, so a file under errors[] and one under paths.skipped leave it hollow, and `json-pattern`, the old quoted-path pattern over the same report, passes; `json-and-pattern` is refused at load. `dash-path` hands a changed file named --b165-dash.txt to grep as ./--b165-dash.txt, per file and in a batch, with the ordinary path beside it unchanged. NOT ASSERTED: the report is hand-written from semgrep 1.171.0 output measured on 2026-10-27, not produced by semgrep here; gitleaks itself, whose trace line carrying a skipped value was measured by hand with 8.30.1 and is not driven here; a stream other than standard error carrying a value; a path whose name begins with a dash handed to a tool that reads `./` as something other than the current directory.\n'
   printf '  NOT ASSERTED: `{base}` as an operand of a program that runs it, with the opt-in on, which is the opt-in'"'"'s to allow and is not refused, and a base that resolved but is not 40 hex digits - a SHA-256 repository - whose row is `no_base` with a different sentence and is not driven here. Nor the TIMEOUT path: no case here drives a tool past its limit, so the 124 the executor turns into `timed_out` is reached by measurement outside this self-test and not by a case inside it - see the comment on the poll loop.\n'
   if [ "$SELF_FAILED" -ne 0 ]; then
     printf 'run-checks: %d self-test case(s) did not produce the exit code the contract declares for them.\n' "$SELF_FAILED" >&2
@@ -2983,6 +3249,22 @@ for idx, chk in enumerate(checks):
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         bad("%s.timeout_seconds must be a positive integer, not %r" % (w, timeout))
 
+    # B163 - A STREAM THAT IS READ FOR COVERAGE AND NEVER KEPT (R154). The
+    # executor folds a tool's standard error into its output, and the result
+    # keeps the last 2000 characters of that output as `output_tail`. gitleaks
+    # at `--log-level trace` writes the value of every candidate it SKIPS to
+    # standard error, unredacted despite `--redact` - measured on 8.30.1:
+    # `TRC skipping finding: rule allowlist ... finding=<the value>`. Its
+    # coverage is read from that same log, so the log cannot simply be dropped.
+    # `coverage_only` keeps the two streams apart: standard error goes to a
+    # file of its own that the coverage pattern reads, standard error first,
+    # and nothing else - `output_tail`, and the lines printed under a row that
+    # did not pass, come from standard output alone. `merged`, the default, is
+    # the behaviour every check had before.
+    stderr_mode = chk.get("stderr", "merged")
+    if stderr_mode not in ("merged", "coverage_only"):
+        bad("%s.stderr must be `merged` or `coverage_only`, not %r" % (w, stderr_mode))
+
     cmd = argv_of("%s.command" % w, chk.get("command"))
     if mode == "per_file":
         if sum(a.count("{file}") for a in cmd) != 1:
@@ -3028,7 +3310,30 @@ for idx, chk in enumerate(checks):
     if frm == "per_file_exit" and mode != "per_file":
         bad("%s.coverage.from is per_file_exit but the check runs in batch mode; "
             "batch mode has no per-file result to read" % w)
-    if frm in ("stdout_paths", "stdout_count"):
+    # B164 - PATHS READ FROM A JSON DOCUMENT, NOT FROM EVERY QUOTED STRING IN
+    # IT (R155). A pattern over semgrep's `--json` matched a path wherever it
+    # was quoted, so a file named only under `errors[]` counted as examined.
+    # Measured on semgrep 1.171.0: a JavaScript file with a syntax error is
+    # listed in `errors[]` as PartialParsing AND in `paths.scanned`, and the
+    # old pattern counted it. `json_paths` names, as a dotted key path, the
+    # list the tool declares it examined; `json_not_examined` names the keys
+    # whose paths are taken back out of it. A list met on the way is walked
+    # element by element, so `errors.path` reads the `path` of every error.
+    json_sel = cov.get("json_paths")
+    json_not = cov.get("json_not_examined", [])
+    if json_sel is not None:
+        dotted = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
+        if frm != "stdout_paths":
+            bad("%s.coverage.json_paths is read only by `from: stdout_paths`, not %r" % (w, frm))
+        if not isinstance(json_sel, str) or not dotted.match(json_sel):
+            bad("%s.coverage.json_paths must be a dotted key path such as paths.scanned" % w)
+        if cov.get("pattern") is not None:
+            bad("%s.coverage declares both `pattern` and `json_paths`; it reads paths one way" % w)
+        if not isinstance(json_not, list) or not all(isinstance(k, str) and dotted.match(k) for k in json_not):
+            bad("%s.coverage.json_not_examined must be a list of dotted key paths" % w)
+    elif "json_not_examined" in cov:
+        bad("%s.coverage.json_not_examined takes paths out of `json_paths`, which is not declared" % w)
+    if frm in ("stdout_paths", "stdout_count") and json_sel is None:
         if not isinstance(cov.get("pattern"), str) or not cov["pattern"]:
             bad("%s.coverage.from is %s, so it needs a `pattern` with one capture group" % (w, frm))
         try:
@@ -3239,10 +3544,11 @@ for idx, chk in enumerate(checks):
 
     plan.append({
         "index": idx, "id": cid, "severity": sev, "mode": mode,
-        "timeout_seconds": timeout, "command": cmd, "requires": req,
+        "timeout_seconds": timeout, "stderr": stderr_mode, "command": cmd, "requires": req,
         "version_command": ver_argv, "why": chk.get("why", ""),
         "exit_codes": {"pass": ec_pass, "fail": ec_fail, "refused": ec_ref},
         "coverage": {"from": frm, "pattern": cov.get("pattern"), "command": cov_cmd,
+                     "json_paths": json_sel, "json_not_examined": list(json_not or []),
                      "examined_when_exit_in": int_list("%s.coverage.examined_when_exit_in" % w,
                                                        cov.get("examined_when_exit_in", [0]))
                                               if frm == "per_file_exit" else None,
@@ -3451,7 +3757,7 @@ for c in plan:
     d = os.path.join(WORK, "run", str(c["index"]))
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "meta"), "w") as fh:
-        fh.write("mode=%s\ntimeout=%d\n" % (c["mode"], c["timeout_seconds"]))
+        fh.write("mode=%s\ntimeout=%d\nstderr=%s\n" % (c["mode"], c["timeout_seconds"], c["stderr"]))
     with open(os.path.join(d, "argv"), "wb") as fh:
         fh.write(b"".join(a.encode() + b"\x00" for a in c["command"]))
     with open(os.path.join(d, "version_argv"), "wb") as fh:
@@ -3572,7 +3878,12 @@ fi
 # in too, so a tool's budget is not shortened by this change.
 run_limited() {
   limit="$1"; outfile="$2"; shift 2
-  "$@" >>"$outfile" 2>&1 &
+  # RL_ERR set: standard error goes to that file and never into $outfile (B163).
+  if [ -n "${RL_ERR:-}" ]; then
+    "$@" >>"$outfile" 2>>"$RL_ERR" &
+  else
+    "$@" >>"$outfile" 2>&1 &
+  fi
   pid=$!
   limit_ms=$((limit * 1000))
   waited_ms=0
@@ -3659,6 +3970,8 @@ for idx in $TRIGGERED; do
   # mistake the argv-only rule in checks.yaml exists to prevent.
   mode="$(sed -n 's/^mode=//p' "$D/meta")"
   timeout="$(sed -n 's/^timeout=//p' "$D/meta")"
+  stderr_mode="$(sed -n 's/^stderr=//p' "$D/meta")"
+  RL_ERR=""
 
   # Every declared tool must be present. Missing is a failure, never a skip:
   # skipping is how a repo ends up with a green stage and no scanner.
@@ -3726,6 +4039,14 @@ for idx in $TRIGGERED; do
   fi
 
   : > "$D/output"
+  # `coverage_only` (B163): the check command's standard error lands in a
+  # file the coverage reader opens and the result never copies. Set here and
+  # not earlier, so the version and rules commands above keep their merged
+  # output, and cleared once the command has run.
+  if [ "$stderr_mode" = coverage_only ]; then
+    : > "$D/stderr"
+    RL_ERR="$D/stderr"
+  fi
   started="$(date +%s)"
 
   if [ "$mode" = "per_file" ]; then
@@ -3758,12 +4079,21 @@ for idx in $TRIGGERED; do
       [ -n "$f" ] || continue
       judge_now command "$D/argv" || { gated=1; break; }
       read_argv "$D/argv"
+      # B165 - A PATH THAT BEGINS WITH `-` IS HANDED OVER AS `./-...` (R156),
+      # so the tool cannot read it as an option. Measured: a changed file
+      # `-x.sh` reached shellcheck as `-x.sh`, which it parsed as the flags
+      # `-x` and `-.` and refused (exit 3), and semgrep refused `-v.py` with
+      # `unknown option '-.'` (exit 2); both examined `./-x.sh` and `./-v.py`.
+      # Only such a path is prefixed, so every other argv is the one it was,
+      # and `file_exits` keeps the path unprefixed for coverage to match.
+      fa="$f"
+      case "$f" in -*) fa="./$f" ;; esac
       CMD=()
       for a in "${ARGV[@]}"; do
         # `{base}` BEFORE `{file}`, so a path that holds the text `{base}` is
         # handed over as the path it is and never rewritten into a commit id.
         a="${a//\{base\}/$BASE_SHA}"
-        CMD+=("${a//\{file\}/$f}")
+        CMD+=("${a//\{file\}/$fa}")
       done
       printf '\n===== %s\n' "$f" >> "$D/output"
       frc=0
@@ -3786,6 +4116,8 @@ for idx in $TRIGGERED; do
       if [ "$a" = "{files}" ]; then
         while IFS= read -r f; do
           [ -n "$f" ] || continue
+          # B165: as for `{file}` above, a leading `-` is handed over as `./-`.
+          case "$f" in -*) f="./$f" ;; esac
           CMD+=("$f")
         done < "$D/files"
       else
@@ -3797,6 +4129,7 @@ for idx in $TRIGGERED; do
     printf '%s\n' "$brc" > "$D/exit"
   fi
 
+  RL_ERR=""
   printf '%s\n' "$(( $(date +%s) - started ))" > "$D/duration"
 
   if [ -s "$D/cov_argv" ]; then
@@ -3831,6 +4164,40 @@ def norm(p):
     if p.startswith(root):
         p = p[len(root):]
     return p
+
+# B164: the first JSON object in a check's output - the whole of it, else the
+# first line that opens one and decodes from there - so a line of standard
+# error before semgrep's one-line `--json` does not leave nothing to read.
+def first_json_object(text):
+    try:
+        doc = json.loads(text)
+        return doc if isinstance(doc, dict) else None
+    except ValueError:
+        pass
+    dec, pos = json.JSONDecoder(), 0
+    for line in text.splitlines(True):
+        if line.lstrip().startswith("{"):
+            try:
+                doc = dec.raw_decode(text, pos + len(line) - len(line.lstrip()))[0]
+            except ValueError:
+                doc = None
+            if isinstance(doc, dict):
+                return doc
+        pos += len(line)
+    return None
+
+# Every string at a dotted key path; a list on the way is walked element by
+# element, and a value that is not a string is not a path.
+def json_strings_at(doc, dotted):
+    cur = [doc]
+    for seg in dotted.split("."):
+        nxt = []
+        for v in cur:
+            for x in (v if isinstance(v, list) else [v]):
+                if isinstance(x, dict) and seg in x:
+                    nxt.append(x[seg])
+        cur = nxt
+    return [x for v in cur for x in (v if isinstance(v, list) else [v]) if isinstance(x, str)]
 
 results, blocking_failures, advisory_failures, triggered = [], [], [], 0
 
@@ -3962,12 +4329,17 @@ for c in plan["checks"]:
     exit_code = int(read(d, "exit", "1").strip() or 1)
     duration = int(read(d, "duration", "0").strip() or 0)
     output = read(d, "output")
+    # What the coverage patterns read. For a `coverage_only` check (B163) that
+    # is its standard error, then its standard output, and `output` - all that
+    # `output_tail` below copies - is standard output alone.
+    cov_text = read(d, "stderr") + output if c.get("stderr") == "coverage_only" else output
     row["exit_code"] = exit_code
     row["duration_seconds"] = duration
 
     # --- coverage ---------------------------------------------------------
     cov = c["coverage"]
     covered, covered_list, timed_out, count_note = 0, [], False, None
+    listed_not_examined = []
     if cov["from"] == "per_file_exit":
         ok = set(cov["examined_when_exit_in"] or [0])
         for line in read(d, "file_exits").splitlines():
@@ -3980,6 +4352,23 @@ for c in plan["checks"]:
             if code in ok:
                 covered_list.append(path)
         covered = len(covered_list)
+    elif cov["from"] == "stdout_paths" and cov.get("json_paths"):
+        doc = first_json_object(cov_text)
+        if doc is None:
+            count_note = "the output holds no JSON object for `json_paths` to read"
+        else:
+            gone = set(norm(p) for k in cov["json_not_examined"] for p in json_strings_at(doc, k))
+            seen = set()
+            for p in json_strings_at(doc, cov["json_paths"]):
+                p = norm(p)
+                if not p or p in seen:
+                    continue
+                seen.add(p)
+                if p in gone:
+                    listed_not_examined.append(p)
+                else:
+                    covered_list.append(p)
+        covered = len(covered_list)
     elif cov["from"] == "stdout_paths":
         # MULTILINE so ^ and $ mean "a line of the tool's output", which is what
         # anyone writing one of these patterns against a line-oriented scanner
@@ -3987,7 +4376,7 @@ for c in plan["checks"]:
         # reads as hollow when the tool was fine.
         rx = re.compile(cov["pattern"], re.MULTILINE)
         seen = set()
-        for m in rx.finditer(output):
+        for m in rx.finditer(cov_text):
             p = norm(m.group(1))
             if p and p not in seen:
                 seen.add(p); covered_list.append(p)
@@ -3995,7 +4384,7 @@ for c in plan["checks"]:
     elif cov["from"] == "stdout_count":
         # No match means the tool never printed the number it was supposed to,
         # which is a coverage failure and not a reason to crash the run.
-        m = re.search(cov["pattern"], output, re.MULTILINE)
+        m = re.search(cov["pattern"], cov_text, re.MULTILINE)
         try:
             covered = int(m.group(1)) if m else 0
         except (TypeError, ValueError):
@@ -4087,6 +4476,8 @@ for c in plan["checks"]:
                      "deleted_not_required": deleted_files[:200]},
         "satisfied": not reasons, "reasons": reasons,
     }
+    if cov.get("json_paths"):
+        row["coverage"]["observed"]["listed_not_examined"] = listed_not_examined[:200]
     row["timed_out"] = timed_out
     row["output_tail"] = output[-2000:]
 

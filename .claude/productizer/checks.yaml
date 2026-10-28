@@ -3235,6 +3235,7 @@ checks:
     requires: [gitleaks]
     version_command: [gitleaks, version]
     mode: batch
+    stderr: coverage_only
     command: [gitleaks, dir, --no-banner, --no-color, --redact, --ignore-gitleaks-allow, --exit-code, "3", --log-level, trace, --report-format, sarif, --report-path, "-", "."]
     timeout_seconds: 300
     exit_codes:
@@ -3252,7 +3253,7 @@ checks:
     limitations:
       - It inherits gitleaks' global allowlist. Lockfiles, images and .git are skipped before `scanning path` is logged, so such a file in the change reads as not examined rather than passing - measured for the allowlist, not for every skip path gitleaks has.
       - It scans the working tree, not git history. A credential committed and later deleted is still in history, and nothing here scans history.
-      - The stored-output protection depends on the SARIF report staying far larger than the runner's 2000-character tail. That size is the runner's, not declared here.
+      - Its standard error is `coverage_only` (B163): gitleaks' trace log, which prints a skipped candidate's value unredacted, is read for coverage and never stored or printed. The stored tail is the SARIF report on standard output, which `--redact` covers; a value gitleaks wrote unredacted to standard output would still be kept.
       - Encoded credentials depend on gitleaks' default decode depth of 5; nothing here measured one.
 
   # --- dependency audit: declared, and not triggered while there is nothing to audit
@@ -3345,7 +3346,8 @@ checks:
       refused: [2, 4, 7]
     coverage:
       from: stdout_paths
-      pattern: '"([^"]+\.(py|js|ts|go))"'
+      json_paths: paths.scanned
+      json_not_examined: [errors.path, errors.spans.file, paths.skipped.path]
       must_cover: all_triggering
       min_covered: 1
       min_rules: 50
@@ -3355,6 +3357,7 @@ checks:
       - The rule floor is counted over one Python file, so it proves the Python rules loaded. A registry response that dropped only the JavaScript rules would pass the floor.
       - The ruleset is fetched from the registry on every run and is not content-pinned, so the same commit can be green on one day and red on the next.
       - It sees only .py, .js, .ts and .go. The 72 shell scripts, which are most of what this plugin executes, are `shell-lint`'s and `stderr-suppression`'s, not this check's.
+      - Coverage is semgrep's `paths.scanned` less the files its `errors` and `paths.skipped` name (B164). A file semgrep parsed only in part, listed as a PartialParsing error, counts as not examined although rules ran over the part it parsed, so such a file makes the check hollow rather than passing.
 
   # --- SAST on authentication, and the control-framework scan: DISABLED -----
   #
@@ -3387,7 +3390,8 @@ checks:
       refused: [2, 4, 7]
     coverage:
       from: stdout_paths
-      pattern: '"([^"]+\.(py|js|ts|go))"'
+      json_paths: paths.scanned
+      json_not_examined: [errors.path, errors.spans.file, paths.skipped.path]
       must_cover: all_triggering
       min_covered: 1
     limitations:
@@ -3413,7 +3417,8 @@ checks:
       refused: [2, 4, 7]
     coverage:
       from: stdout_paths
-      pattern: '"([^"]+\.(py|js|ts|go))"'
+      json_paths: paths.scanned
+      json_not_examined: [errors.path, errors.spans.file, paths.skipped.path]
       must_cover: all_triggering
       min_covered: 1
     limitations:
@@ -4198,6 +4203,35 @@ checks:
             override off, 13 (`sg-work-tree-holds`, `-base-holds`, `-case-variant`,
             `wtn-registry`); the voiding ignored, 3 (`sg-voided`). NOT asserted: what the real
             semgrep reads for a registry id, measured by hand with semgrep 1.171.0 and not here.
+        - id: R154
+          verdict: Covered
+          evidence: >-
+            B163. `stderr-kept-out`: a check declaring `stderr: coverage_only` whose grep writes
+            a line to standard error fails, exit 3; its coverage is read off that stream, its
+            `output_tail` is exactly its standard output, and the line is in neither the result
+            file nor the printed tail. `stderr-merged`, the same check with no key, keeps it.
+            Falsified 2026-10-27 with standard error merged again in `run_limited`: three
+            assertions red. NOT asserted: gitleaks itself, whose trace line carrying a skipped
+            value was measured by hand with 8.30.1 and is not run here.
+        - id: R155
+          verdict: Partial
+          reason: >-
+            The report is hand-written from semgrep 1.171.0 output, not produced by semgrep here,
+            and that the three semgrep checks keep the `json_paths` reading rests on this file.
+          evidence: >-
+            B164. `json-paths`: a semgrep-shaped report read through `json_paths: paths.scanned`
+            less `errors.path`, `errors.spans.file` and `paths.skipped.path` counts only the file
+            scanned and named in no error; the one under `errors[]` is in `listed_not_examined`
+            and the check is hollow, exit 3. `json-pattern`, the old quoted-path pattern over the
+            same report, passes counting all three. Falsified 2026-10-27 with the exclusion off:
+            three assertions red.
+        - id: R156
+          verdict: Covered
+          evidence: >-
+            B165. `dash-path`: a changed file `--b165-dash.txt` is read by grep per file and in a
+            batch, exit 0, handed over as `./--b165-dash.txt` with an ordinary path beside it
+            unchanged, and coverage matches both. Falsified 2026-10-27 with the prefix removed:
+            the case exit 3, grep refusing the name as an option.
     limitations:
       - It is the runner's self-test, not this repository's run. That the real suite's refusals print their tails in CI is seen in the workflow log, not asserted here.
       - A file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself (`.semgrepignore`, `.npmrc`, `conftest.py`), a git alias - is not gated. The data-only list rests on the tools' `--help`, read 2026-10-13.

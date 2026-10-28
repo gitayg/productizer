@@ -649,3 +649,40 @@ advisory `skill-body-budget` check holds the size and that each named file
 exists; no eval shows a model opens the named reference when it enters a
 stage. A topic that was in the always-loaded further-reading table now takes
 one more read. The token savings are an estimate from bytes, not a count.
+
+## Added in v4.73.1
+
+### 34 · `secret-scan` keeps its trace log out of the result; its report is trusted to be redacted
+
+gitleaks 8.30.1 at `--log-level trace` writes the value of a candidate it skips
+to standard error, unredacted despite `--redact` (measured with a made-up key:
+`TRC skipping finding: rule allowlist ... finding=<the value>`). Before v4.73.1
+(B163) a short report - a `.gitleaks.toml` with three rules - let that line
+into the result's `output_tail`. `secret-scan` now declares `stderr:
+coverage_only`: its standard error is read for coverage and kept out of the
+result and the printed tail. What is kept is the SARIF report on standard
+output, and that it holds no value rests on `--redact`, checked for one
+made-up key and two other made-up tokens, not for every rule. gitleaks itself is
+not run by the runner's self-test; the mechanism is asserted with grep.
+
+### 35 · The semgrep checks count a partly parsed file as not examined
+
+Since v4.73.1 (B164) `sast`, `sast-auth` and `secure-coding-controls` count a
+file only when semgrep lists it under `paths.scanned` and names it under neither
+`errors` nor `paths.skipped`. semgrep 1.171.0 lists a JavaScript file with a
+syntax error under both `paths.scanned` and `errors` (PartialParsing), having
+run its rules over the part it parsed; such a file now makes the check hollow
+rather than passing. The self-test reads a hand-written report modelled on
+that output, not one semgrep produced; `paths.skipped` appears only under
+`--verbose`, which the checks do not pass, so its exclusion is asserted only
+against the hand-written report. Nothing watches the `json_paths` declaration
+itself: `governance-weakening` does not read a coverage pattern or key path.
+
+### 36 · Only a leading `-` is rewritten in a changed path
+
+Since v4.73.1 (B165) `run-checks.sh` 1.5 hands a changed path that begins with
+`-` to a tool as `./-...`. Before it, shellcheck and semgrep refused such a
+file - the check read `refused`, which blocked the run, so nothing passed
+unexamined; measured with shellcheck and semgrep, not with every data-only
+tool. No other path is rewritten, and a tool that reads `./` as something other
+than the current directory is not covered.
