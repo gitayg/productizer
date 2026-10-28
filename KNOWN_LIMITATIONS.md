@@ -703,11 +703,18 @@ it never runs is protected anyway. On this repository the protected list grew
 from 89 paths to 114. Since v4.74.1 (B176) 1.11 follows a symbolic link too: the
 link is protected and so is the file it points to, read from the base tree, and
 that file is followed if it is a script. A link whose target leaves the
-repository, is absolute, or names nothing the base tree holds - a target that
-runs through another link among them - stays protected and is not followed,
-and the reason says so; what such a link reaches at run time is not judged.
-This repository holds no symbolic link, so its own list did not change: 122
-paths at 55e56c1 and after.
+repository, is absolute, or names nothing the base tree holds stays protected
+and is not followed, and the reason says so; what such a link reaches at run
+time is not judged. This repository holds no symbolic link, so its own list did
+not change: 122 paths at 55e56c1 and after. Since v4.75.1 (B180) 1.12 resolves
+a link's target, and a path a protected script names, one component at a time
+as the kernel does: a component that is a link is replaced by that link's
+target before a later `..` applies, and every link so passed is protected.
+1.11 read the target as text, so `helper.sh -> dirlink/../real.sh` protected a
+`real.sh` beside the link that never runs. A walk through more than 40 links
+ends there and its target is not followed, though a kernel allowing more would
+reach it; a component the base tree does not hold is walked as a directory,
+which protects a path the kernel would refuse to reach.
 
 ### 38 · PyYAML's hashes were read from PyPI, not from a wheel
 
@@ -722,7 +729,13 @@ mode should then fail the install rather than fall back; that was not run. `yaml
 requirements line it writes. Since v4.74.1 (B177) it reads them as arguments of
 the same pip install: the `run:` is split into commands, comments are cut where
 bash cuts them and a redirection's file is no argument, so a flag handed to
-`echo` after `;` no longer counts. It is still a reading of shell text, not
+`echo` after `;` no longer counts. Since v4.75.1 (B179) a `#` right after the
+`)` or the backquote that closes a command substitution is part of a word, as
+bash reads it, and a comment begun inside backquotes ends at the closing one;
+1.3 cut both to the line end and hid an unhashed install written after them.
+The comment reading follows bash's word starts, not its whole grammar: a `)`
+it cannot match, such as a `case` pattern's, starts no comment, which reports
+more than bash runs and never less. It is still a reading of shell text, not
 bash: a pip install inside `sh -c` or `eval`, or inside a quoted `$(...)`, is
 reported rather than read, a pip spelled through a variable is not seen, and a
 `--no-binary` written into the requirements file or `PIP_NO_BINARY` is not
@@ -840,3 +853,16 @@ has its own bands file, binding and scheduled task; the comparison of the
 binding with the frozen literal is the prompt's, made by a model, as for the
 first band, and no task was installed in this release. The band view
 (`build-view.sh`) still shows only `ops/bands.yaml`.
+
+## Added in v4.75.1
+
+### 46 · The view's reading of a path on another drive was driven with ntpath, not run on Windows
+
+Since v4.75.1 (B181) `build-view.sh` 1.3 reads its own output file, and a
+result file it names on the page, as outside the repository when the two are on
+different drives, where 1.2 called `os.path.relpath`, which on Windows raises
+for two drives: the dashboard writes under the temp directory, on C:, so a
+repository on D: would not build. That failure was reproduced with `ntpath`,
+not on Windows. The self-test's A17 hands the two functions Windows paths
+through Python's `ntpath` on this machine. No Windows machine has built a page,
+so any other path the builder reads on Windows is not known to work.

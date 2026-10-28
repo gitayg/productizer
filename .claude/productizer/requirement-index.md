@@ -212,4 +212,8 @@ marker, because a table left there would be one nothing writes or checks.
 | R184 | unwanted | active | `band-review-rounds-checker` |
 | R185 | optional | active | `band-revert-rate-checker` |
 | R186 | optional | active | `band-revert-rate-checker` |
+| R187 | unwanted | active | `ci-template-safe`, `release-workflow-safe` |
+| R188 | unwanted | active | `stage-advance-guard` |
+| R189 | unwanted | active | `stage-advance-guard` |
+| R190 | unwanted | active | `view-builder` |
 <!-- productizer:requirement-index:end -->

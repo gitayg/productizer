@@ -798,7 +798,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**153 requirements are active**, and they are the whole of what has been
+**157 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -987,7 +987,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Seventy-four defences, written as `If … then`
+**When something goes wrong.** Seventy-eight defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1200,6 +1200,23 @@ because a designed path and a defended one are not the same thing:
   record, or fewer than three earlier windows hold a value, or the earlier
   windows all hold one value and the current value is above it, then the
   lifecycle shall report that band as not measured.
+- **R187** — If a `run:` that names PyYAML, in a workflow the lifecycle ships
+  or runs, holds a `#` that bash does not read as starting a comment, as one
+  right after a `)` or a backquote that closes a command substitution, or a
+  comment that bash ends at a closing backquote, then the lifecycle shall read
+  a pip install after that `#` or that backquote as a command.
+- **R188** — If a symbolic link's target, or a path that a script protected
+  from an unattended stage run names, passes at the base through another
+  symbolic link, then the lifecycle shall protect the file or directory the
+  kernel reaches by following that link before a later `..` applies, and every
+  link passed.
+- **R189** — If resolving the target of a symbolic link protected from an
+  unattended stage run passes through more than 40 symbolic links at the base,
+  then the lifecycle shall report that link as protected and its target as not
+  followed.
+- **R190** — If the file a view is written to, or a path a view publishes, is
+  on another drive than the repository, then the lifecycle shall build the
+  view and read that path as outside the repository.
 
 **Only where the feature is present.** Ten requirements apply only to a build
 that includes the feature:

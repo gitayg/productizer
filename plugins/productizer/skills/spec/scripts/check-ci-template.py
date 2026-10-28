@@ -75,7 +75,10 @@ WHAT IT ASSERTS, each a separate finding:
                  are read as arguments of that same pip install: the run: is
                  split into commands at `;`, `&`, `&&`, `||`, `|`, a
                  parenthesis, a backquote and a line end, a comment is cut
-                 where bash starts one, and a redirection's file is no
+                 where bash starts one - since 1.4 (B179) never right after a
+                 `)` or a backquote that closes a substitution, which bash
+                 reads as part of a word, and inside backquotes only up to
+                 the closing one - and a redirection's file is no
                  argument; any --no-binary, an --only-binary whose value is
                  not :all:, a pip install seen only inside a larger word (a
                  quoted $(...), `sh -c "..."`) and a run: that does not split
@@ -148,7 +151,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-ci-template 1.3"
+VERSION = "check-ci-template 1.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(HERE, "..", "templates", "build-from-spec.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "ci-template")
@@ -328,8 +331,20 @@ def shell_text(run):
     a word outside quotes; and a line end or a backquote outside quotes made a
     `;`. shlex's own comments=True is not used: it starts a comment at a `#`
     inside a word, which bash does not, so `echo a#; pip install pyyaml` read
-    as `echo a` and the install was never seen (B177)."""
+    as `echo a` and the install was never seen (B177).
+
+    A `)` or a backquote that closes a substitution ends no word in bash, so
+    1.3 cut `echo $(true)#; pip install pyyaml` and `echo `true`#; ...` at
+    the `#` and never saw the install, which bash runs (B179). Since 1.4 a
+    `#` starts a comment only after whitespace, `;`, `&`, `|`, `(`, `<`, `>`,
+    an opening backquote, a `)` that closes a subshell or a line start; a `(`
+    is a subshell only where a word starts and no `<` or `>` precedes it, so
+    `$(`, `<(` and a `(` inside a word are not. A comment begun inside
+    backquotes ends at the closing backquote, where bash ends the command it
+    reads out of them: 1.3 cut `echo `#x`; pip install pyyaml` to the line
+    end."""
     out, quote, word_start, i = [], "", True, 0
+    parens, in_bq = [], False
     while i < len(run):
         c = run[i]
         if quote == "'":
@@ -348,14 +363,25 @@ def shell_text(run):
             out.append(c)
             quote = c
         elif c == "#" and word_start:
-            while i < len(run) and run[i] != "\n":
+            while i < len(run) and run[i] != "\n" and not (in_bq and run[i] == "`"):
                 i += 1
             continue
         elif c in "\n`":
             out.append(" ; ")
         else:
             out.append(c)
-        word_start = not quote and (c.isspace() or c in ";&|()<>`")
+        if quote:
+            word_start = False
+        elif c == "`":
+            in_bq = not in_bq
+            word_start = in_bq
+        elif c == "(":
+            parens.append(word_start and run[i - 1:i] not in ("<", ">"))
+            word_start = True
+        elif c == ")":
+            word_start = parens.pop() if parens else False
+        else:
+            word_start = c.isspace() or c in ";&|<>"
         i += 1
     return "".join(out)
 

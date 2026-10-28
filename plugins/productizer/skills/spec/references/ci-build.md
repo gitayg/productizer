@@ -781,7 +781,9 @@ your copy after every edit.
 - **The protected list follows names, not code.** Since `stage-advance.sh` 1.10
   (B147) it holds what `checks.yaml` names and every script those scripts name
   by their path, to any depth, and since 1.11 (B176) every symbolic link among
-  them and the file it points to, but not a script reached through a name built
+  them and the file it points to - since 1.12 (B180) the file the kernel
+  reaches, a `..` after a link applied to where that link leads - but not a
+  script reached through a name built
   at run time (`"$dir/$name"`, a glob) nor a data file a script reads, and a
   `run-checks.sh --config` other than `.claude/productizer/checks.yaml` is not
   read. Nor is a file a tool finds and runs by itself, with no argument naming

@@ -118,11 +118,13 @@ while [ $# -gt 0 ]; do
     # record which builder it ran (B115, B130). 1.1 (B139): a link built from
     # the origin remote, a tracked path or jira.site is an escaped http(s) URL
     # or no link at all. 1.2 (B146): a tracked path is percent-encoded in a
-    # GitHub file link, so a `#`, `?` or `%` in its name is that name.
-    --version) echo "build-view 1.2"; exit 0 ;;
+    # GitHub file link, so a `#`, `?` or `%` in its name is that name. 1.3
+    # (B181): an output file or a result on another drive than the tree is
+    # read as outside it, where 1.2's relpath raised on Windows.
+    --version) echo "build-view 1.3"; exit 0 ;;
     # The graph assertion suite. Driven by --selftest as one of its cases and
     # separately runnable, because when it goes red the first question is which
-    # of A1..A16 went red and that answer is on its own stdout.
+    # of A1..A17 went red and that answer is on its own stdout.
     --arch-selftest) MODE=archtest; shift ;;
     --out) OUT="${2:-}"; [ -n "$OUT" ] || { echo "build-view: --out needs a file" >&2; exit 2; }; shift 2 ;;
     --out=*) OUT="${1#--out=}"; shift ;;
@@ -166,7 +168,7 @@ ROOT="$(cd "$ROOT" && pwd)"
 #
 # The graph assertions are one case here rather than seven, because they are
 # assertions about a data structure and belong in the language that builds it;
-# `--arch-selftest` is that suite and it names its own cases A1..A16. What this
+# `--arch-selftest` is that suite and it names its own cases A1..A17. What this
 # layer adds is the part that suite cannot reach from inside one process: the
 # exit codes.
 if [ "$MODE" = selftest ]; then
@@ -1488,10 +1490,26 @@ def vz_arch_read(path, shown):
     return obj, 'read', shown, mt
 
 
-def vz_arch_shown(path):
+def vz_arch_shown(path, pm=os.path, root=None):
     """A path fit to publish: relative to the tree, or its bare name."""
-    r = os.path.relpath(os.path.abspath(path), os.path.abspath(ROOT))
-    return os.path.basename(path) if r.startswith(os.pardir) else r
+    # A path on another drive than the tree cannot be inside it, and Windows'
+    # relpath raises ValueError for one rather than answering (B181), so the
+    # dashboard's output under a temp directory on C: crashed a build of a
+    # repository on D:. pm is the path module, so the self-test drives ntpath.
+    try:
+        r = pm.relpath(pm.abspath(path), pm.abspath(ROOT if root is None else root))
+    except ValueError:
+        return pm.basename(path)
+    return pm.basename(path) if r.startswith(pm.pardir) else r
+
+
+def vz_self_path(out, root, pm=os.path):
+    """The page's own output file relative to the tree, '/'-separated, or None
+    when it is on another drive and so matches no path the tree holds (B181)."""
+    try:
+        return pm.relpath(pm.abspath(out), root).replace(pm.sep, '/')
+    except ValueError:
+        return None
 
 
 VZ_ARCH = vz_arch_build(*vz_arch_read(rel(RESULT_PATH), RESULT_PATH))
@@ -1504,7 +1522,7 @@ if MODE == 'arch':
     sys.exit(0)
 
 if MODE == 'archtest':
-    # A1..A16. Every case names the state or the property it drives, so a red
+    # A1..A17. Every case names the state or the property it drives, so a red
     # line says which branch broke rather than that something did.
     _fixdir = os.path.join(SKILL_HOME, 'fixtures', 'arch-graph')
     _fix = os.path.join(_fixdir, 'five-states.json')
@@ -1521,7 +1539,7 @@ if MODE == 'archtest':
 
     if _g['state'] != 'read':
         sys.stderr.write('build-view: the fixture at %s could not be read, so no case '
-                         'was driven and none of A1..A16 means anything.\n'
+                         'was driven and none of A1..A17 means anything.\n'
                          % vz_arch_shown(_fix))
         sys.exit(2)
 
@@ -1669,6 +1687,21 @@ if MODE == 'archtest':
        'the same fail claim WITHOUT the runner\'s advisory_failing mark reads void - the '
        'exemption is the mark, never the status alone (F6 got %r)' % _ums.get('F6'))
 
+    # A17 - B181. Windows reads a path on another drive as outside the tree:
+    # the output file matches no changed path and a published path shows its
+    # bare name. Driven with ntpath, since nothing here runs on Windows.
+    import ntpath
+    _w_out = 'C:\\Users\\u\\AppData\\Local\\Temp\\productizer-view.html'
+    _w_res = 'C:\\Users\\u\\AppData\\Local\\Temp\\checks-result.json'
+    _w_root = 'D:\\work\\repo'
+    _w = (vz_self_path(_w_out, _w_root, ntpath),
+          vz_arch_shown(_w_res, ntpath, _w_root),
+          vz_self_path('D:\\work\\repo\\docs\\view.html', _w_root, ntpath),
+          vz_arch_shown('D:\\work\\repo\\out\\checks-result.json', ntpath, _w_root))
+    _a('A17', _w == (None, 'checks-result.json', 'docs/view.html', 'out\\checks-result.json'),
+       'an output file and a result on drive C: of a tree on drive D: read as outside it, '
+       'and the same files on D: as inside it (got %r)' % (_w,))
+
     sys.stdout.write('  cases driven: %d. Cases that did not hold: %d\n' % (len(_driven), len(_failed)))
     if _failed:
         sys.stderr.write('FAIL: %s did not hold.\n' % ', '.join(_failed))
@@ -1677,7 +1710,8 @@ if MODE == 'archtest':
         '  NOT ASSERTED: that this repository ever reaches never_ran, void, missing or '
         'advisory_failing. '
         'It does not today, which is why the fixture exists; A1..A16 are statements '
-        'about the deriver, not about this tree.\n')
+        'about the deriver, not about this tree. That a page is built on Windows: A17 '
+        'drives the path reading with ntpath, and nothing here runs on Windows.\n')
     sys.exit(0)
 
 bad_checks = [c for c in checks if c['status'] not in ('pass', 'skipped')]
@@ -4266,7 +4300,7 @@ VZ_D_STATUS = {'A': ('d-add', 'added'), 'D': ('d-rem', 'removed')}
 # output across runs is the property R11 is asserted on. A generator that
 # reported its own artifact as part of the change would also be telling the
 # reader that regenerating the view changed something in the repository.
-_vz_self = os.path.relpath(os.path.abspath(OUT), ROOT).replace(os.sep, '/')
+_vz_self = vz_self_path(OUT, ROOT)
 _vz_changed = []
 raw = tmpf('delta')
 if VZ_DELTA_OK and raw:
