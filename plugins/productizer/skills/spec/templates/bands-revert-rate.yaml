@@ -1,0 +1,25 @@
+# Data only — never a command. One bands file per metric (B171): this one is
+# the revert rate band, beside ops/bands.yaml, and it has its own binding
+# (`band_bindings` in `.claude/productizer/config.json`) and its own scheduled
+# task (`templates/scheduled-band-metric.md`).
+# Copy it to ops/bands-revert-rate.yaml.
+# The detection command it is measured by comes from the binding, never from
+# here: this file is committed, so anyone who lands a commit can change it.
+#
+# The metric: commits carrying a `This reverts commit` line divided by changes
+# merged, over the last 30 days.
+# The detection command prints the value, the baseline and a `tier:` line.
+# The tier is the value's distance ABOVE the mean of the 6 earlier 30-day
+# windows, in their standard deviations; only a rise is a breach, and the
+# Western Electric run rules are not evaluated.
+metric: revert_rate
+baseline: rolling_30d
+rules: one_point_above_mean
+
+tiers:
+  1sigma: { action: log }
+  # `tools_note` documents intent for a human reader. Nothing parses it.
+  2sigma: { action: diagnose, tools_note: "intent: Read, Grep, git log — read-only. Not enforced here." }
+  # A 3σ breach proposes; it never acts. No rollback route: the scheduled
+  # prompt forbids deploying and rolling back.
+  3sigma: { action: propose, routes: [pull_request] }

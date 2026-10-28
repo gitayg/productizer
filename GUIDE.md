@@ -798,7 +798,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**144 requirements are active**, and they are the whole of what has been
+**153 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -987,7 +987,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Sixty-nine defences, written as `If … then`
+**When something goes wrong.** Seventy-four defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1184,8 +1184,24 @@ because a designed path and a defended one are not the same thing:
   `--require-hashes` and `--only-binary :all:`, or carries `--no-binary` or
   another `--only-binary` value, then the lifecycle shall report that install
   as not pinned by hash.
+- **R178** — If a review record scored against a reviewer case holds no
+  round-1 Important finding whose location covers the case's confirmed bug, or
+  its first round did not review the case's change, then the lifecycle shall
+  score that case as missed.
+- **R179** — If a reviewer case names no change as a commit, no confirmed bug
+  as a `path:line` under the root or no fix, then the lifecycle shall refuse
+  to score that case.
+- **R180** — If a commit in a change carries a `This reverts commit` line
+  naming a commit that no reviewer case under `evals/reviewer/` names as its
+  change, then the lifecycle shall fail that change.
+- **R181** — If a pull request changes `REVIEW.md`, then the lifecycle shall
+  re-score the reviewer against every reviewer case.
+- **R184** — If a band's current window holds no merged change or no review
+  record, or fewer than three earlier windows hold a value, or the earlier
+  windows all hold one value and the current value is above it, then the
+  lifecycle shall report that band as not measured.
 
-**Only where the feature is present.** Six requirements apply only to a build
+**Only where the feature is present.** Ten requirements apply only to a build
 that includes the feature:
 
 - **R22** — Where a repository declares its own check tools, the lifecycle
@@ -1203,6 +1219,18 @@ that includes the feature:
 - **R162** — Where the self-test coverage check is given a probe job count
   above one, the lifecycle shall run up to that many self-test probes at once,
   each under its own probe time limit.
+- **R182** — Where a repository binds the revert-rate band, the lifecycle
+  shall measure it as the commits of the last 30 days carrying a `This reverts
+  commit` line divided by the changes merged in those 30 days.
+- **R183** — Where a repository binds the review-rounds band, the lifecycle
+  shall measure it as the mean number of rounds in the review records last
+  changed in the last 30 days.
+- **R185** — Where a repository binds a band beside the first, the lifecycle
+  shall run that band's detection command only when that band's own binding
+  matches the literal frozen into that band's own scheduled task.
+- **R186** — Where a repository binds a band beside the first, the lifecycle
+  shall leave the first band's bands file, binding and scheduled task prompt
+  as they were.
 
 Every id above is permanent. A plan, a test or a PR title naming `R1` will
 still mean this sentence in two years, which is why ids are never reused and

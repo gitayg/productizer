@@ -198,9 +198,18 @@ marker, because a table left there would be one nothing writes or checks.
 | R170 | unwanted | active | `review-record-checker` |
 | R171 | unwanted | active | `plan-record-checker` |
 | R172 | unwanted | active | `plan-record-checker`, `plan-record` |
-| R173 | unwanted | active | `approval-rules-checker` |
+| R173 | unwanted | active | `approval-rules-checker`, `approval-rules` |
 | R174 | unwanted | active | `governance-weakening` |
 | R175 | unwanted | active | `stage-advance-guard` |
 | R176 | unwanted | active | `stage-advance-guard` |
 | R177 | unwanted | active | `ci-template-safe`, `release-workflow-safe` |
+| R178 | unwanted | active | `reviewer-case-checker` |
+| R179 | unwanted | active | `reviewer-case-checker` |
+| R180 | unwanted | active | `revert-cases-checker`, `revert-cases` |
+| R181 | unwanted | active | `reviewer-case-checker` |
+| R182 | optional | active | `band-revert-rate-checker` |
+| R183 | optional | active | `band-review-rounds-checker` |
+| R184 | unwanted | active | `band-review-rounds-checker` |
+| R185 | optional | active | `band-revert-rate-checker` |
+| R186 | optional | active | `band-revert-rate-checker` |
 <!-- productizer:requirement-index:end -->

@@ -522,3 +522,43 @@ checks:
     status: uncalibrated
     reason: "measured nothing - it triggered on none of the 30 commits: this repository has never held a docs/sdlc/**/plan.md, so the range says nothing about whether it over-fires"
     measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.74.0 change", command: "measure-check-overfire.sh --check plan-record --commits 30 --history empty"}
+  - id: reviewer-case-checker
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.75.0 change replayed at the window's head, which is not merged history. score-reviewer-case.py did not exist before v4.75.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.75.0 change", command: "measure-check-overfire.sh --check reviewer-case-checker --commits 30 --history empty"}
+  - id: revert-cases-checker
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.75.0 change replayed at the window's head, which is not merged history. check-revert-cases.py did not exist before v4.75.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.75.0 change", command: "measure-check-overfire.sh --check revert-cases-checker --commits 30 --history clone"}
+  - id: band-revert-rate-checker
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.75.0 change replayed at the window's head, which is not merged history. band-revert-rate.py did not exist before v4.75.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.75.0 change", command: "measure-check-overfire.sh --check band-revert-rate-checker --commits 30 --history clone"}
+  - id: band-review-rounds-checker
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.75.0 change replayed at the window's head, which is not merged history. band-review-rounds.py did not exist before v4.75.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.75.0 change", command: "measure-check-overfire.sh --check band-review-rounds-checker --commits 30 --history clone"}
+  - id: revert-cases
+    status: uncalibrated
+    reason: "the command passes --base, so it compares against a history the extracted tree does not have"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.75.0 change", command: "measure-check-overfire.sh --check revert-cases --commits 30 --history clone"}
+  - id: approval-rules
+    status: measured
+    window: {first: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, last: 7e21e09a32674357200bde8aa997914ec7704b5c, commits: 29, history: clone}
+    triggered: 29
+    excluded: {tool_absent: 27}
+    verdicts: 2
+    fires: 2
+    fire_rate: "2/2 = 100.0%"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.75.0 change; the replay covered 30 commits, and its one pass, on that uncommitted change at the window's head, is left out as not merged history", command: "measure-check-overfire.sh --check approval-rules --commits 30 --history clone"}
+    rulings:
+      - commit: 7e21e09a32674357200bde8aa997914ec7704b5c
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-28
+        note: "ruled GENUINE by the maintainer on 2026-10-28, after the fire and its finding were shown. Replay evidence: fired at 'v4.74.1'; this repository held no CODEOWNERS at that commit, which v4.74.0 measured and recorded, and B178 adds one. An agent reads it as genuine; that is an agent's judgement, not a person's ruling"
+      - commit: 55e56c18e899d46dcbb2dabd9f9f3c3d6d2e96b0
+        ruling: genuine
+        by: gitayg (maintainer)
+        date: 2026-10-28
+        note: "ruled GENUINE by the maintainer on 2026-10-28, after the fire and its finding were shown. Replay evidence: fired at 'v4.74.0', the release that shipped check-approval-rules.py and declared this repository's approval-rules disabled because it held no CODEOWNERS. An agent reads it as genuine; that is an agent's judgement, not a person's ruling"

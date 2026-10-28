@@ -87,6 +87,17 @@
     "detection_command": "python3 ops/ci-failure-rate.py",
     "_note": "The scheduled band check executes detection_command from HERE, never a path read out of bands.yaml. Two sources must agree: this binding and the literal frozen into the scheduled prompt when a human installed it."
   },
+  "band_bindings": {
+    "_note": "One binding per band added beside `bands` above, each with its own bands file and its own scheduled task (templates/scheduled-band-metric.md, taskId sdlc-bands-<slug>-<metric>), which runs detection_command from HERE only when it matches the literal frozen into that task. `bands` and the task installed from it are untouched, so what that task runs does not change. Each command prints a `tier:` line the task acts on. See references/stage-9-maintain.md.",
+    "revert_rate": {
+      "config": "ops/bands-revert-rate.yaml",
+      "detection_command": "python3 ./plugins/productizer/skills/spec/scripts/band-revert-rate.py"
+    },
+    "review_rounds": {
+      "config": "ops/bands-review-rounds.yaml",
+      "detection_command": "python3 ./plugins/productizer/skills/spec/scripts/band-review-rounds.py"
+    }
+  },
   "intent": {
     "channels": [
       "file",

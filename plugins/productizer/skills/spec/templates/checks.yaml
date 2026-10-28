@@ -110,12 +110,12 @@ policy:
   # (shellcheck, semgrep, grep). The list ships with the plugin and is never
   # read from this file.
   #
-  # 19 of the 22 checks below need it on: the 16 whose program is a script in
+  # 20 of the 23 checks below need it on: the 17 whose program is a script in
   # this repository (pii-log-scan, stderr-suppression, spec-home,
   # ruling-requested, template-frontmatter, guide-current, view-read-only,
   # missing-tool-reported, acceptance-rows, import-marking,
   # classification-provenance, superseded-text, pending-ruling-scope,
-  # review-record, plan-record, approval-rules), and
+  # review-record, plan-record, approval-rules, revert-cases), and
   # sast, sast-auth and secure-coding-controls, whose `coverage.rules_command`
   # names a committed file. secret-scan, shell-lint and dependency-audit run
   # with it off.
@@ -1194,3 +1194,39 @@ checks:
     limitations:
       - The branch protection settings are NOT MEASURED - they are on GitHub, not in the tree.
       - A plain user name counts as a person whether a person or a machine holds it, and a team counts as people whatever its members are.
+
+  # --- a revert nobody turned into a reviewer case ------------------------------
+  #
+  # B170. A revert is a confirmed miss: the change shipped a bug review did not
+  # stop. Each becomes a case under evals/reviewer/ (templates/reviewer-case.md)
+  # naming the change, the bug's path:line and the fix, and the reviewer is
+  # re-scored on every case by templates/agent-evals.yml, the score taken by
+  # score-reviewer-case.py with no model. A commit in the change carrying a
+  # `This reverts commit <id>` line with no case whose Change is that id FAILS
+  # this check, as does a case missing its change, its bug or its fix. Add the
+  # case in the same change as the revert. An incident has no commit to find it
+  # by, so a missing incident case is not seen here.
+  #
+  # It reads the commits since the base, so it needs one: under --changed,
+  # which names no commit, it refuses rather than guess.
+  - id: revert-cases
+    why: a revert is the one confirmed miss a reviewer ever gets, and without a case it teaches the reviewer nothing
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, --base, "{base}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a revert in the range with no case naming its change, or a case missing its change, bug or fix
+      refused: [2]     # not a git work tree, or a base git cannot resolve
+    coverage:
+      from: stdout_count
+      pattern: 'examined ([0-9]+) commit\(s\)'
+      min_covered: 1
+    limitations:
+      - A revert is a commit message holding a `This reverts commit <id>` line. A revert written by hand without it, and an incident, are not seen.
+      - Whether a case's bug location is the real one is a person's to judge.

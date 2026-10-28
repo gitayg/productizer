@@ -1,7 +1,7 @@
 name: Agent evals
 on:
   pull_request:
-    paths: ['CLAUDE.md', '.claude/**']
+    paths: ['CLAUDE.md', '.claude/**', 'REVIEW.md']
   schedule:
     - cron: '0 2 * * *'
 
@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the reviewer cases name commits from history
       - name: Run eval suite
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -18,6 +20,8 @@ jobs:
           shopt -s nullglob
           pass=0; total=0
           for eval in evals/*/; do
+            # evals/reviewer/ holds reviewer cases, not a prompt: the next step scores them.
+            [ "$eval" = "evals/reviewer/" ] && continue
             total=$((total+1))
             claude -p "$(cat "$eval/prompt.md")" --output-format json > "$eval/out.json"
             if ./evals/check.sh "$eval"; then pass=$((pass+1)); fi
@@ -38,4 +42,48 @@ jobs:
             2) echo "::error::threshold.sh called wrongly — fix this workflow, not the evals." ;;
             *) echo "::error::threshold.sh crashed (exit $rc) — the gate never ran, so nothing was verified." ;;
           esac
+          exit $rc
+
+      # B170. One case per revert or incident under evals/reviewer/
+      # (templates/reviewer-case.md). The model runs here: the reviewer agent
+      # (templates/agent-reviewer.md, installed as .claude/agents/sdlc-reviewer.md)
+      # reviews each case's change and PRINTS a review record; this step saves
+      # it. The score takes no model: score-reviewer-case.py matches the record
+      # against the case. Re-runs whenever CLAUDE.md, .claude/** (the agent, its
+      # tools, `models`) or REVIEW.md changes, and nightly.
+      - name: Re-score the reviewer on its cases
+        # Scored even when the step above failed, so one red suite does not hide the other.
+        if: ${{ !cancelled() && hashFiles('evals/reviewer/*.md') != '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EVAL_THRESHOLD: '90'
+        run: |
+          shopt -s nullglob
+          out="$RUNNER_TEMP/reviewer"
+          mkdir -p "$out"
+          pass=0; total=0
+          for case in evals/reviewer/*.md; do
+            total=$((total+1))
+            name=$(basename "$case" .md)
+            change=$(sed -n 's/^Change:[[:space:]]*\([0-9a-fA-F]\{7,40\}\)[[:space:]]*$/\1/p' "$case" | head -n 1)
+            if [ -z "$change" ] || ! git cat-file -e "$change^{commit}"; then
+              echo "::error::$case names no change this clone holds; scored as missed"
+              continue
+            fi
+            git worktree add --detach --quiet "$out/$name" "$change"
+            ( cd "$out/$name" && claude -p --agent sdlc-reviewer \
+                "Review commit $change against its parent, as round 1 of a new review record. Print only the review record, in the format of templates/review-record.md, with round 1's Base the parent and Head $change." \
+              ) > "$out/$name.review.md" || true
+            git worktree remove --force "$out/$name"
+            if python3 ./plugins/productizer/skills/spec/scripts/score-reviewer-case.py \
+                 --case "$case" --record "$out/$name.review.md"; then
+              pass=$((pass+1))
+            fi
+          done
+          echo "reviewer: caught $pass / $total"
+          set +e
+          ./evals/threshold.sh "$pass" "$total"
+          rc=$?
+          set -e
+          [ "$rc" -eq 0 ] || echo "::error::reviewer evals: threshold.sh exit $rc (3 refused, 2 bad usage, 1 crash)"
           exit $rc

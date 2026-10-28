@@ -4583,10 +4583,10 @@ checks:
   # --- nobody named (B166 to B169, B172) ---------------------------------------
   #
   # Three new tools, each with a self-test that reaches 0, 1 and 2. The
-  # self-tests are what this repository runs: it keeps no review records, no
-  # docs/sdlc plans and no CODEOWNERS, so the adopter-facing declarations below
-  # them are declared here as the template ships them (B51) and read
-  # not_triggered or disabled, never passed.
+  # self-tests are what this repository runs: it keeps no review records and no
+  # docs/sdlc plans, so two of the adopter-facing declarations below them are
+  # declared here as the template ships them (B51) and read not_triggered,
+  # never passed. approval-rules runs on this tree since v4.75.0 (B178).
 
   - id: review-record-checker
     why: a review finding with no location, a round with no count, a bug re-found every round and an Important finding nobody answered all read as a review until something reads the record
@@ -4724,10 +4724,10 @@ checks:
         - id: R173
           verdict: Partial
           reason: >-
-            This repository has no CODEOWNERS, so its own approval-rules declaration is disabled
-            and nothing here holds it on a real tree. The branch protection settings that make a
-            CODEOWNERS bind are on GitHub and NOT MEASURED. A bot is recognised only by a `[bot]`
-            suffix: a plain user name counts as a person and a team as people.
+            The branch protection settings that make a CODEOWNERS bind are on GitHub and NOT
+            MEASURED; on this repository "Require review from Code Owners" is the maintainer's step
+            and is not known to be on. A bot is recognised only by a `[bot]` suffix: a plain user
+            name counts as a person and a team as people.
           evidence: >-
             check-approval-rules.py 1.0 (B172), 21 cases in temporary repositories. `no-codeowners`,
             `unowned-later-pattern`, `bot-owner`, `later-glob-takes-file`, `only-one-dir-owned`,
@@ -4735,7 +4735,10 @@ checks:
             shipped templates/CODEOWNERS; `single-star-stays-in-dir` follows GitHub's `docs/*`
             example. Falsified 2026-10-28: first match instead of last 17 of 21, bots counted
             human 19 of 21, the added-file probe off 20 of 21, a `*` crossing directories 20 of
-            21, the no-CODEOWNERS finding off 20 of 21.
+            21, the no-CODEOWNERS finding off 20 of 21. Since v4.75.0 (B178) this repository
+            commits .github/CODEOWNERS owning both directories to @gitayg and its own approval-rules
+            check is enabled: on this tree it exits 0, 80 paths probed; with the workflows line
+            removed it exits 1 naming the workflow files.
     limitations:
       - It reads CODEOWNERS only. Code owner review, stale-approval dismissal, most-recent-push approval and whether GitHub Actions may approve are settings, not files.
 
@@ -4788,16 +4791,16 @@ checks:
     limitations:
       - Not triggered here today. It covers nothing until a plan lands under docs/sdlc/.
 
-  # DISABLED, and not by when.paths: its paths include .claude/productizer/**,
-  # which nearly every change here touches, and this repository has no
-  # CODEOWNERS, so enabled it would fail every such change. Whether this
-  # repository commits a CODEOWNERS and turns on code owner review is the
-  # maintainer's decision about its own GitHub settings (B172); measured
-  # 2026-10-28, check-approval-rules.py on this tree exits 1, `no CODEOWNERS`,
-  # 69 paths probed.
+  # ENABLED since v4.75.0 (B178), by the maintainer's ruling of 2026-10-28:
+  # this repository commits .github/CODEOWNERS, built from templates/CODEOWNERS,
+  # making @gitayg the owner of .claude/productizer/ and .github/workflows/, so
+  # the check must pass here. Measured 2026-10-28 on this tree:
+  # check-approval-rules.py exits 0, 2 rules, 80 paths probed. No GitHub
+  # setting was changed: "Require review from Code Owners" on main is the
+  # maintainer's step, and until it is on, the file names an owner nobody is
+  # required to hear from - which this check cannot see.
   - id: approval-rules
-    enabled: false
-    why: DISABLED because this repository has no CODEOWNERS and adopting one, with code owner review, is the maintainer's decision about its own GitHub settings
+    why: a change an agent authored to the files that judge it is approvable by anyone with write access unless CODEOWNERS names a person for them
     when:
       paths:
         - ".github/CODEOWNERS"
@@ -4820,4 +4823,212 @@ checks:
       pattern: 'probed ([0-9]+) path\(s\)'
       min_covered: 2
     limitations:
-      - Disabled. It covers nothing.
+      - The branch protection settings are NOT MEASURED - they are on GitHub, not in the tree. Until the maintainer turns on code owner review, the owner it names is not required to approve.
+      - A plain user name counts as a person whether a person or a machine holds it, and a team counts as people whatever its members are.
+
+  # --- a revert that taught the reviewer nothing, and two bands nobody kept
+  # --- (B170, B171) ------------------------------------------------------------
+  #
+  # Four new tools, each with a self-test. score-reviewer-case.py and
+  # check-revert-cases.py reach 0, 1 and 2; the two band detection commands
+  # reach 0, 2 and 3, 3 being "not measured". The band commands are run by a
+  # scheduled task a person installs, never by this suite, so their self-tests
+  # are what holds them here.
+
+  - id: reviewer-case-checker
+    why: a reviewer scored by a model on whether it caught a bug is noise measuring noise, and a case with no location cannot be scored at all
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/score-reviewer-case.py, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/score-reviewer-case.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/score-reviewer-case.py, --selftest]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 25 cases held'
+      min_covered: 25
+      spec_units:
+        - id: R178
+          verdict: Covered
+          evidence: >-
+            score-reviewer-case.py 1.0 (B170), 25 cases. `caught-in-range`, `caught-exact-line`
+            and `caught-long-change` exit 0; `missed-line-outside`, `missed-other-file`,
+            `missed-nit-at-bug`, `missed-later-round`, `missed-other-change`, `missed-other-base`,
+            `missed-malformed-record` and `missed-no-rounds` exit 1 naming what did not hold.
+            Falsified 2026-10-28: the line overlap off, the severity rule off, the change rule
+            off, the base rule off and round 1 widened to every round, each 24 of 25; the shape
+            rule off, 23 of 25.
+        - id: R179
+          verdict: Covered
+          evidence: >-
+            `case-no-change`, `case-no-bug-line`, `case-bug-outside-root`, `case-no-fix`,
+            `case-key-twice` and `case-keys-after-rule-ignored` exit 2; the shipped
+            templates/reviewer-case.md is refused for its placeholders. Falsified 2026-10-28 with
+            the fix rule off: 24 of 25.
+        - id: R181
+          verdict: Partial
+          reason: >-
+            Read off the template's text: templates/agent-evals.yml lists REVIEW.md under its
+            pull_request paths and runs score-reviewer-case.py over evals/reviewer/*.md. The
+            workflow has never run on a GitHub runner, and whether `claude -p --agent
+            sdlc-reviewer` prints a record the scorer can read is not measured.
+          evidence: >-
+            `agent-evals-rescores-on-review-md`. Falsified 2026-10-28 with REVIEW.md dropped from
+            the template's paths: 24 of 25.
+    limitations:
+      - It scores a record's text against a case's. Whether a case's bug location is the real one, and whether the reviewer the workflow runs is the one installed, are not measured.
+
+  - id: revert-cases-checker
+    why: a revert is the one confirmed miss a reviewer ever gets, and a check that lets one land without a case teaches the reviewer nothing
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, python3, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, --selftest]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 13 cases held'
+      min_covered: 13
+      spec_units:
+        - id: R180
+          verdict: Covered
+          evidence: >-
+            check-revert-cases.py 1.0 (B170), 13 cases in temporary repositories made with `git
+            revert`. `revert-without-case` and `case-of-another-change` exit 1 with FINDING
+            no-case; `revert-with-case` and `case-short-id` pass, the case read from the working
+            tree; `malformed-case` exits 1 with FINDING case-shape; `indented-line-is-a-revert`
+            reads a squash body's indented line; `mid-line-mention-is-not` counts one revert over
+            two commits. Falsified 2026-10-28: the no-case finding off, 9 of 13; the case-shape
+            finding off, 12 of 13; the line anchored with no indent, 12 of 13; the line read
+            anywhere, 12 of 13.
+    limitations:
+      - A revert is a commit message holding a `This reverts commit <id>` line. A revert written by hand without it, and an incident, are not seen.
+
+  - id: band-revert-rate-checker
+    why: a band computed by eye, or one that reads a quiet month as within band, says nothing about whether review effort was cut while the revert rate held
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/band-revert-rate.py, python3, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/band-revert-rate.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/band-revert-rate.py, --selftest]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 16 cases held'
+      min_covered: 16
+      spec_units:
+        - id: R182
+          verdict: Covered
+          evidence: >-
+            band-revert-rate.py 1.0 (B171), 16 cases in temporary repositories dated by
+            GIT_COMMITTER_DATE, one-day windows. `value-printed` reads 0.3333 for 1 revert over 3
+            changes; `within-band`, `one-sigma`, `two-sigma` and `three-sigma` print each tier;
+            `merged-branch-revert` counts a revert inside a merged branch once over its one merge.
+            Falsified 2026-10-28 with every commit counted as a change: 15 of 16.
+        - id: R184
+          verdict: Covered
+          evidence: >-
+            `no-change-in-window`, `too-few-earlier` and `no-spread-rise` exit 3 with NOT
+            MEASURED; `no-spread-level` and `drop-is-within` read within. Falsified 2026-10-28:
+            the baseline minimum lowered to 2, a flat baseline's rise accepted, and the distance
+            made two-sided, each 15 of 16.
+        - id: R185
+          verdict: Partial
+          reason: >-
+            Read off the templates: templates/config.json binds each added band under
+            `band_bindings` with a config and a detection_command no other band shares, and
+            templates/scheduled-band-metric.md reads `band_bindings.<METRIC>` against a frozen
+            `<DETECTION COMMAND>`. No scheduled task was installed or run.
+          evidence: >-
+            `single-metric-install-unchanged`, the binding half.
+        - id: R186
+          verdict: Covered
+          evidence: >-
+            `single-metric-install-unchanged` holds the sha256 of templates/bands.yaml and
+            templates/scheduled-bands.md and the `bands` binding of templates/config.json as
+            v4.74.1 shipped them. Falsified 2026-10-28: one sentence of scheduled-bands.md
+            changed, 15 of 16; the `bands` detection_command changed, 15 of 16.
+    limitations:
+      - The Western Electric run rules are not evaluated - one point, its distance above the mean. A revert written without the line is not counted.
+
+  - id: band-review-rounds-checker
+    why: review rounds per change read from anything but the review records would be a second reading of the record, and a quiet month read as within band hides the drop in care
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/band-review-rounds.py, python3, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/band-review-rounds.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/band-review-rounds.py, --selftest]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 14 cases held'
+      min_covered: 14
+      spec_units:
+        - id: R183
+          verdict: Covered
+          evidence: >-
+            band-review-rounds.py 1.0 (B171), 14 cases in temporary repositories. Records under
+            docs/sdlc/ read by check-review-record.py's own parser: `value-printed` reads 1.6667
+            for 2, 2 and 1 rounds; `dated-by-last-change` moves a rewritten record into the window
+            of its last commit; `record-without-rounds` names a record with no Rounds row and does
+            not count it; `other-path-ignored` reads no record outside the glob. Falsified
+            2026-10-28: dated by the first commit, 13 of 14; a record with no rounds counted,
+            13 of 14.
+        - id: R184
+          verdict: Covered
+          evidence: >-
+            `no-record-in-window`, `too-few-earlier` and `no-spread-rise` exit 3. Falsified
+            2026-10-28: the baseline minimum lowered to 2, 13 of 14; a flat baseline's rise
+            accepted, 13 of 14.
+    limitations:
+      - A change with no review record is not seen, and a record is believed to hold every round the change had.
+
+  # The adopter-facing declaration, as templates/checks.yaml ships it. This
+  # repository has made no revert (`git log --grep "This reverts commit"` reads
+  # nothing over 158 commits), so it keeps no evals/reviewer/ and the check
+  # passes over every range until the first revert lands.
+  - id: revert-cases
+    why: a revert is the one confirmed miss a reviewer ever gets, and without a case it teaches the reviewer nothing
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-revert-cases.py, --base, "{base}"]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a revert in the range with no case naming its change, or a case missing its change, bug or fix
+      refused: [2]     # not a git work tree, or a base git cannot resolve
+    coverage:
+      from: stdout_count
+      pattern: 'examined ([0-9]+) commit\(s\)'
+      min_covered: 1
+    limitations:
+      - A revert is a commit message holding a `This reverts commit <id>` line. A revert written by hand without it, and an incident, are not seen.

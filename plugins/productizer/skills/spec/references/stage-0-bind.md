@@ -85,7 +85,8 @@ Install once per repo, after `.claude/productizer/config.json` exists
 (`references/running-it.md`): `sdlc-evals-<slug>` from
 `templates/scheduled-evals.md` once `evals/` holds an eval, and
 `sdlc-bands-<slug>` from `templates/scheduled-bands.md` once `ops/bands.yaml`
-does.
+does, and one `sdlc-bands-<slug>-<metric>` from
+`templates/scheduled-band-metric.md` for each band bound under `band_bindings`.
 
 - **Always `list_scheduled_tasks` before creating**, and update rather than
   recreate: a second task under a new id silently doubles the nightly run.

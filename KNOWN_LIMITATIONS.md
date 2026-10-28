@@ -796,7 +796,47 @@ pull request are settings on GitHub, named in
 nothing here; whether an approval made with `GITHUB_TOKEN` counts toward
 required reviews is not stated in that documentation. A bot is recognised only
 by a `[bot]` suffix, so a machine user with a plain name reads as a person and
-a team as people. This repository has no CODEOWNERS: its own `approval-rules`
-check is declared disabled, and the self-test alone runs. Requiring the person
-who dispatched an agent run as a reviewer of its pull request is not built
-(B173).
+a team as people. Since v4.75.0 (B178) this repository commits
+`.github/CODEOWNERS` and its own `approval-rules` check runs and passes; whether
+"Require review from Code Owners" is on for its `main` is the maintainer's
+setting, not changed here and not known. Requiring the person who dispatched an
+agent run as a reviewer of its pull request is not built (B173).
+
+## Added in v4.75.0
+
+### 44 · A reviewer case is scored by location; the workflow that runs the reviewer never ran
+
+Since v4.75.0 (B170) a revert or an incident becomes a case under
+`evals/reviewer/` (`templates/reviewer-case.md`), and `score-reviewer-case.py`
+scores a review record against it with no model: caught when round 1 reviewed
+the case's change and an Important finding's line range covers the bug. It
+matches text. A finding at the right line about a different bug is a catch, a
+finding one line off the recorded range is a miss, and whether the case's bug
+location is the real one is a person's to judge. `templates/agent-evals.yml`
+runs the reviewer agent on each case and saves what it prints as the record;
+it has never run on a GitHub runner, and whether `claude -p --agent
+sdlc-reviewer` prints a record the scorer reads is not measured. A scheduled
+eval task installed from `templates/scheduled-evals.md` reads every
+subdirectory of `evals/` as a prompt and will meet `evals/reviewer/`, which
+holds none. `check-revert-cases.py` finds a revert by its `This reverts commit`
+line: a revert written by hand without it, and an incident, are not seen, so a
+missing incident case is noticed only by a person.
+
+### 45 · Two more bands, measured one point at a time
+
+Since v4.75.0 (B171) `band-revert-rate.py` and `band-review-rounds.py` measure
+the revert rate and the review rounds per change over the last 30 days against
+the six 30-day windows before, and print a tier from the value's distance above
+their mean. Only that one point is read: the Western Electric run rules the
+first band's `bands.yaml` names are not evaluated for these two. Only a rise is
+a breach. A baseline of equal values, common for a team that rarely reverts,
+leaves a rise unmeasured (exit 3), and fewer than three earlier windows with a
+value leaves the band unmeasured: on this repository, 2026-10-28, both bands
+read NOT MEASURED. A change is a first-parent commit, so a repository that
+merges with merge commits and one that squashes count the same work alike, but
+one that pushes many commits straight to the default branch counts each. A
+change with no review record is invisible to the rounds band. Each added band
+has its own bands file, binding and scheduled task; the comparison of the
+binding with the frozen literal is the prompt's, made by a model, as for the
+first band, and no task was installed in this release. The band view
+(`build-view.sh`) still shows only `ops/bands.yaml`.

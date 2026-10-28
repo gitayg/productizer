@@ -130,6 +130,13 @@ rules:
     why: what CI actually executes. A step removed here is a check that stops existing while checks.yaml still declares it
 
   - tier: red
+    glob: ".github/CODEOWNERS"
+    why: >-
+      who must approve a change to the spec, the checks and the workflows. A
+      line removed, or an owner swapped for a bot, leaves those files
+      approvable by anyone with write access once code owner review is on
+
+  - tier: red
     glob: ".github/tools/**"
     why: >-
       lockfiles for what CI installs and then runs. A version or integrity hash

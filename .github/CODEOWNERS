@@ -1,0 +1,19 @@
+# CODEOWNERS - the people who must approve a change to the files that judge a
+# change. Built from plugins/productizer/skills/spec/templates/CODEOWNERS
+# (B178). Never a bot: a bot's approval is not a person deciding.
+#
+# GitHub reads the first of .github/CODEOWNERS, CODEOWNERS and docs/CODEOWNERS
+# that exists, and the last matching pattern wins. Keep these lines LAST, so no
+# later pattern takes one of these files away from its owner, and never leave a
+# pattern under them with no owner: that leaves its files approvable by anyone
+# with write access.
+#
+# This file does nothing by itself. Branch protection (or a ruleset) on main
+# must "Require review from Code Owners", and turning that on is the
+# maintainer's step on GitHub; see
+# plugins/productizer/skills/spec/references/stage-3-6-build.md, "Approval rules
+# for an agent-authored change". The approval-rules check reads this file; it
+# cannot read the settings.
+
+/.claude/productizer/ @gitayg
+/.github/workflows/ @gitayg

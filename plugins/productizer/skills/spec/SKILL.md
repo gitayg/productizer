@@ -202,15 +202,15 @@ a PR. Repo copies in `.claude/productizer/templates/` win over these.
 | Stage | Templates |
 |---|---|
 | 0 · bind, scaffold | `config.json` `spec.md` `constitution.md` `CLAUDE.md` `REVIEW.md` |
-| 0 · schedule, hooks | `session-start.sh` `hooks-settings.json` `managed-settings.json` `scheduled-evals.md` `scheduled-bands.md` |
+| 0 · schedule, hooks | `session-start.sh` `hooks-settings.json` `managed-settings.json` `scheduled-evals.md` `scheduled-bands.md` `scheduled-band-metric.md` |
 | 0c · import | `import.md` |
 | 1 · intent | `backlog.md` `intent.md` `jira-intent.md` |
 | 2 · design | `intake.md` `spec-delta.md` `spec-command.md` `ruling.md` |
 | 3 · build | `plan.md` `pull-request.md` `build-from-spec.yml` |
-| 4 · test | `verification-section.md` `agent-verifier.md` `agent-evals.yml` `threshold.sh` |
+| 4 · test | `verification-section.md` `agent-verifier.md` `agent-evals.yml` `threshold.sh` `reviewer-case.md` |
 | 5 · checks | `checks.yaml` |
 | 6 · deploy | `agent-reviewer.md` `review-record.md` `CODEOWNERS` `production-gate.sh` `triage-step.yml` `SKILL-secure-api-review.md` |
 | 7 · document | `user-guide.md` |
 | 8 · announce | `release-blog.md` `release-email.md` `publish-gate.sh` |
-| 9 · maintain | `bands.yaml` `converge.md` |
+| 9 · maintain | `bands.yaml` `bands-revert-rate.yaml` `bands-review-rounds.yaml` `converge.md` |
 | any | `view.html` `agent-spec-reviewer.md` |

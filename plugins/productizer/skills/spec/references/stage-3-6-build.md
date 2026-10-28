@@ -27,8 +27,14 @@ SKILL.md keeps the rules of these stages; this is them as a whole.
 - **Never report a task done without running the checks and pasting the
   output.**
 - Agent config is regression-tested nightly, and every production incident earns
-  a permanent eval. A schedule reports, it does not block — gating a merge needs
-  CI (`templates/agent-evals.yml`).
+  a permanent eval. **A revert or an incident becomes a reviewer case**
+  (`templates/reviewer-case.md`, under `evals/reviewer/`): the change, the
+  confirmed bug's `path:line`, the fix. `templates/agent-evals.yml` runs the
+  reviewer on each case whenever its prompt, tools or model or `REVIEW.md`
+  changes, and `scripts/score-reviewer-case.py` scores the record it prints
+  with no model. A revert landing without a case fails the `revert-cases`
+  check (`scripts/check-revert-cases.py`). A schedule reports, it does not
+  block — gating a merge needs CI (`templates/agent-evals.yml`).
 - Keep refusal and crash distinguishable in the exit code, or a gate saying no
   reads like one that fell over and the wrong thing gets fixed.
 
@@ -104,3 +110,10 @@ default branch, in branch protection or a ruleset:
 None of these settings is in the tree, so `approval-rules` cannot see them and
 says so on every run. Whether the person who dispatched an agent run counts as
 a required reviewer of its pull request is an open question (B173).
+
+**Productizer's own repository** commits `.github/CODEOWNERS`, owning both
+directories to `@gitayg`, and runs `approval-rules` on itself (B178, v4.75.0).
+The settings above are not changed by any release: turning on "Require review
+from Code Owners" for its `main`, with the rest of the list, is a step the
+maintainer takes on GitHub. Until then the file names an owner nobody is
+required to hear from.
