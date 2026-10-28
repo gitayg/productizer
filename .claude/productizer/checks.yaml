@@ -2426,9 +2426,34 @@ checks:
             0; `print-protected-transitive-set` prints exactly the three scripts. Falsified
             2026-10-28 with the closure off: 220 of 224. On this repository --print-protected
             --base HEAD prints 114 paths where 1.9 printed 89, all 89 among them.
+        - id: R175
+          verdict: Partial
+          reason: >-
+            A link is reached only as a script is, through a name written whole: a link reached
+            through a name built at run time is not seen, as for R158.
+          evidence: >-
+            stage-advance.sh 1.11 (B176), 235 cases. Two checks run tools/run.sh and
+            tools/entry.sh, a link to entry-real.sh, and run.sh names links to a script, to a
+            directory, to a path through a linked directory and to a two-link cycle: under
+            --unattended `unattended-checks-link-target`, `-program-target`,
+            `-target-transitive`, `-dir-target`, `-in-named-path`, `-cycle` and `-deleted` exit
+            3 naming why; a script no name reaches stays allowed; `print-protected-links-set`
+            prints exactly the fourteen paths. Falsified 2026-10-28: links skipped as in 1.10,
+            225 of 235; the target not protected, 229 of 235; the linked-directory prefix off,
+            233 of 235; both cycle guards removed, --print-protected over a two-link cycle still
+            ran after 20 seconds and was killed. This repository holds no link: 122 paths
+            before and after.
+        - id: R176
+          verdict: Covered
+          evidence: >-
+            stage-advance.sh 1.11 (B176). `unattended-checks-link-outside-kept` deletes a named
+            link to ../../outside.sh and exits 3 with the reason "it is a symbolic link to
+            ../../outside.sh, outside the repository, so its target is not followed";
+            `print-protected-links` writes the note for a link to missing.sh on stderr and
+            lists the link. Falsified 2026-10-28 with the reason left as it was: 233 of 235.
     limitations:
       - Only the copyable CI template calls it - build-dispatch.sh asks it before delivering an unattended run's patch, and again on the commit. No tracker move or label calls it, so a ticket's stage can still move without it.
-      - The forbidden set is a list, not a proof. Attended, nothing but the list applies; under --unattended an ASCII, dot-free file the list does not name (Jenkinsfile, GEMINI.md) is still allowed. Since 1.6 a file a check declared in checks.yaml runs is refused under --unattended (R126), and since 1.10 every script such a script names by its path (R158, B147), but a script reached through a name built at run time, or a data file a script reads, is not protected; a `run-checks.sh --config` other than the default is not read; PyYAML is pinned by hash (B148), and that the hashes are PyPI's was read from PyPI's JSON API, not checked against a wheel. A homoglyph is read, not folded - one non-ASCII character as one to two characters - so a reading of three or more, and a homoglyph made of ASCII alone (rn for m), are not refused; and a legitimate non-ASCII name that reads as a rule file is refused attended too. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
+      - The forbidden set is a list, not a proof. Attended, nothing but the list applies; under --unattended an ASCII, dot-free file the list does not name (Jenkinsfile, GEMINI.md) is still allowed. Since 1.6 a file a check declared in checks.yaml runs is refused under --unattended (R126), and since 1.10 every script such a script names by its path (R158, B147), and since 1.11 every symbolic link those readings reach and its target (R175, B176), but a script reached through a name built at run time, or a data file a script reads, is not protected, and a link whose target leaves the repository or is not in the base tree is protected without its target being followed (R176); a `run-checks.sh --config` other than the default is not read; PyYAML is pinned by hash (B148), and that the hashes are PyPI's was read from PyPI's JSON API, not checked against a wheel. A homoglyph is read, not folded - one non-ASCII character as one to two characters - so a reading of three or more, and a homoglyph made of ASCII alone (rn for m), are not refused; and a legitimate non-ASCII name that reads as a rule file is refused attended too. A modified checks-result.json is inert in an attended run; the ruling of 2026-10-12 refuses it only under --unattended, which only the CI template's deliver passes.
       - Default-deny over `.claude/**` refuses a design move's change to every `.claude/productizer/` file but the spec, the backlog, bookkeeping ADDED and, since 1.5, the requirement index MODIFIED in an attended design move (B112). An unattended design move may not write the index, because R91 lists the unattended exceptions and it is not among them.
       - A stage other than design or build with evidence of its own is driven by no case.
 
@@ -2863,6 +2888,23 @@ checks:
             The template holds 17 of 17; at 81c6031, which pinned by version alone, it fails at
             jobs.prepare.steps[4]. Fixtures yaml-hashed.yml exit 0 and yaml-unhashed.yml exit 1.
             Falsified 2026-10-28 with the rule made never to fire: 46 of 47.
+        - id: R177
+          verdict: Partial
+          reason: >-
+            It reads shell text, not bash: a pip spelled through a variable is not seen, an
+            install inside `sh -c`, `eval` or a quoted $(...) is reported unread, and a
+            --no-binary in the requirements file or PIP_NO_BINARY is not read.
+          evidence: >-
+            check-ci-template.py 1.3 (B177), 59 self-test cases. Twelve fixtures, each
+            yaml-hashed.yml with its pip line changed: the flags handed to echo after `;`, `&&`,
+            `||` or `|`, written in a comment, written as a redirection's file, beside a quoted
+            $(...) or a backquoted install, a `#` inside a word before an unhashed install, and a
+            hashed install adding --no-binary or --only-binary=:none: each exit 1 naming the
+            command; the install wrapped over two lines with --only-binary=':all:' quoted exits
+            0. The template holds 17 of 17. Falsified 2026-10-28: the 1.2 line rule restored, 48
+            of 59; shlex's comments=True, 58 of 59; each of --no-binary accepted, any
+            --only-binary value accepted, a redirection's file kept, an install inside a word not
+            reported and a backquote not a separator, 58 of 59.
     limitations:
       - It reads one file. An adopter's edited copy is checked only if they point it at that copy.
       - The template's own behaviour on GitHub - that a draft stays a draft, that GITHUB_TOKEN cannot trigger the adopter's checks - is GitHub's, and not measured here.
@@ -2957,6 +2999,17 @@ checks:
             at 81c6031 it fails at jobs.checks.steps[3] and jobs.release-prep.steps[2]. Fixtures
             yaml-hashed.yml exit 0 and yaml-unhashed.yml exit 1. Falsified 2026-10-28 with the
             rule made never to fire: 22 of 23.
+        - id: R177
+          verdict: Partial
+          reason: >-
+            This repository's workflow half, by check-ci-template.py's rule; it reads shell text,
+            not bash, as ci-template-safe says.
+          evidence: >-
+            check-release-workflow.py 1.2 (B177), 35 self-test cases, loading
+            `unhashed_yaml_install` from check-ci-template.py 1.3: the same twelve fixtures over
+            the release-prep job, eleven exit 1 naming the command and the wrapped hashed install
+            exits 0. The real workflow holds 9 of 9. Falsified 2026-10-28 with the 1.2 line rule
+            restored in check-ci-template.py: 24 of 35.
     limitations:
       - It reads one file and runs nothing. Whether GitHub enforces the declared permissions, whether a pinned commit is the release its comment names, and whether the jobs ever ran are not measured.
       - The repository-code rule is lexical and shared with check-ci-template.py, so the two drift together; it is stricter here in one place, refusing bash or sh on any file.
@@ -3676,6 +3729,15 @@ checks:
             with the job's and the step's rewritten if: UNDECIDED; `pin-bumped` still exits 0.
             Falsified 2026-10-28: the body comparison off, 82 of 86; both rewritten-if branches
             off, 83 of 86.
+        - id: R174
+          verdict: Covered
+          evidence: >-
+            check-governance-weakening.sh 1.3 (B175), 90 self-test cases. With `id: co` on the
+            release job's checkout at the base, `id-action-changed` - the action moved to
+            someone-else/checkout at the same ref - exits 1 with `UNDECIDED:
+            workflow.step[release/id=co].uses`, both names printed; `id-pin-bumped` and
+            `pin-bumped` exit 0. Falsified 2026-10-28: the comparison off, 88 of 90; the raw uses
+            compared with its @ref, 85 of 90.
       from: stdout_paths
       pattern: '^(\S+)$'
       must_cover: none
@@ -3683,7 +3745,7 @@ checks:
     limitations:
       - It reports movement between a base and the work tree. A check that was never strict, and a whole governance surface weak from the day it was written, are invisible to it.
       - Four of its own falsifications came back GREEN on the first attempt, and each was reported as a finding about the test rather than quietly re-run.
-      - Since 1.1 a workflow job's own permissions and its steps are compared (R133, R134), and since 1.2 a job's `needs:` and `if:` and a kept step's body (R160, R161, B149). A changed body or a rewritten `if:` is UNDECIDED, never a claimed weakening: whether a new `run:` asserts less is not decided here, and every routine edit to a step's `run:` now reads as one.
+      - Since 1.1 a workflow job's own permissions and its steps are compared (R133, R134), since 1.2 a job's `needs:` and `if:` and a kept step's body (R160, R161, B149), and since 1.3 the action a kept step uses, its `@ref` dropped (R174, B175). A changed body, a rewritten `if:` or another action under a kept `id` is UNDECIDED, never a claimed weakening: whether a new `run:` or another action asserts less is not decided here, and every routine edit to a step's `run:` now reads as one.
 
   - id: governance-self-footing
     why: a diff that deletes or switches off the check watching for switched-off checks is the one move that cannot be left to advice

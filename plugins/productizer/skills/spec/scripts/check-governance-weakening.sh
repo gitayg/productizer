@@ -59,6 +59,10 @@
 #     - a step that KEPT its key while its `run:`, `with:`, `env:` or `shell:`
 #       changed: UNDECIDED, both bodies printed (B149). The action's `@ref` is
 #       not part of it, as it is not part of the key, so a pin bump stays quiet.
+#     - a step that KEPT its key - an `id`, which says nothing of the action -
+#       while the action it `uses`, its `@ref` dropped, became another: UNDECIDED,
+#       both names printed (B175). Nothing here orders one action against
+#       another, so it is not claimed as a weakening.
 #     - a JOB kept at both ends: a job lost from its `needs:` (a member lost
 #       and none gained) and an `if:` arriving on a job that had none are
 #       weakenings; a `needs:` rewritten or an `if:` rewritten is UNDECIDED
@@ -186,11 +190,12 @@
 #     a job that only runs on a tag reads the same as one on a job every pull
 #     request runs. A step body that moved is UNDECIDED, never a claimed
 #     weakening: whether `persist-credentials: true` or a rewritten `run:`
-#     asserts less is not decided here.
+#     asserts less is not decided here, nor whether another action under the
+#     same id does.
 #   - whether a weakening was RIGHT. This reports the move, never the judgement.
 set -euo pipefail
 
-VERSION="check-governance-weakening 1.2"
+VERSION="check-governance-weakening 1.3"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MEASURE="$HERE/governance-weakening.py"
@@ -707,6 +712,31 @@ PY
     --root "$WORK/run-rewritten" --self-id "$SELF_ID_DEFAULT"
   says run-rewritten "UNDECIDED: workflow.step[release/Draft].body" \
     "the step is named by its key and both runs are printed"
+
+  # -- B175. A step keyed by its id kept that key while the action it uses
+  # changed owner at the same ref, and 1.2 compared the body without `uses`.
+  # The base is re-committed with `id: co` on the release job's checkout.
+  for c in id-action-changed id-pin-bumped; do
+    build "$c"
+    python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("      - uses: actions/checkout@v1\n","      - id: co\n        uses: actions/checkout@v1\n"))' \
+      "$WORK/$c/$WORKFLOW_REL"
+    ( cd "$WORK/$c" \
+      && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git commit --quiet -am "id" ) \
+      >> "$WORK/build.log" \
+      || die_unmeasured "could not build the $c case"
+  done
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("actions/checkout@v1","someone-else/checkout@v1"))' \
+    "$WORK/id-action-changed/$WORKFLOW_REL"
+  drive id-action-changed 1 "a step keyed by its id kept the key while its action changed owner at the same ref: 1.2 compared the body without uses and exited 0" \
+    --root "$WORK/id-action-changed" --self-id "$SELF_ID_DEFAULT"
+  says id-action-changed "UNDECIDED: workflow.step[release/id=co].uses  was 'actions/checkout'  is now 'someone-else/checkout'" \
+    "it names the step by its id and prints both actions, the @ref dropped"
+  python3 -c 'import sys;p=sys.argv[1];t=open(p).read();open(p,"w").write(t.replace("actions/checkout@v1","actions/checkout@v2"))' \
+    "$WORK/id-pin-bumped/$WORKFLOW_REL"
+  drive id-pin-bumped 0 "a pin bump on a step keyed by its id: the action's name is compared without its @ref, so it is the same step" \
+    --root "$WORK/id-pin-bumped" --self-id "$SELF_ID_DEFAULT"
+  says id-pin-bumped "Nothing on the governance surface moved down a ladder" \
+    "a routine pin bump under an id stays quiet"
 
   # -- 1: UNDECIDED. A glob rewritten is a member lost and a member gained in
   # one change, and glob subsumption is not decided here.

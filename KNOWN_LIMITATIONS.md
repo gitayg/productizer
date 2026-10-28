@@ -700,7 +700,14 @@ or spelled with a character outside letters, digits and `_.@+/-`, is not
 followed, and neither is a data file a script reads (a config, a rules file),
 which can steer a check as surely. A script named only in a comment or a string
 it never runs is protected anyway. On this repository the protected list grew
-from 89 paths to 114.
+from 89 paths to 114. Since v4.74.1 (B176) 1.11 follows a symbolic link too: the
+link is protected and so is the file it points to, read from the base tree, and
+that file is followed if it is a script. A link whose target leaves the
+repository, is absolute, or names nothing the base tree holds - a target that
+runs through another link among them - stays protected and is not followed,
+and the reason says so; what such a link reaches at run time is not judged.
+This repository holds no symbolic link, so its own list did not change: 122
+paths at 55e56c1 and after.
 
 ### 38 · PyYAML's hashes were read from PyPI, not from a wheel
 
@@ -711,8 +718,15 @@ manylinux wheels, x86_64 and aarch64, read from PyPI's JSON API on 2026-10-28;
 no wheel was downloaded to check them and no runner has installed with them yet,
 so the next CI run is the first proof. A runner on another architecture or
 another Python would find no wheel whose hash is named, and pip's hash-checking
-mode should then fail the install rather than fall back; that was not run. `yaml-hash-pinned` reads the flags on the `run:` line, not the
-requirements line it writes. semgrep, installed in its own virtual environment,
+mode should then fail the install rather than fall back; that was not run. `yaml-hash-pinned` reads the flags in the `run:` text, not the
+requirements line it writes. Since v4.74.1 (B177) it reads them as arguments of
+the same pip install: the `run:` is split into commands, comments are cut where
+bash cuts them and a redirection's file is no argument, so a flag handed to
+`echo` after `;` no longer counts. It is still a reading of shell text, not
+bash: a pip install inside `sh -c` or `eval`, or inside a quoted `$(...)`, is
+reported rather than read, a pip spelled through a variable is not seen, and a
+`--no-binary` written into the requirements file or `PIP_NO_BINARY` is not
+read. semgrep, installed in its own virtual environment,
 is still pinned by version alone, and its dependencies not at all.
 
 ### 39 · A kept step's changed body is undecided, never a weakening
@@ -722,8 +736,11 @@ and the `run:`, `with:`, `env:` and `shell:` of a step whose key did not move.
 A `needs:` that only lost a job, and an `if:` added to a job, are weakenings; a
 rewritten body or condition is UNDECIDED, because whether the new one asserts
 less is not decided here, so a routine edit to a step's `run:` now reads as an
-advisory finding. A job's `runs-on`, `timeout-minutes`, `strategy` and
-`container` are still not compared.
+advisory finding. Since v4.74.1 (B175) a step that keeps its `id` while the
+action it `uses` becomes another, its `@ref` aside, is UNDECIDED too: nothing
+here orders one action against another, and a pin bump stays quiet. A job's
+`runs-on`, `timeout-minutes`, `strategy` and `container` are still not
+compared.
 
 ### 40 · Probing self-tests side by side shortens the run, not one probe
 

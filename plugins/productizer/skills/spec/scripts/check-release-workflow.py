@@ -61,9 +61,11 @@ WHAT IT ASSERTS, each a separate finding:
                  commit id
   yaml-hash-pinned
                  every pip install in any job's run: that names PyYAML passes
-                 --require-hashes and --only-binary :all: (B148), by
-                 check-ci-template.py's rule, loaded from that file; it reads
-                 the run: text, not whether the hashes are PyPI's
+                 --require-hashes and --only-binary :all: (B148) as arguments
+                 of that same command, and no --no-binary or other
+                 --only-binary value (B177), by check-ci-template.py's rule,
+                 loaded from that file; it reads the run: text, not whether
+                 the hashes are PyPI's
   run-injection  no `${{` expression of any context inside any run: in the
                  workflow; values reach a shell through env:
 
@@ -94,7 +96,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-release-workflow 1.1"
+VERSION = "check-release-workflow 1.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(".github", "workflows", "checks.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "release-workflow")
@@ -281,8 +283,9 @@ def check(path):
         line = rules.unhashed_yaml_install(run)
         if line:
             find("yaml-hash-pinned", where, "installs PyYAML without --require-hashes and "
-                 "--only-binary :all:, so a file re-published at that version would be "
-                 "installed: %s" % line)
+                 "--only-binary :all: as arguments of the same pip install, or with "
+                 "--no-binary or another --only-binary value, so a file re-published at "
+                 "that version would be installed: %s" % line)
     return findings
 
 

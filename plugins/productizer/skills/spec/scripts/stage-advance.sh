@@ -170,6 +170,18 @@
 # well: refusing more is the safe direction. A file that is not a script
 # (data, docs) is never added this way, and a name built at run time from
 # pieces (`"$dir/$name"`, a glob) is not seen.
+# Then, since 1.11 (B176), every SYMBOLIC LINK (mode 120000) such a reading
+# reaches: one a protected script names, one a protected argv names, one
+# under a protected directory, and one a named path runs through
+# (`./dir-link/x.sh`). 1.10 skipped every link, so `./link.sh` protected
+# neither the link nor the file it points to. The link is protected; its
+# target is read from the base tree, resolved against the link's own
+# directory, protected whatever it is - a script, a data file or a directory
+# with its subtree - and followed if it is a script or a link, so a cycle of
+# links ends once each is read. A target that is absolute, leaves the
+# repository, or names nothing the base tree holds is not followed: the link
+# stays protected, the reason printed with it says so, and --print-protected
+# writes it as a note on stderr.
 # No checks.yaml at the base: nothing extra is protected. One that cannot be
 # read - no PyYAML, not YAML, `checks` not a list, an argv that is not a list
 # of strings, a placeholder as the program or handed to a program neither on
@@ -276,7 +288,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="stage-advance 1.10"
+VERSION="stage-advance 1.11"
 SELF="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -1057,6 +1069,54 @@ YAML
     printf '  FAIL  %-44s the printed list is not the run script and the two it reaches\n' "print-protected-transitive-set"
     sed 's/^/          stdout: /' "$WORK/print-protected-transitive.out"
   fi
+  # --- B176. UNATTENDED, a symbolic link. 1.10 followed only mode 100644 and
+  # 100755, so a link a protected script names, and the file it points to,
+  # were both allowed, each exit 0. The link and its target are protected and
+  # the target followed; a link out of the repository or to no path is
+  # protected and said so; a cycle of links ends.
+  newrepo cyl; R="$WORK/cyl"
+  mkdir -p "$R/tools/lib" "$R/tools/pkg" "$R/tools/lib2"
+  printf '#!/usr/bin/env bash\nbash ./link-helper.sh\nbash ./out-link.sh\nbash ./dead-link.sh\nbash ./loop-a.sh\ncd ./dir-link\nbash ./via-link/x.sh\n' > "$R/tools/run.sh"
+  printf 'bash lib/deep2.sh\n' > "$R/tools/real-helper.sh"
+  printf 'exit 0\n' > "$R/tools/lib/deep2.sh"; printf 'exit 0\n' > "$R/tools/pkg/inner.sh"
+  printf 'exit 0\n' > "$R/tools/entry-real.sh"; printf 'exit 0\n' > "$R/tools/stray.sh"
+  ln -s real-helper.sh "$R/tools/link-helper.sh"; ln -s ../../outside.sh "$R/tools/out-link.sh"
+  ln -s missing.sh "$R/tools/dead-link.sh"; ln -s loop-b.sh "$R/tools/loop-a.sh"; ln -s loop-a.sh "$R/tools/loop-b.sh"
+  ln -s pkg "$R/tools/dir-link"; ln -s entry-real.sh "$R/tools/entry.sh"; ln -s stray.sh "$R/tools/stray-link.sh"
+  ln -s lib2 "$R/tools/via-link"; printf 'exit 0\n' > "$R/tools/lib2/x.sh"
+  printf 'version: 1\nchecks:\n  - id: run\n    command: [./tools/run.sh]\n  - id: entry\n    command: [./tools/entry.sh]\n' > "$R/.claude/productizer/checks.yaml"
+  commit "$R"
+  cydel() { G "$R" rm --quiet "$1"; G "$R" diff --cached > "$WORK/cy-$2.patch"; G "$R" reset --quiet --hard; }
+  cymod tools/real-helper.sh link-target; cymod tools/lib/deep2.sh link-deep; cymod tools/entry-real.sh link-program
+  cymod tools/pkg/inner.sh link-dir; cymod tools/stray.sh link-stray; cymod tools/lib2/x.sh link-via
+  cydel tools/link-helper.sh link-deleted; cydel tools/out-link.sh link-out-deleted; cydel tools/loop-b.sh link-cycle
+  drive unattended-checks-link-target 3 "tools/real-helper.sh $CY the target of the symbolic link tools/link-helper.sh)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-target.patch"
+  drive unattended-checks-link-target-transitive 3 "tools/lib/deep2.sh $CY a script tools/real-helper.sh names by its path)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-deep.patch"
+  drive unattended-checks-link-program-target 3 "tools/entry-real.sh $CY the target of the symbolic link tools/entry.sh)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-program.patch"
+  drive unattended-checks-link-dir-target 3 "tools/pkg/inner.sh $CY the target of the symbolic link tools/dir-link)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-dir.patch"
+  drive unattended-checks-link-in-named-path 3 "tools/lib2/x.sh $CY the target of the symbolic link tools/via-link)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-via.patch"
+  drive unattended-checks-link-deleted 3 "tools/link-helper.sh $CY a script tools/run.sh names by its path)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-deleted.patch"
+  drive unattended-checks-link-outside-kept 3 "tools/out-link.sh $CY a script tools/run.sh names by its path; it is a symbolic link to ../../outside.sh, outside the repository, so its target is not followed)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-out-deleted.patch"
+  drive unattended-checks-link-cycle 3 "tools/loop-b.sh $CY the target of the symbolic link tools/loop-a.sh)" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-cycle.patch"
+  drive unattended-checks-link-unnamed-allowed 0 "tools/stray.sh" \
+    "$R" --from build --to test --mode build --unattended --patch "$WORK/cy-link-stray.patch"
+  drive print-protected-links 0 "stage-advance: note: tools/dead-link.sh is protected, a script tools/run.sh names by its path; it is a symbolic link to missing.sh, a path the base tree does not hold" \
+    "$R" --print-protected --base HEAD
+  CASES=$((CASES + 1)); CODES="$CODES 0"
+  if printf 'tools/dead-link.sh\ntools/dir-link\ntools/entry-real.sh\ntools/entry.sh\ntools/lib/deep2.sh\ntools/lib2\ntools/link-helper.sh\ntools/loop-a.sh\ntools/loop-b.sh\ntools/out-link.sh\ntools/pkg\ntools/real-helper.sh\ntools/run.sh\ntools/via-link\n' | cmp -s - "$WORK/print-protected-links.out"; then
+    HELD=$((HELD + 1)); printf '  ok    %-44s exit 0\n' "print-protected-links-set"
+  else
+    printf '  FAIL  %-44s the printed list is not the two programs, the links they reach and their targets\n' "print-protected-links-set"
+    sed 's/^/          stdout: /' "$WORK/print-protected-links.out"
+  fi
   R="$WORK/cy"
 
   # --- THE PROTECTED LIST. --print-protected prints the reading above, one
@@ -1291,7 +1351,7 @@ YAML
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); a file a tool runs that no argument names (a test runner discovering tests, a git alias, a config the tool finds by itself), which the strict reading cannot see; a script a protected script reaches through a name built at run time ("$dir/$name", a glob) or spelled with a character outside letters, digits and _.@+/-, and a data file it reads (a config, a rules file), which the B147 reading does not follow; a file a change adds under the commit id `{base}` becomes, which this reading cannot know; a value inside a comma-separated list (`--x=a,b`), read as one value; a name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); that a --protected list is the one --print-protected wrote for this base (the list is validated as data, not traced to its source; build-dispatch.sh checks the HEAD it was written for); a checks.yaml at the base that is not a regular file, or an argv in it that is not a list of strings; an absolute program path inside the repository; a checks.yaml other than .claude/productizer/checks.yaml (run-checks.sh --config); a check whose program is resolved through a PATH that reaches the work tree; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
+  printf '    NOT ASSERTED: a header with an unquoted space; the label form of --from for every stage; a custom stage other than design/build with evidence; --head other than HEAD (build-dispatch.sh drives it); a requirement WITHDRAWN; that nothing is written outside the fixtures checked for it; that build-mode evidence outside artifacts.path is code rather than prose (a README edit counts); a backlog line ADDED in build mode that satisfies a check reading the backlog (check-import-marking reads a named stage there); the checks result MODIFIED in an ATTENDED run, which stays inert because run-checks.sh rewrites it every run, so a forged one is caught only under --unattended; the checks result RETYPED under --unattended (into a symlink it is refused as a link; out of one, no case drives it); that a caller which should pass --unattended does (build-dispatch.sh'"'"'s self-test drives its two calls); a write-once record MODIFIED by its own writer, which never happens (both refuse to overwrite); a file a tool runs that no argument names (a test runner discovering tests, a git alias, a config the tool finds by itself), which the strict reading cannot see; a script a protected script reaches through a name built at run time ("$dir/$name", a glob) or spelled with a character outside letters, digits and _.@+/-, and a data file it reads (a config, a rules file), which the B147 reading does not follow; a link'"'"'s target that runs through another link (`a -> b/c` where b is a link), which is not followed - the link stays protected and says so; a file a change adds under the commit id `{base}` becomes, which this reading cannot know; a value inside a comma-separated list (`--x=a,b`), read as one value; a name a tool resolves through a search path of its own other than the root (node_modules, a virtual environment); that the forbidden set is every file that steers CI or an agent - attended it is a list, and under --unattended the allowlist still admits an ASCII, dot-free file the list does not name (Jenkinsfile, azure-pipelines.yml, GEMINI.md, a package.json script); a homoglyph read as more than two characters, or one a component with no ASCII letter or digit holds; a homoglyph made of ASCII alone (rn for m); that no legitimate non-ASCII name is refused attended (a six-letter Cyrillic name ending .md is read as agents.md and refused); that a --protected list is the one --print-protected wrote for this base (the list is validated as data, not traced to its source; build-dispatch.sh checks the HEAD it was written for); a checks.yaml at the base that is not a regular file, or an argv in it that is not a list of strings; an absolute program path inside the repository; a checks.yaml other than .claude/productizer/checks.yaml (run-checks.sh --config); a check whose program is resolved through a PATH that reaches the work tree; the requirement index MODIFIED by a design move holding content other than what build-requirement-index.sh writes (the exception is on the path and the status, not on the bytes).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -1546,16 +1606,29 @@ try:
 except OSError as e:
     fail("the base tree listing cannot be read (%s)" % e)
 SCRIPTS = {}
+# A SYMBOLIC LINK (mode 120000) IS FOLLOWED TOO (B176). 1.10 skipped one, so a
+# protected script naming ./link.sh protected neither the link nor the file
+# it points to. A link a protected script names, or one under a protected
+# directory, is protected, and its target - read from the base tree, resolved
+# against the link's own directory - is protected and followed in turn. A
+# target outside the repository, or one the base tree does not hold, is not
+# followed; the link stays protected and its reason says so. A link a named
+# path runs through (`./dir-link/x.sh`) is protected and followed the same
+# way. `read` ends a cycle of links.
+LINKS = {}
 for entry in listing:
     meta, _, rel = entry.partition("\t")
     mode, kind, oid = (meta.split(" ") + ["", "", ""])[:3]
     if kind == "blob" and mode in ("100644", "100755") and (
             mode == "100755" or posixpath.splitext(rel)[1].lower() in SCRIPT_EXT):
         SCRIPTS[key(rel)] = (rel, oid)
+    elif kind == "blob" and mode == "120000":
+        LINKS[key(rel)] = (rel, oid)
+OBJECTS = dict(SCRIPTS, **LINKS)
 def protected_by(k):
     return any(k == p or k.startswith(p + "/") for p in out)
 NAME_RUN = re.compile(rb"[A-Za-z0-9_.@+/-]+")
-queue = [k for k in SCRIPTS if protected_by(k)]
+queue = [k for k in OBJECTS if protected_by(k)]
 read = set()
 while queue:
     batch = [k for k in dict.fromkeys(queue) if k not in read]
@@ -1565,7 +1638,7 @@ while queue:
     read.update(batch)
     try:
         cat = subprocess.run(["git", "-C", root, "cat-file", "--batch"],
-                             input=b"".join(SCRIPTS[k][1].encode() + b"\n" for k in batch),
+                             input=b"".join(OBJECTS[k][1].encode() + b"\n" for k in batch),
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
     except (OSError, subprocess.CalledProcessError) as e:
         fail("git cannot read a protected script from the base tree (%s)" % type(e).__name__)
@@ -1575,8 +1648,26 @@ while queue:
         size = int(cat[pos:head_end].split(b" ")[2])
         body = cat[head_end + 1:head_end + 1 + size]
         pos = head_end + 2 + size
-        rel = SCRIPTS[k][0]
+        rel = OBJECTS[k][0]
         here = posixpath.dirname(rel)
+        if k in LINKS:
+            target = body.decode("utf-8", "surrogateescape")
+            cand = posixpath.normpath(posixpath.join(here, target))
+            ck = key(cand)
+            if target.startswith("/") or cand == ".." or cand.startswith("../"):
+                gone = "outside the repository"
+            elif cand == "." or ck not in TREE:
+                gone = "a path the base tree does not hold as a file or directory"
+            else:
+                gone = ""
+            if gone:
+                lrel, lwhy = out.get(k, (rel, "a symbolic link under a protected directory"))
+                out[k] = (lrel, "%s; it is a symbolic link to %s, %s, so its target is not "
+                          "followed" % (lwhy, target, gone))
+                continue
+            protect(OBJECTS[ck][0] if ck in OBJECTS else cand, "the target of the symbolic link %s" % rel)
+            queue.extend(o for o in OBJECTS if o not in read and (o == ck or o.startswith(ck + "/")))
+            continue
         names = set()
         for run in set(NAME_RUN.findall(body)):
             run = run.decode("ascii")
@@ -1586,9 +1677,16 @@ while queue:
             for base_dir in (here, ""):
                 cand = posixpath.normpath(posixpath.join(base_dir, name)) if name else ""
                 ck = key(cand)
-                if ck in SCRIPTS and ck not in out:
-                    protect(SCRIPTS[ck][0], "a script %s names by its path" % rel)
+                if ck in OBJECTS and ck not in out:
+                    protect(OBJECTS[ck][0], "a script %s names by its path" % rel)
                     queue.append(ck)
+                elif ck not in OBJECTS:
+                    parts = cand.split("/")
+                    for n in range(1, len(parts)):
+                        lk = key("/".join(parts[:n]))
+                        if lk in LINKS and lk not in out:
+                            protect(LINKS[lk][0], "a symbolic link a script %s names a path through" % rel)
+                            queue.append(lk)
 w = sys.stdout.buffer
 for k in sorted(out):
     rel, why = out[k]
@@ -1655,6 +1753,8 @@ if [ "$PRINT_PROTECTED" = 1 ]; then
     [ -z "$PRINTED" ] || printf '%s\n' "$PRINTED"
     printf 'stage-advance: %s path(s) that %s at %s runs, one per line on stdout\n' \
       "$(grep -c . <<< "$PRINTED")" "$CHECKS_YAML" "$BASE" >&2
+    # A link whose target is not followed is still protected; say so (B176).
+    printf '%s\n' "$CHECKS_RUN" | awk -F'\t' 'index($3, "so its target is not followed") { print "stage-advance: note: " $1 " is protected, " $3 }' >&2
   fi
   exit 0
 fi

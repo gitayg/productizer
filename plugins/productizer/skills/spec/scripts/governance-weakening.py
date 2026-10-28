@@ -453,8 +453,7 @@ def step_label(step: Dict[str, Any], index: int) -> str:
     if isinstance(sid, str) and sid.strip():
         return "id=%s" % sid.strip()
     name = step.get("name")
-    uses = step.get("uses")
-    action = uses.split("@", 1)[0].strip() if isinstance(uses, str) else ""
+    action = step_action(step)
     if isinstance(name, str) and name.strip():
         return "%s (uses %s)" % (name, action) if action else name
     if action:
@@ -465,6 +464,12 @@ def step_label(step: Dict[str, Any], index: int) -> str:
         if lines:
             return "run: %s" % lines[0][:80]
     return "#%d" % index
+
+
+def step_action(step: Dict[str, Any]) -> str:
+    """The action a step uses, with its `@ref` dropped; empty for none."""
+    uses = step.get("uses")
+    return uses.split("@", 1)[0].strip() if isinstance(uses, str) else ""
 
 
 def workflow_steps(doc: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
@@ -886,6 +891,22 @@ def compare_workflow(surface: Surface, base: Optional[Dict[str, Any]],
             surface.undecided("workflow.step[%s].body" % key, work_b, work_t,
                               "the step kept its key and what it runs changed. "
                               "Whether it now asserts less is for a person to say")
+        # A STEP KEYED BY ITS ID KEEPS THAT KEY WHATEVER IT USES (B175). The
+        # body above leaves `uses` out, so `id: py` moving from
+        # actions/setup-python to someone-else/setup-python at the same commit
+        # id read as nothing moved. The action's name is compared with its @ref
+        # dropped, so a pin bump is still the same step. UNDECIDED, not
+        # WEAKENED: no ladder here orders one action against another, and the
+        # same swap on a step with no id - its key gone, another added - is
+        # already UNDECIDED above.
+        surface.atoms += 1
+        act_b, act_t = step_action(bstep), step_action(tstep)
+        if act_b != act_t:
+            surface.undecided("workflow.step[%s].uses" % key, act_b or "no action",
+                              act_t or "no action",
+                              "the step kept its key and the action it runs is "
+                              "another one. Whose code now runs there, and whether "
+                              "it asserts less, is for a person to say")
     for key in sorted(set(tree_steps) - set(base_steps)):
         if key not in renamed_from:
             surface.tightened("workflow.step[%s]" % key, "absent", "declared")

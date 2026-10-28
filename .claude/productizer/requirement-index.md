@@ -199,4 +199,8 @@ marker, because a table left there would be one nothing writes or checks.
 | R171 | unwanted | active | `plan-record-checker` |
 | R172 | unwanted | active | `plan-record-checker`, `plan-record` |
 | R173 | unwanted | active | `approval-rules-checker` |
+| R174 | unwanted | active | `governance-weakening` |
+| R175 | unwanted | active | `stage-advance-guard` |
+| R176 | unwanted | active | `stage-advance-guard` |
+| R177 | unwanted | active | `ci-template-safe`, `release-workflow-safe` |
 <!-- productizer:requirement-index:end -->

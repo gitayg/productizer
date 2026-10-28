@@ -798,7 +798,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**140 requirements are active**, and they are the whole of what has been
+**144 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -987,7 +987,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Sixty-five defences, written as `If … then`
+**When something goes wrong.** Sixty-nine defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1165,6 +1165,25 @@ because a designed path and a defended one are not the same thing:
   `.github/workflows/`, or a file a change adds there, with no owner other
   than a bot, then the lifecycle shall report that file as having no human
   code owner.
+- **R174** — If a workflow step that keeps its key between the base and the
+  working tree uses an action whose name, its `@ref` left out, differs from
+  the one it used at the base, then the lifecycle shall report that move as
+  undecided.
+- **R175** — If an unattended stage run changes a symbolic link that, at the
+  base, a check declared in `.claude/productizer/checks.yaml` runs or a script
+  so run names by its path, directly or through other scripts or links so
+  named, or changes the file or directory that link points to at the base,
+  then the lifecycle shall refuse the stage move.
+- **R176** — If a symbolic link protected from an unattended stage run points,
+  at the base, outside the repository or to no path the base tree holds, then
+  the lifecycle shall report that link as protected and its target as not
+  followed.
+- **R177** — If a `run:` that names PyYAML, in a workflow the lifecycle ships
+  or runs, holds a pip install command, split from the commands around it at
+  `;`, `&`, `&&`, `\|\|`, `\|` and line ends, that does not itself carry
+  `--require-hashes` and `--only-binary :all:`, or carries `--no-binary` or
+  another `--only-binary` value, then the lifecycle shall report that install
+  as not pinned by hash.
 
 **Only where the feature is present.** Six requirements apply only to a build
 that includes the feature:

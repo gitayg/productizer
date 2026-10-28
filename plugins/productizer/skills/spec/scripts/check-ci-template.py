@@ -71,10 +71,20 @@ WHAT IT ASSERTS, each a separate finding:
                  --require-hashes and --only-binary :all: (B148), so pip takes
                  only a wheel whose hash a requirements line names and builds
                  no sdist; pinned by version alone, a file re-published at that
-                 version would be installed. LIMITS: it reads the run: text,
-                 not the requirements file, so it does not check that the
-                 hashes are PyPI's; a pip spelled through a variable is not
-                 seen; an install that does not name PyYAML is not this rule's
+                 version would be installed. Since 1.3 (B177) the two flags
+                 are read as arguments of that same pip install: the run: is
+                 split into commands at `;`, `&`, `&&`, `||`, `|`, a
+                 parenthesis, a backquote and a line end, a comment is cut
+                 where bash starts one, and a redirection's file is no
+                 argument; any --no-binary, an --only-binary whose value is
+                 not :all:, a pip install seen only inside a larger word (a
+                 quoted $(...), `sh -c "..."`) and a run: that does not split
+                 into shell words are each a finding. LIMITS: it reads the
+                 run: text, not the requirements file, so it does not check
+                 that the hashes are PyPI's, nor a --no-binary written in that
+                 file or in PIP_NO_BINARY; a pip spelled through a variable is
+                 not seen; an install that does not name PyYAML is not this
+                 rule's
   run-injection  no `${{` expression of any context inside a run: - not only
                  github.event and inputs, but steps, needs, env, matrix,
                  github.head_ref and the rest, any of which can carry
@@ -132,12 +142,13 @@ Exit codes:
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 
-VERSION = "check-ci-template 1.2"
+VERSION = "check-ci-template 1.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(HERE, "..", "templates", "build-from-spec.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "ci-template")
@@ -188,7 +199,6 @@ INSTALL_WORDS = ("pip", "pip3", "pipx", "uv", "poetry", "conda", "mamba", "micro
 INSTALL_RX = re.compile(r"(?<![\w./$-])(%s)(?![\w.-])" % "|".join(re.escape(w) for w in INSTALL_WORDS))
 YAML_LIB_RX = re.compile(r"(?i)pyyaml|python3?-yaml|ruamel")
 PIP_INSTALL_RX = re.compile(r"(?<![\w./$-])(?:pip3?|-m\s+pip)\s+install(?![\w-])")
-ONLY_BINARY_RX = re.compile(r"--only-binary(?:\s+|=)[\"']?:all:")
 # A run: that names build-dispatch.sh and the word deliver calls deliver,
 # whether the subcommand follows the script name or sits in an argv array
 # built first (`args=(deliver . ...)`, then `"${args[@]}"`), as the template's
@@ -312,15 +322,115 @@ def first_missing(run, required):
     return None
 
 
+def shell_text(run):
+    """A run: as one line of shell for shlex: a backslash-newline removed, as
+    bash removes it; a comment cut where bash starts one, at a `#` that begins
+    a word outside quotes; and a line end or a backquote outside quotes made a
+    `;`. shlex's own comments=True is not used: it starts a comment at a `#`
+    inside a word, which bash does not, so `echo a#; pip install pyyaml` read
+    as `echo a` and the install was never seen (B177)."""
+    out, quote, word_start, i = [], "", True, 0
+    while i < len(run):
+        c = run[i]
+        if quote == "'":
+            out.append(c)
+            quote = "" if c == "'" else quote
+        elif c == "\\" and i + 1 < len(run):
+            if run[i + 1] != "\n":
+                out.append(run[i:i + 2])
+                word_start = False
+            i += 2
+            continue
+        elif quote == '"':
+            out.append(c)
+            quote = "" if c == '"' else quote
+        elif c in "'\"":
+            out.append(c)
+            quote = c
+        elif c == "#" and word_start:
+            while i < len(run) and run[i] != "\n":
+                i += 1
+            continue
+        elif c in "\n`":
+            out.append(" ; ")
+        else:
+            out.append(c)
+        word_start = not quote and (c.isspace() or c in ";&|()<>`")
+        i += 1
+    return "".join(out)
+
+
+def shell_commands(run):
+    """A run: split into commands, each a list of its words: at `;`, `&`, `&&`,
+    `||`, `|`, a parenthesis and a line end, with a redirection and the word it
+    names dropped, since that word is a file and not an argument. Raises
+    ValueError for text shlex cannot split (an unclosed quote)."""
+    lex = shlex.shlex(shell_text(run), posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    lex.commenters = ""
+    commands, words, skip = [], [], False
+    for tok in lex:
+        if skip:
+            skip = False
+            continue
+        if tok and not set(tok) - set(";&|()<>"):
+            if set(tok) & set(";|()") or tok in ("&", "&&"):
+                if words:
+                    commands.append(words)
+                words = []
+            skip = bool(set(tok) & set("<>")) and "(" not in tok
+            continue
+        words.append(tok)
+    if words:
+        commands.append(words)
+    return commands
+
+
+def pip_install_ok(words):
+    """None when this command is no pip install, True when it is one whose own
+    arguments, after the word naming pip, carry --require-hashes and
+    --only-binary :all: (or =:all:) with no --no-binary and no other
+    --only-binary value; False otherwise. A pip install seen only inside a
+    larger word - `sh -c "..."`, a quoted `$(...)` - has arguments that cannot
+    be read here, so it is False."""
+    at = None
+    for i, w in enumerate(words):
+        if re.fullmatch(r"(?:-m)?pip[0-9.]*", w.rsplit("/", 1)[-1]) and "install" in words[i + 1:]:
+            at = i
+            break
+    if at is None:
+        return False if PIP_INSTALL_RX.search(" ".join(words)) else None
+    args = words[at + 1:]
+    only_all = False
+    for i, w in enumerate(args):
+        name, eq, val = w.partition("=")
+        if len(name) >= len("--no-bi") and "--no-binary".startswith(name):
+            return False
+        if len(name) >= len("--o") and "--only-binary".startswith(name):
+            value = val if eq else (args[i + 1] if i + 1 < len(args) else "")
+            if name != "--only-binary" or value != ":all:":
+                return False
+            only_all = True
+    return only_all and "--require-hashes" in args
+
+
 def unhashed_yaml_install(run):
-    """The first pip install line of a run: naming PyYAML that does not pass
-    both --require-hashes and --only-binary :all:; None when every one does."""
+    """The first pip install command of a run: naming PyYAML that does not
+    itself pass both --require-hashes and --only-binary :all:, or passes
+    --no-binary or another --only-binary value; None when every one does. The
+    flags are read as arguments of that command, never anywhere on its line:
+    `pip install pyyaml; echo --require-hashes --only-binary :all:` passed
+    1.2 (B177)."""
     if not re.search(r"(?i)pyyaml", run):
         return None
-    for line in guard_lines(run):
-        if PIP_INSTALL_RX.search(line) and not (
-                "--require-hashes" in line.split() and ONLY_BINARY_RX.search(line)):
-            return line
+    try:
+        commands = shell_commands(run)
+    except ValueError as exc:
+        return "%s (the run: does not split into shell words: %s)" % (
+            (guard_lines(run) or [""])[0], exc)
+    for words in commands:
+        if pip_install_ok(words) is False:
+            return " ".join(words)
     return None
 
 
@@ -588,8 +698,9 @@ def check(path):
         line = unhashed_yaml_install(run)
         if line:
             find("yaml-hash-pinned", where, "installs PyYAML without --require-hashes and "
-                 "--only-binary :all:, so a file re-published at that version would be "
-                 "installed: %s" % line)
+                 "--only-binary :all: as arguments of the same pip install, or with "
+                 "--no-binary or another --only-binary value, so a file re-published at "
+                 "that version would be installed: %s" % line)
         for label, rx in SWALLOW:
             if rx.search(run):
                 find("swallow", where, "%s hides a failure" % label)
@@ -738,7 +849,9 @@ def selftest():
           "refuses a list read at another HEAD at run time); that a staged script "
           "installs nothing (write-job-no-install reads the run: text); that the hashes a "
           "PyYAML install names are PyPI's, or that pip on a runner accepts them "
-          "(yaml-hash-pinned reads the flags on the run: line).")
+          "(yaml-hash-pinned reads the flags as arguments of the pip install in the run: "
+          "text); a --no-binary in a requirements file or in PIP_NO_BINARY; a pip install "
+          "inside `sh -c` or `eval` read for its flags (it is reported, never passed).")
     if got != doc:
         print("FAIL: reached and documented exit codes differ")
         return 1
