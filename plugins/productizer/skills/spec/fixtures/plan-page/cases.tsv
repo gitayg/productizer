@@ -1,0 +1,33 @@
+# cases.tsv - four TAB-separated fields: id, expect, assertion, note
+#
+#   expect     clean   = check-plan-page.py must report no finding on pages/<id>.html
+#              finding = it must report at least one, under the assertion named
+#   assertion  capability | network | script | none (for a clean page)
+#
+# A built plan page is held to these AND to the template's script byte for
+# byte; these hand-made pages carry their own script, so that half is not
+# applied to them. The clean pages are as important as the others: a check
+# that flags every page is switched off as fast as one that flags none.
+clean	clean	none	a fragment link, textContent and a timer given a function
+prose-clean	clean	none	every forbidden word, in escaped text and a pre, is text
+cap-use	finding	capability	the call written plainly
+cap-name-in-text	finding	capability	the name verbatim anywhere, even in text, is a finding: a built page encodes it
+cap-bracket	finding	capability	the name assembled; the use call bracketed
+eval	finding	capability	an evaluator: what it asks for is not in the page
+timer-string	finding	capability	a timer handed a string is an evaluator
+img-remote	finding	network	an image from a remote host
+link-css	finding	network	a stylesheet from a protocol-relative URL
+script-src	finding	network	a script from a remote host
+css-import	finding	network	@import in a style element
+css-url	finding	network	url() in a style attribute
+css-escape	finding	network	url( written with a CSS escape
+fetch	finding	network	fetch in the script
+beacon	finding	network	sendBeacon in the script
+location	finding	network	navigating the page away, carrying data
+form	finding	network	a form that posts
+meta-refresh	finding	network	a meta refresh
+js-url	finding	network	a javascript: link
+iframe	finding	network	a frame, even one fed srcdoc
+inline-handler	finding	script	an inline event handler
+inner-html	finding	script	text written as markup
+storage	finding	script	answers kept in browser storage

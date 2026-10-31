@@ -951,3 +951,39 @@ does not do:
 - **Its shapes are fixed.** A proof item is a list line at the left margin; a
   paragraph of proof with no list marker is refused, and an id is read only
   outside the item's fences.
+
+## Added in v4.78.0
+
+### 49 · The plan page is read as bytes, and the person's reading of it is not known
+
+Since v4.78.0 (B185) `scripts/build-plan-page.sh` turns a plan into a page a
+person comments on and answers, and `scripts/plan-answers.py` takes the answer
+set back into the plan (`references/plan-page.md`). What it does not do:
+
+- **It cannot know the person read the page**, or that an answer is a
+  considered one. A valid answer set says which buttons were pressed.
+- **A comment is free text the agent interprets.** The validator checks the
+  passage it names and the words it quotes, not what it means; comments are
+  printed and never written into the plan.
+- **No check runs the page in a browser.** `check-plan-page.py` reads the built
+  page's bytes and its HTML parse - Python's parser standing in for a
+  browser's - against lists of elements, attributes and APIs, and holds the
+  script to the template's byte for byte. The buttons, the selection comment
+  and the copy were driven by hand in one browser in the session that built
+  them.
+- **The clipboard may refuse.** In a sandboxed frame - an Artifact, say - the
+  copy can be refused; the page then says so and selects its answer set for the
+  person to copy by hand. Whether an Artifact frame refuses it was not
+  measured. The save-as-file link is offered only outside a frame.
+- **A capability granted at publish time is not seen.** The page asks for none,
+  and the checks read the page; `artifact-gate.sh` refuses a self-publishing
+  capability in the publish call and allows `downloads`, so publishing the plan
+  page with `downloads` granted would not be refused. Publish it with none.
+- **The theme reads custom properties only**, and only of a colour or a
+  font-name shape. A bare `0 0% 100%` triplet, colours set any other way, and
+  a font not installed on the reader's machine are not taken; a font is named,
+  never loaded, and no contrast is measured.
+- **The open-question syntax is fixed.** A question is `- Q<n>: ...` at the
+  left margin with options `  - A: ...` under it; anything else in the section
+  stops the build, and a plan edited between building the page and answering
+  it refuses the answers until the page is rebuilt.

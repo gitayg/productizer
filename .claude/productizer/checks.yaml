@@ -4883,8 +4883,8 @@ checks:
       refused: [2]
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 37 cases held'
-      min_covered: 37
+      pattern: '([0-9]+) of 38 cases held'
+      min_covered: 38
       spec_units:
         - id: R171
           verdict: Covered
@@ -4893,7 +4893,10 @@ checks:
             `plan-placeholder-revert`, `plan-empty-revert`, `plan-no-proof` and
             `plan-proof-runs-into-revert` exit 1; `plan-template-is-placeholder` fails the shipped
             plan.md. Falsified 2026-10-28: revert rule off 10 of 17, tested rule off 13 of 17,
-            placeholder accepted 11 of 17.
+            placeholder accepted 11 of 17. check-plan-record.py 1.2 (B185) reads `Open questions` and
+            `Decisions` as sections, so a placeholder `Revert` above them is still a placeholder:
+            `plan-revert-runs-into-decisions` exits 1. Falsified 2026-10-31 with the two names left
+            out of the plan's headings: 37 of 38.
         - id: R172
           verdict: Partial
           reason: >-
@@ -4941,6 +4944,218 @@ checks:
     limitations:
       - It reads text. Whether the tests named were run, and whether the revert path works, are not measured.
       - A proof's evidence is read as text. A screenshot of the wrong page, a link that does not open, a log from another build and an id the item does not answer all pass; reading the proof against the request is the reviewer's (REVIEW.md).
+
+  # --- the plan page (B185) --------------------------------------------------
+  #
+  # A plan read as a page: every section, a comment on any passage, a button
+  # per option of each open question, and the answers handed back as text the
+  # agent validates. The page is not a view and holds nothing: it requests no
+  # capability, loads and sends nothing, and its answers reach plan.md alone,
+  # through plan-answers.py. references/plan-page.md.
+  - id: plan-page
+    why: a plan page that asks for a capability, reaches the network, or runs the plan's own text as markup or script turns a reading aid into a channel out of the repository and a second place decisions live
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-plan-page.py, ./plugins/productizer/skills/spec/scripts/build-plan-page.sh, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-plan-page.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-plan-page.py]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a built page held something it may not, or the corpus was misclassified
+      refused: [2]     # no builder, no corpus, an unexercised group, or a page that could not be built
+    coverage:
+      from: stdout_count
+      pattern: 'check-plan-page: ([0-9]+) of [0-9]+ cases held'
+      min_covered: 27
+      spec_units:
+        - id: R202
+          verdict: Partial
+          reason: >-
+            It reads the page's bytes and its HTML parse. A capability granted in the publish call
+            leaves nothing in the page, and artifact-gate.sh allows `downloads` there; the page is
+            never run.
+          evidence: >-
+            check-plan-page.py 1.0 (B185), 27 cases: four pages built by the real builder - the
+            hostile fixture plan, which quotes a capability request for `artifact` in its text, that
+            plan with a hostile stylesheet, a plain plan and the shipped templates/plan.md - hold
+            the capability object's name nowhere, no `use(` call and no evaluator; the corpus
+            flags `cap-use`, `cap-name-in-text`, `cap-bracket`, `eval` and `timer-string`. Its
+            --selftest (10 cases) drives a stub builder adding a request, exit 1. Falsified
+            2026-10-31 in a copied skill directory: the name rule off, 9 of 10; the `use(` rule
+            off, 9 of 10; the builder's encoding of the name removed, 23 of 27.
+        - id: R203
+          verdict: Partial
+          reason: >-
+            Static lists over bytes and the HTML parse; the page was never watched for requests,
+            and an API the lists do not name is caught only by the template-script identity.
+          evidence: >-
+            No built page holds an element that loads or sends, an address that is not a
+            `#fragment`, `url(`, `@import` or a backslash in its CSS, or a network or navigation
+            API in its script; fourteen corpus pages each doing one of these are flagged, and
+            `clean` and `prose-clean`, which names every forbidden word as text, pass. Falsified
+            2026-10-31: loading elements, address attributes, CSS `url(`/`@import` and network
+            APIs each allowed in turn, 9 of 10.
+        - id: R204
+          verdict: Partial
+          reason: >-
+            Python's HTML parser stands in for a browser's.
+          evidence: >-
+            Each of the 15 lines of fixtures/plan-page/plans/hostile.expect - `</script>`,
+            `onerror=`, `javascript:` links, `@@BODY@@`, an `@import`, a meta refresh in a fence,
+            markup in the title, a heading, a question and an option - is in the built page's
+            text outside script and style; the page's only script is the template's byte for byte
+            and it holds no inline handler. Falsified 2026-10-31: the builder's `<` escaping
+            removed, 24 of 27; plan text spliced into the script, 23 of 27; the script identity
+            off, 9 of 10.
+    limitations:
+      - It reads bytes and the HTML parse and never runs the page. A capability granted in the publish call leaves nothing in the page.
+      - Its lists of elements, attributes and APIs are lists; a built page is also held to the template's script byte for byte, which is what covers an API they do not name.
+
+  - id: plan-page-checker
+    why: the plan page check reads pages for what they hold, and a reader that stopped flagging a fetch, a capability request or a stray script, or read an unbuilt page as clean, would pass every page
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/check-plan-page.py, ./plugins/productizer/skills/spec/scripts/build-plan-page.sh, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/check-plan-page.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/check-plan-page.py, --selftest]
+    timeout_seconds: 180
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'check-plan-page selftest: ([0-9]+) of [0-9]+ cases held'
+      min_covered: 10
+    limitations:
+      - Its stub builders write one forbidden thing each into a clean page; the corpus under fixtures/plan-page carries the rest of the reading.
+
+  - id: plan-page-builder
+    why: the plan page is the person's only view of what they are deciding, and a page missing a section, an option or the plan's hash answers a different plan than the one on disk
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/build-plan-page.sh, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/build-plan-page.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/build-plan-page.sh, --selftest]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the page it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'build-plan-page selftest: ([0-9]+) of [0-9]+ cases held'
+      min_covered: 37
+      spec_units:
+        - id: R201
+          verdict: Partial
+          reason: >-
+            No check runs the page in a browser; it was driven once, by hand, in the session that
+            built it.
+          evidence: >-
+            build-plan-page.sh 1.0 (B185), 37 cases; counts below at 36. `every-section` finds the seven template
+            sections' headings and a line of each; `every-question` both questions, a control per
+            option, `data-key="C"` included, and the `other` control. Falsified 2026-10-31: the
+            open questions drawn as plain passages, 35 of 36; the last section dropped, 35 of 36.
+        - id: R205
+          verdict: Partial
+          reason: >-
+            No check runs the script that assembles the answer set; one set the page produced in a
+            browser was validated with plan-answers.py, by hand.
+          evidence: >-
+            `answers-header`: the page carries the plan's path and sha256 in `data-plan` and
+            `data-sha`, and the template's script the fence and the `format: 1`, `plan: ` and
+            `plan-sha256: ` header lines. Falsified 2026-10-31 with the hash not carried, 35 of 36.
+        - id: R211
+          verdict: Partial
+          reason: >-
+            A font is named, never loaded, and no contrast is measured.
+          evidence: >-
+            `theme-from-config`, `theme-var-resolved`, `theme-dark` and `mapping-wins` take colours
+            and fonts from :root, a var() reference, the dark @media root and a plan_page.tokens
+            name; `theme-unsafe-not-taken`, `hostile-css-dropped` and `breakout-css-dropped` hold
+            that url(), expression(), a bad hex, a commented or non-root value, `</style>` and
+            @import are never taken. Falsified 2026-10-31: any value taken as a colour, 33 of 36;
+            var() never resolved, 35 of 36; the dark root not read, 35 of 36; the light colours
+            never written, 31 of 36.
+        - id: R212
+          verdict: Covered
+          evidence: >-
+            `builtin-no-config`, `missing-css-builtin`, `outside-css-builtin`, `bad-config-builtin`
+            and `hostile-css-builtin` build, exit 0, and name the reason under `Theme: built-in`.
+            Falsified 2026-10-31 with an outside stylesheet read: 35 of 36.
+    limitations:
+      - The page is not run in a browser by any check; its buttons, comments and copy were exercised by hand once.
+
+  - id: plan-answers
+    why: an answer set applied to a plan it was not built from, naming a question or a passage the plan does not hold, or reaching a file that is not a plan, writes a decision nobody made into the record
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/plan-answers.py, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/plan-answers.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/plan-answers.py, --selftest]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'plan-answers selftest: ([0-9]+) of [0-9]+ cases held'
+      min_covered: 39
+      spec_units:
+        - id: R206
+          verdict: Covered
+          evidence: >-
+            plan-answers.py 1.0 (B185), 39 cases in a temporary repository. `stale` and
+            `stale-says-rebuild` exit 1 saying the plan changed and the page must be rebuilt;
+            `apply-twice-is-stale` refuses the same set once applied. Falsified 2026-10-31 with
+            the hash comparison off: 36 of 39.
+        - id: R207
+          verdict: Covered
+          evidence: >-
+            `unknown-question`, `unknown-option`, `decided-twice`, `decided-is-not-open`,
+            `other-no-text`, `unknown-anchor`, `unknown-section` and `quote-not-there` exit 1.
+            Falsified 2026-10-31: a decision twice accepted, 38 of 39; an unknown passage accepted,
+            37 of 39; the quote not matched, 38 of 39; any option accepted, the self-test crashed
+            on the unknown option, exit 1 with no count.
+        - id: R208
+          verdict: Covered
+          evidence: >-
+            `spec-named` (the set names .claude/productizer/spec.md with that file's true hash),
+            `dotdot`, `absolute`, `symlink`, `absent-plan` and `other-plan-than-asked` exit 1.
+            Falsified 2026-10-31: the plan.md name rule off, 38 of 39; a symbolic link followed,
+            38 of 39.
+        - id: R209
+          verdict: Covered
+          evidence: >-
+            `apply-writes-decision`, `apply-moves-question`, `apply-drops-placeholder`,
+            `apply-keeps-the-rest`, `apply-last-removes-open-questions` and
+            `apply-adds-decisions-section` read the plan back after --apply. Falsified 2026-10-31:
+            the answered question kept, and no entry written, each stopped by apply's own
+            after-check - the self-test crashed, exit 1 with no count.
+        - id: R210
+          verdict: Partial
+          reason: >-
+            The listing covers the temporary repository, not the whole disk; the write is one
+            os.replace onto the plan.
+          evidence: >-
+            `apply-touches-only-the-plan` lists every file in the temporary repository and reads
+            the spec's bytes before and after --apply: only the plan changed;
+            `apply-comments-not-written` holds that comments stay out of it. Falsified 2026-10-31:
+            apply also writing a decisions.md beside the plan, 38 of 39; apply also appending to
+            the spec, 38 of 39.
+    limitations:
+      - It cannot know the person read the page, and a comment is free text the agent interprets; comments are printed and never written.
 
   - id: approval-rules-checker
     why: a CODEOWNERS that leaves the spec, the checks or the workflows without a human owner makes an agent's change to them approvable by anyone with write access

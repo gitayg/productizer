@@ -10,6 +10,11 @@ out of a published view into the spec. The moment a view is authoritative, the
 committed chain stops being the audit trail — which is the only thing this
 lifecycle is selling.
 
+**The plan page is not a view.** It shows one plan and lets a person comment
+and decide its open questions, and it is held to stricter rules than any view:
+no capability at all, nothing loaded or sent, and answers that reach `plan.md`
+alone through a validator, never the spec (`references/plan-page.md`).
+
 ## When to publish one, and when not to
 
 | Ask | Response |

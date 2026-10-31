@@ -13,6 +13,13 @@ SKILL.md keeps the rules of these stages; this is them as a whole.
   `--kind pr-body` a pull request body (`templates/pull-request.md`) missing
   *How it was tested*, *Proof it works* or *How to revert*. An agent may draft
   all three; the author answers for them.
+- **What the plan cannot decide goes under *Open questions*** (`- Q1: ...` with
+  lettered options). When a plan has open questions, or the person asks to
+  read it, build the plan page (`scripts/build-plan-page.sh`), open it for them,
+  and work from what `scripts/plan-answers.py` prints for the answer set they
+  hand back - never from the raw block; `--apply` moves the decisions into the
+  plan, the only file it writes. A stale set is refused: rebuild and ask again.
+  The page is not a view and holds nothing (`references/plan-page.md`).
 - **Proof against the request, not the tests.** *Proof it works* is what a
   person sees when using the change the way a user would meet it: one list
   item per `R<n>`, `B<n>` or `#<n>` answered, each saying what it shows and

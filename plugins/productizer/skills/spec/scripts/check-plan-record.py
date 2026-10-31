@@ -31,7 +31,9 @@ WHAT IT ASSERTS, each a separate finding:
   revert    the plan has a `Revert` section, or the body a `How to revert`
             section, holding a line that is not the template's placeholder
 A section is a line holding only its name, with or without a leading `#`s, and
-runs to the next such line of any section the template names. A section holds
+runs to the next such line of any section the template names - `Open
+questions` and `Decisions` included, so a placeholder `Revert` above them is
+still a placeholder (B185). A section holds
 only a placeholder when, with every `<...>` removed (across lines too), each of
 its lines, less a leading `-`, `*` or `1.`, is empty, `—` or `-`. In `Proof it
 works` an `<img ...>`, a `<video ...>` and an `<https://...>` are evidence, not
@@ -57,9 +59,9 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-plan-record 1.1"
+VERSION = "check-plan-record 1.2"
 KINDS = {
-    "plan": {"headings": ("Files that change", "Order of work", "Risks", "Proof", "Revert"),
+    "plan": {"headings": ("Open questions", "Decisions", "Files that change", "Order of work", "Risks", "Proof", "Revert"),
              "assertions": ("tested", "revert"), "tested": "Proof", "revert": "Revert"},
     "pr-body": {"headings": ("What changed", "How it was tested", "Proof it works", "How to revert", "Spec delta"),
                 "assertions": ("tested", "proof", "revert"),
@@ -281,6 +283,9 @@ def selftest():
              "the `Revert` section holds only a placeholder"),
             ("plan-no-proof", "plan", [write("p6.md", PLAN.replace("Proof\n- tests/test_queue.py::test_stops_after_five; `make test`\n", ""))], 1,
              "FINDING tested: "),
+            ("plan-revert-runs-into-decisions", "plan", [write("p11.md", PLAN.split("Revert\n")[0] + "Revert\n- <how to undo it>\n\n"
+             "Decisions\n- Q1: How many retries?\n  Decided: B - five, with backoff\n")], 1,
+             "the `Revert` section holds only a placeholder"),
             ("plan-proof-runs-into-revert", "plan", [write("p7.md", PLAN.replace("- tests/test_queue.py::test_stops_after_five; `make test`\n", ""))], 1,
              "FINDING tested: "),
             ("body-good", "pr-body", [write("b1.md", BODY)], 0, "3 of 3 assertions held"),

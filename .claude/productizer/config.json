@@ -135,5 +135,10 @@
       "plugins/productizer/skills/spec/scripts/check-hygiene.sh",
       ".claude/productizer/hygiene-local.txt"
     ]
+  },
+  "plan_page": {
+    "_note": "plan_page themes the plan page (scripts/build-plan-page.sh) and nothing else. stylesheet = null | <path to a CSS file in this repository>: the page takes its colours and fonts from the custom properties that file sets on :root (light) and on :root under @media (prefers-color-scheme: dark), [data-theme=\"dark\"] or .dark (dark), and only values of a colour or font-name shape; url(), @import and anything that is not a colour or a font list are never taken. tokens = {} | {<page token>: \"--<property>\"}: names the property for a page token (bg, surface, text, muted, border, accent, accent-text, font, mono) when it is not one of the documented names. null, a file that cannot be read, one outside the repository or one that sets nothing usable gives the built-in theme, and the page says which - never an error. A font is named, never loaded. See references/plan-page.md, The project's own look.",
+    "stylesheet": null,
+    "tokens": {}
   }
 }

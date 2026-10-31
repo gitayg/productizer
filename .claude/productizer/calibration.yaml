@@ -542,6 +542,22 @@ checks:
     status: uncalibrated
     reason: "the command passes --base, so it compares against a history the extracted tree does not have"
     measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-28", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.75.0 change", command: "measure-check-overfire.sh --check revert-cases --commits 30 --history clone"}
+  - id: plan-page
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.78.0 change replayed at the window's head, which is not merged history. check-plan-page.py did not exist before v4.78.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-31", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.78.0 change", command: "measure-check-overfire.sh --check plan-page --commits 30 --history clone"}
+  - id: plan-page-checker
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.78.0 change replayed at the window's head, which is not merged history. check-plan-page.py did not exist before v4.78.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-31", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.78.0 change", command: "measure-check-overfire.sh --check plan-page-checker --commits 30 --history clone"}
+  - id: plan-page-builder
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.78.0 change replayed at the window's head, which is not merged history. build-plan-page.sh did not exist before v4.78.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-31", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.78.0 change", command: "measure-check-overfire.sh --check plan-page-builder --commits 30 --history clone"}
+  - id: plan-answers
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.78.0 change replayed at the window's head, which is not merged history. plan-answers.py did not exist before v4.78.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-10-31", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.78.0 change", command: "measure-check-overfire.sh --check plan-answers --commits 30 --history clone"}
   - id: approval-rules
     status: measured
     window: {first: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, last: 7e21e09a32674357200bde8aa997914ec7704b5c, commits: 29, history: clone}

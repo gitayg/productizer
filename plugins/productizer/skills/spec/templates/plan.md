@@ -1,5 +1,13 @@
 # Implementation plan: <short title>
 
+Open questions
+- Q1: <a decision this plan cannot make alone; remove the section when there is none>
+  - A: <one answer>
+  - B: <another answer>
+
+Decisions
+- <answered open questions land here, written by plan-answers.py --apply>
+
 Files that change
 - path/to/file.ext — what changes and why
 

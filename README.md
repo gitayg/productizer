@@ -52,7 +52,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.77.0"`.
+`plugin.json` sets `"version": "4.78.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -337,6 +337,23 @@ tell a real screenshot from a wrong one, and nothing here takes, uploads or
 posts one. The CI build template's draft carries the three sections as
 placeholders the author owes before it leaves draft, so the checker fails it
 until they are filled.
+
+### Reading a plan as a page, and answering it
+
+A plan (`templates/plan.md`) now carries *Open questions* - `- Q1: ...` with
+lettered options - and *Decisions*. `scripts/build-plan-page.sh
+docs/sdlc/<item>/plan.md` builds one self-contained page from it: every
+section, a Comment button on every passage, a quote from words selected inside
+one, a button per option and an answer of the person's own. *Copy answers*
+hands back a fenced answer set headed by the plan's path and its sha256, and
+`scripts/plan-answers.py` validates it - a set built from an older plan, or
+naming a question, option or passage the plan does not hold, is refused - and
+with `--apply` moves the decisions into the plan. It writes the plan and
+nothing else, and never the spec. The page is not a view: it requests no
+capability, loads and sends nothing, and keeps nothing once closed.
+`plan_page.stylesheet` in `config.json` gives it the project's own colours and
+fonts, read from `:root` custom properties of a safe shape only; otherwise it
+uses a built-in light and dark theme and says why (`references/plan-page.md`).
 
 ## Precedence, and the personal copy at `~/.claude/skills/`
 

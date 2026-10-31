@@ -808,7 +808,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**167 requirements are active**, and they are the whole of what has been
+**179 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -817,7 +817,7 @@ written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
 
-**Always, with no trigger.** Twenty-two requirements hold whatever else is
+**Always, with no trigger.** Twenty-five requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -868,8 +868,14 @@ happening:
   number of its agentic turns.
 - **R193** — The lifecycle shall pass the unattended build agent a cap on its
   spend in US dollars.
+- **R202** — The lifecycle shall build every plan page so that it requests no
+  capability.
+- **R203** — The lifecycle shall build every plan page so that it holds no
+  reference a browser would load from, or send to, the network.
+- **R210** — The lifecycle shall write what an answer set holds into the plan
+  that answer set names and into no further file.
 
-**When something arrives.** Forty-two things happen on a discrete trigger:
+**When something arrives.** Forty-five things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -980,6 +986,17 @@ happening:
   shall write into its body a section on how the change was tested, one
   proving it works and one on how to revert it, each holding only a
   placeholder saying its author owes it before the pull request leaves draft.
+- **R201** — When the lifecycle builds a plan page from a change's plan, the
+  lifecycle shall show on that page every section of the plan and each open
+  question with one control per option and one for an answer of the person's
+  own.
+- **R205** — When a person copies the answers from a plan page, the lifecycle
+  shall hand them over as one answer set headed by its format version, the
+  plan's path in the repository and the sha256 of the plan the page was built
+  from.
+- **R209** — When the lifecycle applies an answer set, the lifecycle shall
+  move the questions it answers from the plan's open questions into the plan's
+  Decisions section, with the answer and the note given.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
@@ -1008,7 +1025,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Eighty-four defences, written as `If … then`
+**When something goes wrong.** Eighty-nine defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1260,9 +1277,25 @@ because a designed path and a defended one are not the same thing:
 - **R199** — If a pull request body's proof section holds nothing but one
   not-applicable line of the template's shape that gives a reason, then the
   lifecycle shall accept that body's proof.
+- **R204** — If a plan's text holds markup, a script or a link, then the
+  lifecycle shall show it on the plan page as text that the browser does not
+  run, load or follow.
+- **R206** — If an answer set's plan sha256 differs from the sha256 of the
+  plan it names as that plan stands now, then the lifecycle shall refuse the
+  answer set, saying the page must be rebuilt from the plan as it stands.
+- **R207** — If an answer set names a question the plan does not hold open, an
+  option that question does not offer, or a passage the plan does not hold,
+  then the lifecycle shall refuse the answer set.
+- **R208** — If an answer set names a plan path that is absolute, holds `..`,
+  is not a file named `plan.md` inside the repository, or is reached through a
+  symbolic link, then the lifecycle shall refuse the answer set.
+- **R212** — If no stylesheet is configured for the plan page, or the one
+  configured cannot be read, lies outside the repository or sets no usable
+  property, then the lifecycle shall build the page in its built-in theme and
+  name on the page why.
 
-**Only where the feature is present.** Ten requirements apply only to a build
-that includes the feature:
+**Only where the feature is present.** Eleven requirements apply only to a
+build that includes the feature:
 
 - **R22** — Where a repository declares its own check tools, the lifecycle
   shall run them only if the configuration explicitly opts in.
@@ -1291,6 +1324,10 @@ that includes the feature:
 - **R186** — Where a repository binds a band beside the first, the lifecycle
   shall leave the first band's bands file, binding and scheduled task prompt
   as they were.
+- **R211** — Where config.json names a stylesheet for the plan page, the
+  lifecycle shall take the page's colours and fonts only from custom
+  properties that stylesheet sets on `:root` or a dark-scheme root, each value
+  of a colour or font-name shape.
 
 Every id above is permanent. A plan, a test or a PR title naming `R1` will
 still mean this sentence in two years, which is why ids are never reused and

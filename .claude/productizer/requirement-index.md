@@ -226,4 +226,16 @@ marker, because a table left there would be one nothing writes or checks.
 | R198 | unwanted | active | `plan-record-checker` |
 | R199 | unwanted | active | `plan-record-checker` |
 | R200 | event | active | `build-dispatch` |
+| R201 | event | active | `plan-page-builder` |
+| R202 | ubiquitous | active | `plan-page` |
+| R203 | ubiquitous | active | `plan-page` |
+| R204 | unwanted | active | `plan-page` |
+| R205 | event | active | `plan-page-builder` |
+| R206 | unwanted | active | `plan-answers` |
+| R207 | unwanted | active | `plan-answers` |
+| R208 | unwanted | active | `plan-answers` |
+| R209 | event | active | `plan-answers` |
+| R210 | ubiquitous | active | `plan-answers` |
+| R211 | optional | active | `plan-page-builder` |
+| R212 | unwanted | active | `plan-page-builder` |
 <!-- productizer:requirement-index:end -->
