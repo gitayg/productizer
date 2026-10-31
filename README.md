@@ -52,7 +52,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.76.0"`.
+`plugin.json` sets `"version": "4.77.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -324,6 +324,19 @@ report was rendered but at least one section could not be measured and says so
 in place. Exit `3` means nothing was rendered - among other reasons, because the
 repository has no `evals/solver-probe.py`, which the report requires; the CI
 build template then refuses the run (`references/ci-build.md`, "Adopting it").
+
+The pull request body (`templates/pull-request.md`) asks for *Proof it works*
+beside *How it was tested*: what a person sees when using the change, against
+the original request, one list item per `R<n>`, `B<n>` or `#<n>` it answers,
+each carrying a screenshot, a recording, a fenced log or a link to a run's
+artifact, or the one line `**n/a** - <reason>` for a change nobody using it can
+observe. The reviewer reads it before the diff, and a body without it is an
+Important finding (`REVIEW.md`). `scripts/check-plan-record.py --kind pr-body`
+reads a body saved to a file for all three sections. It reads text: it cannot
+tell a real screenshot from a wrong one, and nothing here takes, uploads or
+posts one. The CI build template's draft carries the three sections as
+placeholders the author owes before it leaves draft, so the checker fails it
+until they are filled.
 
 ## Precedence, and the personal copy at `~/.claude/skills/`
 

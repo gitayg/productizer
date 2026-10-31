@@ -2785,6 +2785,19 @@ checks:
             `-a-negative-spend-cap`, `-a-spend-cap-without-cents`, `-a-repeated-turn-cap`);
             `agent-args-passes-the-least-caps` passes 1 and 0.01. Falsified 2026-10-31: the
             presence check removed, 176 of 179; both cap shapes widened to any word, 175 of 179.
+        - id: R200
+          verdict: Partial
+          reason: >-
+            Same as R124: the subcommand is driven, the YAML step and a real GitHub are not. That
+            the author fills the owed sections before the pull request leaves draft is a person's
+            act and is not measured.
+          evidence: >-
+            build-dispatch.sh 1.5 (B184), 181 cases. After `deliver-build`, `body-owes-the-proof`
+            holds that the body handed to the stub gh carries `## Proof it works` with the owed
+            marker, and `body-fails-its-own-checker-until-filled` runs the real
+            check-plan-record.py --kind pr-body over it: exit 1, 0 of 3 assertions held. Falsified
+            2026-10-31 by the building agent with the three sections removed from deliver: 179 of
+            181.
         - id: R128
           verdict: Covered
           evidence: >-
@@ -4870,8 +4883,8 @@ checks:
       refused: [2]
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 17 cases held'
-      min_covered: 17
+      pattern: '([0-9]+) of 37 cases held'
+      min_covered: 37
       spec_units:
         - id: R171
           verdict: Covered
@@ -4890,8 +4903,44 @@ checks:
             Under --kind pr-body, `body-no-tested`, `body-placeholder-revert` and `plan-as-body`
             exit 1, `body-good` passes, and `body-template-is-placeholder` fails the shipped
             templates/pull-request.md.
+        - id: R197
+          verdict: Partial
+          reason: >-
+            As R172: a body lives on GitHub and nothing in the lifecycle fetches one. The check
+            reads text; it cannot tell a real screenshot from a wrong one, whether a link opens, or
+            whether the evidence shows what the request asked.
+          evidence: >-
+            check-plan-record.py 1.1 (B184), 37 cases. Under --kind pr-body, `body-no-proof`,
+            `body-placeholder-proof`, `body-empty-proof`, `proof-no-item`,
+            `proof-not-applicable-is-no-na`, `proof-na-no-reason`, `proof-na-placeholder-reason`
+            and `proof-na-beside-an-item` exit 1; `body-template-proof-is-placeholder` fails the
+            shipped templates/pull-request.md. Falsified 2026-10-31 by the building agent: the
+            proof assertion off, 16 of 37; a placeholder accepted, 34 of 37; the no-item rule off,
+            35 of 37; an n/a with no reason accepted, 35 of 37; an n/a beside an item accepted,
+            36 of 37.
+        - id: R198
+          verdict: Partial
+          reason: >-
+            For R197's reason: an id or a link is read as text and never resolved.
+          evidence: >-
+            `proof-item-no-id`, `proof-id-only-in-a-log-is-not-named`, `proof-item-no-evidence`,
+            `proof-anchor-is-no-evidence`, `proof-second-item-bad`,
+            `proof-empty-fence-is-no-evidence` and `proof-unclosed-fence-is-no-evidence` exit 1;
+            `proof-fenced-log`, `proof-img-tag` and `proof-relative-image` pass. Falsified
+            2026-10-31: the id rule off, 35 of 37; an id read inside a fence, 36 of 37; the
+            evidence rule off, 32 of 37; an anchor link, an empty fence or an unclosed fence
+            counted as evidence, a list line inside a fence starting an item, and an <img> stripped
+            as a placeholder, each 36 of 37.
+        - id: R199
+          verdict: Covered
+          evidence: >-
+            `proof-na`, a proof section holding only `**n/a** - <a reason>`, exits 0 with 3 of 3
+            assertions held; `proof-na-beside-an-item`, `proof-na-no-reason` and
+            `proof-not-applicable-is-no-na` hold the shape. Falsified 2026-10-31 with the n/a shape
+            never matching: 35 of 37.
     limitations:
       - It reads text. Whether the tests named were run, and whether the revert path works, are not measured.
+      - A proof's evidence is read as text. A screenshot of the wrong page, a link that does not open, a log from another build and an id the item does not answer all pass; reading the proof against the request is the reviewer's (REVIEW.md).
 
   - id: approval-rules-checker
     why: a CODEOWNERS that leaves the spec, the checks or the workflows without a human owner makes an agent's change to them approvable by anyone with write access

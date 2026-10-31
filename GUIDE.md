@@ -808,7 +808,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**163 requirements are active**, and they are the whole of what has been
+**167 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -869,7 +869,7 @@ happening:
 - **R193** — The lifecycle shall pass the unattended build agent a cap on its
   spend in US dollars.
 
-**When something arrives.** Forty-one things happen on a discrete trigger:
+**When something arrives.** Forty-two things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -976,6 +976,10 @@ happening:
 - **R194** — When `models.build_caps` in config.json sets no value for a cap,
   the lifecycle shall pass the unattended build agent that cap's built-in
   default, reported by prepare as the default.
+- **R200** — When an unattended run opens a draft pull request, the lifecycle
+  shall write into its body a section on how the change was tested, one
+  proving it works and one on how to revert it, each holding only a
+  placeholder saying its author owes it before the pull request leaves draft.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
@@ -1004,7 +1008,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Eighty-one defences, written as `If … then`
+**When something goes wrong.** Eighty-four defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1245,6 +1249,17 @@ because a designed path and a defended one are not the same thing:
   shall refuse to dispatch the build before a model is called.
 - **R196** — If the flags prepared for an unattended run lack a turn cap or a
   spend cap, then the lifecycle shall refuse the run.
+- **R197** — If a pull request body handed to the lifecycle has no section
+  proving that the change does what the original request asked, or that
+  section holds neither a proof item nor a not-applicable line giving a
+  reason, or holds a not-applicable line beside anything else, then the
+  lifecycle shall fail that body.
+- **R198** — If an item in a pull request body's proof section names no
+  requirement id, backlog id or issue, or carries no link, image or fenced log
+  as its evidence, then the lifecycle shall fail that body.
+- **R199** — If a pull request body's proof section holds nothing but one
+  not-applicable line of the template's shape that gives a reason, then the
+  lifecycle shall accept that body's proof.
 
 **Only where the feature is present.** Ten requirements apply only to a build
 that includes the feature:

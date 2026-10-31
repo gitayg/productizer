@@ -806,7 +806,8 @@ no review records.
 
 Since v4.74.0 (B168) `check-plan-record.py` fails a plan with no `Proof` or no
 `Revert` beyond the template's placeholder, and with `--kind pr-body` a body
-with no *How it was tested* or *How to revert*. The template's `plan-record`
+with no *How it was tested* or *How to revert*, and since v4.77.0 no *Proof it
+works* (limitation 48). The template's `plan-record`
 check reads plans; a body lives on GitHub and nothing in the lifecycle fetches
 one. Whether the tests named were run, and whether the revert path works, are
 not measured.
@@ -918,3 +919,35 @@ those defaults itself. What holds this up is read, not run:
   more sets `models.build_caps`.
 - **The scheduled prompts get no cap from this.** `templates/scheduled-*.md`
   run as scheduled agents outside the template, and nothing here bounds them.
+
+## Added in v4.77.0
+
+### 48 · The proof on a pull request is checked as text, and nothing produces it
+
+Since v4.77.0 (B184) `templates/pull-request.md` asks for *Proof it works*:
+what a person sees when using the change, against the original request, each
+item naming the `R<n>`, `B<n>` or `#<n>` it answers and carrying a screenshot,
+a recording, a fenced log or a link to a run's artifact, or the one line
+`**n/a** - <reason>`. `check-plan-record.py --kind pr-body` reads it. What it
+does not do:
+
+- **It reads text.** A screenshot of the wrong page, a link that does not open,
+  a log from another build and an id the item does not answer all pass. Whether
+  the evidence shows what the request asked is the reviewer's to read
+  (`REVIEW.md`), and an `n/a` reason is read only for being there.
+- **Nothing produces the proof.** The lifecycle runs no browser, takes no
+  screenshot and uploads nothing to GitHub; exercising the change end to end
+  and attaching the evidence is the author's. The intent asked for the pipeline
+  to do both; only the checking half is built.
+- **A body is read only when saved to a file** (limitation 42): nothing fetches
+  one from GitHub, so a body edited on GitHub after it was checked is not
+  re-read.
+- **The CI build template's draft fails its own checker.** `deliver` writes the
+  body before anyone has used the change, so it carries *How it was tested*,
+  *Proof it works* and *How to revert* as placeholders owed by the author before
+  the pull request leaves draft, and `check-plan-record.py --kind pr-body` exits
+  1 on it, 0 of 3 assertions held, by design. Nothing checks that the author
+  filled them before marking it ready; that is the reviewer's.
+- **Its shapes are fixed.** A proof item is a list line at the left margin; a
+  paragraph of proof with no list marker is refused, and an id is read only
+  outside the item's fences.

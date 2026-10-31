@@ -11,8 +11,16 @@ SKILL.md keeps the rules of these stages; this is them as a whole.
   Commit it, then build. `scripts/check-plan-record.py` fails a plan whose
   `Proof` or `Revert` is missing or still the placeholder, and with
   `--kind pr-body` a pull request body (`templates/pull-request.md`) missing
-  *How it was tested* or *How to revert*. An agent may draft both; the author
-  answers for them.
+  *How it was tested*, *Proof it works* or *How to revert*. An agent may draft
+  all three; the author answers for them.
+- **Proof against the request, not the tests.** *Proof it works* is what a
+  person sees when using the change the way a user would meet it: one list
+  item per `R<n>`, `B<n>` or `#<n>` answered, each saying what it shows and
+  carrying a screenshot, a recording, a fenced log or a link to a run's
+  artifact. A change nobody using it can observe says `**n/a** - <reason>`
+  alone. The reviewer reads it before the diff (`REVIEW.md`). The checker reads
+  text; it cannot tell a real screenshot from a wrong one, and nothing in the
+  lifecycle takes or uploads one.
 - **`CLAUDE.md`** holds day-one knowledge under one page: when a mistake happens
   twice, the correction lands here. **Skills** carry inconsistently enforced
   policy; **hooks** what must be deterministic.

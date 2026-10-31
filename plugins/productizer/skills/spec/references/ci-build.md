@@ -637,8 +637,14 @@ and renders nothing, and `prepare` refuses the run with exit 3 before any model
 is called, naming the file (see "Adopting it"). `deliver` renders nothing; it
 reads that body as text (see "The job that can write runs no code from the
 repository it writes to" above). The body is that report, followed by the
-sentence saying the pull request is a proposal to be reviewed, and the line
-`Productizer-Run: <run id>`. Beside the body, `prepare --body-out` writes
+sentence saying the pull request is a proposal to be reviewed, the line
+`Productizer-Run: <run id>`, and the three sections `templates/pull-request.md`
+asks for - *How it was tested*, *Proof it works* and *How to revert* - each
+only a placeholder saying the author owes it before the pull request leaves
+draft (B184). The body is written before anyone has used the change, so it
+cannot hold proof, and `check-plan-record.py --kind pr-body` fails it, 0 of 3
+assertions held, until the author fills them; the self-test runs the checker
+over the body `deliver` hands to `gh` and asserts exactly that. Beside the body, `prepare --body-out` writes
 `protected.txt` and `protected-head` (see "The protected list" above), which
 `deliver` takes as `--protected`.
 

@@ -1131,7 +1131,8 @@ checks:
   # B168. The plan says how the change will be shown to work (`Proof`) and how
   # to undo it once merged (`Revert`). An agent may draft both; the author
   # answers for them. A pull request body saved to a file is read the same way
-  # with `--kind pr-body` (templates/pull-request.md); the body itself lives on
+  # with `--kind pr-body` (templates/pull-request.md), which also asks for its
+  # `Proof it works` (B184); the body itself lives on
   # GitHub, not in the tree, so this check reads the plan.
   - id: plan-record
     why: a change nobody can say how to revert is a change whose rollback is invented during the incident

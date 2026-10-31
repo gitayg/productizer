@@ -212,7 +212,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="build-dispatch 1.4"
+VERSION="build-dispatch 1.5"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$HERE/$(basename -- "${BASH_SOURCE[0]}")"
 
@@ -712,6 +712,15 @@ STUB
     sh -c 'test "$(cat "$1")" = "$2"' _ "$ST/deliver-build.gh.pwd" "$(cd "$R" && pwd -P)"
   also body-names-the-run "the body says Productizer-Run: 123" \
     grep -qx 'Productizer-Run: 123' "$ST/deliver-build.gh.body"
+  # The draft is opened before anyone used the change, so its body carries the
+  # three sections the author owes, as placeholders, and its own checker fails
+  # it until the author fills them (B184).
+  # shellcheck disable=SC2016  # $1 is expanded by the inner sh, on purpose
+  also body-owes-the-proof "the body has Proof it works, owed by the author before the pull request leaves draft" \
+    sh -c 'grep -qx "## Proof it works" "$1" && grep -q "^<owed by the author before this pull request leaves draft: what a person sees" "$1"' _ "$ST/deliver-build.gh.body"
+  # shellcheck disable=SC2016  # $1/$2 are expanded by the inner sh, on purpose
+  also body-fails-its-own-checker-until-filled "check-plan-record.py --kind pr-body exits 1 on the body: tested, proof and revert are placeholders" \
+    sh -c 'o="$(python3 "$1" --kind pr-body "$2")"; test $? = 1 && printf "%s\n" "$o" | grep -q "0 of 3 assertions held" && printf "%s\n" "$o" | grep -q "FINDING proof: .*the .Proof it works. section holds only a placeholder"' _ "$HERE/check-plan-record.py" "$ST/deliver-build.gh.body"
 
   STUB_GH_FAIL=1 drive deliver-gh-fails 7 "gh pr create failed" \
     deliver "$R" --body "$ST/body-del" --mode build --issue 7 --patch "$ST/code.patch" --run-id 124 \
@@ -961,7 +970,7 @@ STUB
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f&&/^#      /{next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: that the template hands deliver the body and the protected list prepare wrote and not others (check-ci-template.py'"'"'s protected-list guard asserts deliver passes --protected and the agent job never downloads the body artifact, but not the artifact paths, and GitHub'"'"'s artifact immutability is not measured here); that a protected list beside a matching protected-head is the one prepare wrote (deliver checks the HEAD, and stage-advance.sh validates the list as data); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the CLI inside the action accepts --advisor, attaches the advisor or ever calls it (the cases here assert only the line prepare writes and agent-args passes; models.advisor is advice, never a gate); that the CLI inside the action honours --max-turns or --max-budget-usd, stops a run at either, or how far past the spend cap a run goes (the cases assert only the cap lines prepare writes and agent-args passes), and that the built-in defaults fit a real plan or build run (chosen, never measured against one); that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing; the probe refusal when the spec was created in the root commit (the check comes before that branch, and no case drives it); that a probe which exists prints the counts the body reads (pr-spec-comment.sh renders NOT MEASURED for that, it does not refuse).\n'
+  printf '    NOT ASSERTED: that the template hands deliver the body and the protected list prepare wrote and not others (check-ci-template.py'"'"'s protected-list guard asserts deliver passes --protected and the agent job never downloads the body artifact, but not the artifact paths, and GitHub'"'"'s artifact immutability is not measured here); that a protected list beside a matching protected-head is the one prepare wrote (deliver checks the HEAD, and stage-advance.sh validates the list as data); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the CLI inside the action accepts --advisor, attaches the advisor or ever calls it (the cases here assert only the line prepare writes and agent-args passes; models.advisor is advice, never a gate); that the CLI inside the action honours --max-turns or --max-budget-usd, stops a run at either, or how far past the spend cap a run goes (the cases assert only the cap lines prepare writes and agent-args passes), and that the built-in defaults fit a real plan or build run (chosen, never measured against one); that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing; the probe refusal when the spec was created in the root commit (the check comes before that branch, and no case drives it); that a probe which exists prints the counts the body reads (pr-spec-comment.sh renders NOT MEASURED for that, it does not refuse); that the author fills the owed How it was tested, Proof it works and How to revert before the pull request leaves draft (the body carries them as placeholders and its own checker fails it, asserted; filling them is a person'"'"'s act).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -1458,6 +1467,19 @@ cp "$BODY_IN/body.md" "$BODY" || fail 7 "the body could not be copied"
   say "This pull request is a proposal to be reviewed, not a change that was accepted. A person dispatched the run that opened it; a person decides whether it merges."
   say ""
   say "Productizer-Run: $RUN_ID"
+  # THE SECTIONS THE AUTHOR OWES (B184). This body is written before anyone has
+  # tested the change or used it, so it cannot hold proof. It carries the three
+  # sections templates/pull-request.md asks for, each only a placeholder, so
+  # check-plan-record.py --kind pr-body fails it until the author fills them.
+  say ""
+  say "## How it was tested"
+  say "<owed by the author before this pull request leaves draft: the commands run and what they printed>"
+  say ""
+  say "## Proof it works"
+  say "<owed by the author before this pull request leaves draft: what a person sees when they use the change, against the original request, each item naming the requirement id, backlog id or issue it answers and carrying its evidence>"
+  say ""
+  say "## How to revert"
+  say "<owed by the author before this pull request leaves draft: the commit to revert, and anything to restore>"
 } >> "$BODY"
 
 # 3. Requirement ids from the spec delta, never from the model.

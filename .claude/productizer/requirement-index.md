@@ -222,4 +222,8 @@ marker, because a table left there would be one nothing writes or checks.
 | R194 | event | active | `build-dispatch` |
 | R195 | unwanted | active | `build-dispatch` |
 | R196 | unwanted | active | `build-dispatch` |
+| R197 | unwanted | active | `plan-record-checker` |
+| R198 | unwanted | active | `plan-record-checker` |
+| R199 | unwanted | active | `plan-record-checker` |
+| R200 | event | active | `build-dispatch` |
 <!-- productizer:requirement-index:end -->

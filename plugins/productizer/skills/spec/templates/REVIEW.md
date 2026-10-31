@@ -36,6 +36,13 @@ its base is not readable as evidence.
 - Revert: does the PR body say how the change was tested and how to revert
   it (`templates/pull-request.md`), and does `plan.md` say how to revert it?
   A missing revert path is an Important finding.
+- Proof: read the PR body's *Proof it works* before the diff. Does each item
+  name the requirement id, backlog id or issue it answers, carry its evidence
+  (a screenshot, a recording, a log, a link to a run's artifact), and show the
+  change doing what the original request asked, the way a user would meet it?
+  A change nobody using it can observe says `**n/a** - <reason>` instead, and
+  the reason has to hold. A body with no proof, or proof that does not show
+  what was asked, is an Important finding.
 
 ## Important, Nit, Pre-existing
 - Important: breaks behaviour, leaks data, or breaches policy.
