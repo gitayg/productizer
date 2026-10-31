@@ -136,6 +136,20 @@
 # model. The advisor is advice, never a gate: when, and whether, it is called
 # is the model's choice and cannot be forced.
 #
+# THE CAPS (B183). Every run is capped twice, never uncapped: `--max-turns N`,
+# the agentic turns Claude Code may take (each one round trip to the model),
+# and `--max-budget-usd A`, the dollars it may spend by its own estimate.
+# Claude Code stops the run when either is reached, and its own default is no
+# limit on turns. The values come from models.build_caps.max_turns and
+# models.build_caps.max_budget_usd in config.json; absent or null takes the
+# built-in default below, and prepare says which a value is. A turn cap is a
+# JSON whole number from 1 to 999999; a spend cap is a JSON number above zero,
+# below a million, in whole cents, and is written with two decimals. Anything
+# else - a string, a boolean, zero, a negative, a fraction of a turn or of a
+# cent - is refused (exit 3) before any model is called, never passed through
+# or rounded. The job's timeout-minutes is the third stop and stays the
+# template's; this script adds no other stop condition.
+#
 # THE AGENT'S PERMISSIONS (maintainer rulings, 2026-10-10 and 2026-10-11). The
 # agent gets the permission rules the repository owner committed for Claude Code
 # - .claude/settings.json and .claude/settings.local.json - EXCEPT that Bash is
@@ -175,13 +189,15 @@
 #   3  the repository cannot be read as needed: not a work tree, a shallow
 #      clone, an unreadable config, HEAD is not the default-branch tip,
 #      (prepare) models.advisor is set to something that is not a model
-#      name (references/models.md, "The advisor"), or
+#      name (references/models.md, "The advisor"), or a cap in
+#      models.build_caps is not a positive number of the shape passed on, or
 #      (prepare --body-out) there is no evals/solver-probe.py, which the
 #      body requires, or the body could not be rendered, or the files
 #      checks.yaml runs could not be listed, or
 #      (stash-git/capture) the git-dir could not be moved or read, or
 #      (agent-args) the prepared claude-args are missing, hold a line that is
-#      not a shape prepare writes or a repeated flag, or lack the Bash deny
+#      not a shape prepare writes or a repeated flag, or lack the Bash deny,
+#      the turn cap or the spend cap
 #   4  the spec is unchanged against the base; no model call should follow
 #   5  build mode, and no plan is committed at the plan path
 #   6  refused by stage-advance.sh, on the patch or on the commit made from
@@ -196,7 +212,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-VERSION="build-dispatch 1.3"
+VERSION="build-dispatch 1.4"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$HERE/$(basename -- "${BASH_SOURCE[0]}")"
 
@@ -208,6 +224,14 @@ PROBE_REL="evals/solver-probe.py"
 # reports for a pull request body (recalled, not measured here), leaving room
 # for the lines deliver appends. Over the cap is refused, never truncated.
 BODY_MAX_BYTES=60000
+# The caps a run gets when config.json sets none (B183). Chosen, not measured:
+# 100 turns is room for one plan or one build of a committed plan, and a run
+# that needs more is one a person should look at before it costs more; 20.00
+# dollars is the most one forgotten dispatched run may spend, a sum a
+# repository owner can lose without a week's quota going with it. Claude Code
+# can overshoot the spend cap by the response that crosses it.
+DEFAULT_MAX_TURNS=100
+DEFAULT_MAX_BUDGET_USD=20.00
 
 die_usage() { printf 'build-dispatch: %s\n' "$1" >&2; exit 2; }
 fail() { local code="$1"; shift; printf 'build-dispatch: %s\n' "$*" >&2; exit "$code"; }
@@ -226,6 +250,7 @@ usage() {
   printf '       build-dispatch.sh --selftest | --version | --help\n'
   printf 'exit: 0 ok, 2 usage, 3 repository not usable, HEAD not the default-branch tip,\n'
   printf '      (prepare --body-out) no evals/solver-probe.py, which the body requires,\n'
+  printf '      a cap in models.build_caps that is not a positive number,\n'
   printf '      or (agent-args) the prepared claude-args refused,\n'
   printf '      4 spec unchanged, 5 no committed plan, 6 refused by stage-advance.sh\n'
   printf '      (or no protected list for a HEAD with a checks.yaml),\n'
@@ -360,8 +385,8 @@ JSON
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-plan"
   also plan-data-has-fenced-diff "spec-diff.md carries the fenced diff" \
     grep -q 'PRODUCTIZER-SPEC-DIFF-' "$ST/out-plan/spec-diff.md"
-  also repo-settings-no-mode-adds-accept-edits "no committed defaultMode: acceptEdits, then the unconditional Bash deny" \
-    args_are "$ST/out-plan/claude-args" $'--permission-mode acceptEdits\n--disallowedTools Bash'
+  also repo-settings-no-mode-adds-accept-edits "no committed defaultMode: the default caps, acceptEdits, then the unconditional Bash deny" \
+    args_are "$ST/out-plan/claude-args" $'--max-turns 100\n--max-budget-usd 20.00\n--permission-mode acceptEdits\n--disallowedTools Bash'
   also repo-settings-always-denies-bash "repo-settings denies Bash even with no --permissions given" \
     grep -qx -- '--disallowedTools Bash' "$ST/out-plan/claude-args"
   drive prepare-edits-only 0 "permissions edits-only" \
@@ -393,8 +418,8 @@ JSON
   commit_push "$R" "plan for #7"
   drive prepare-build 0 "prepared build for issue #7" \
     prepare "$R" --mode build --issue 7 --default-branch main --out "$ST/out-build"
-  also build-args-from-config "model and effort come from models.build; build mode adds no mode of its own; Bash denied" \
-    args_are "$ST/out-build/claude-args" $'--model claude-x-1\n--effort high\n--permission-mode acceptEdits\n--disallowedTools Bash'
+  also build-args-from-config "model and effort come from models.build; the default caps; build mode adds no mode of its own; Bash denied" \
+    args_are "$ST/out-build/claude-args" $'--model claude-x-1\n--effort high\n--max-turns 100\n--max-budget-usd 20.00\n--permission-mode acceptEdits\n--disallowedTools Bash'
 
   # The owner's committed defaultMode stands: no mode flag at all.
   newrepo owner-mode; R="$ST/owner-mode"
@@ -403,13 +428,13 @@ JSON
   drive prepare-owner-default-mode 0 "the committed settings set defaultMode acceptEdits; no mode flag is passed" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-owner" \
     --spec-base "$(G "$R" rev-parse HEAD~2)"
-  also owner-mode-passes-no-flag "repo-settings with a committed defaultMode: no mode flag, only the Bash deny" \
-    args_are "$ST/out-owner/claude-args" '--disallowedTools Bash'
+  also owner-mode-passes-no-flag "repo-settings with a committed defaultMode: no mode flag, only the caps and the Bash deny" \
+    args_are "$ST/out-owner/claude-args" $'--max-turns 100\n--max-budget-usd 20.00\n--disallowedTools Bash'
   drive prepare-owner-edits-only 0 "permissions edits-only" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-owner-e" \
     --spec-base "$(G "$R" rev-parse HEAD~2)" --permissions edits-only
-  also owner-mode-edits-only-narrows "edits-only over a committed defaultMode: still only the Bash deny" \
-    args_are "$ST/out-owner-e/claude-args" '--disallowedTools Bash'
+  also owner-mode-edits-only-narrows "edits-only over a committed defaultMode: still only the caps and the Bash deny" \
+    args_are "$ST/out-owner-e/claude-args" $'--max-turns 100\n--max-budget-usd 20.00\n--disallowedTools Bash'
 
   newrepo owner-bypass; R="$ST/owner-bypass"
   printf '{ "permissions": { "defaultMode": "bypassPermissions" } }\n' > "$R/.claude/settings.local.json"
@@ -422,8 +447,8 @@ JSON
   # shellcheck disable=SC2016  # $1 is expanded by the inner sh, on purpose
   also owner-bypass-not-produced "the owner's bypass is not written into the args" \
     sh -c '! grep -q bypassPermissions "$1"' _ "$ST/out-bypass/claude-args"
-  also owner-bypass-still-denies-bash "a committed bypass still gets the unconditional Bash deny, no shell" \
-    args_are "$ST/out-bypass/claude-args" '--disallowedTools Bash'
+  also owner-bypass-still-denies-bash "a committed bypass still gets the caps and the unconditional Bash deny, no shell" \
+    args_are "$ST/out-bypass/claude-args" $'--max-turns 100\n--max-budget-usd 20.00\n--disallowedTools Bash'
 
   newrepo bad-settings; R="$ST/bad-settings"
   printf '{ "permissions": \n' > "$R/.claude/settings.json"
@@ -459,13 +484,13 @@ JSON
   adv_conf '{ "model": "claude-x-1", "effort": "high" }' '"claude-opus-5-5"' full-id
   drive prepare-advisor-full-id 0 "prepared plan for issue #7" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-adv-id"
-  also advisor-is-one-line-after-the-model "models.advisor reaches the args as exactly one --advisor line, after --model and --effort" \
-    args_are "$ST/out-adv-id/claude-args" $'--model claude-x-1\n--effort high\n--advisor claude-opus-5-5\n--permission-mode acceptEdits\n--disallowedTools Bash'
+  also advisor-is-one-line-after-the-model "models.advisor reaches the args as exactly one --advisor line, after --model and --effort, before the caps" \
+    args_are "$ST/out-adv-id/claude-args" $'--model claude-x-1\n--effort high\n--advisor claude-opus-5-5\n--max-turns 100\n--max-budget-usd 20.00\n--permission-mode acceptEdits\n--disallowedTools Bash'
   adv_conf '{ "model": "inherit" }' '"opus"' alias
   drive prepare-advisor-alias 0 "prepared plan for issue #7" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-adv-alias"
   also advisor-alias-passes "an alias is a model name: --advisor opus, and nothing else added" \
-    args_are "$ST/out-adv-alias/claude-args" $'--advisor opus\n--permission-mode acceptEdits\n--disallowedTools Bash'
+    args_are "$ST/out-adv-alias/claude-args" $'--advisor opus\n--max-turns 100\n--max-budget-usd 20.00\n--permission-mode acceptEdits\n--disallowedTools Bash'
   adv_conf '{ "model": "inherit" }' 'null' null
   drive prepare-advisor-null 0 "prepared plan for issue #7" \
     prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-adv-null"
@@ -486,6 +511,62 @@ JSON
   adv_refused inherit '"inherit"' '"inherit"'
   adv_refused not-a-string '7' '7'
   adv_refused object '{ "model": "opus" }' '{"model": "opus"}'
+
+  # B183. models.build_caps: both caps always reach the args, from config.json
+  # or the built-in default, and prepare says which. A value that is not a
+  # positive number of the shape passed on is refused before a single flag is
+  # written, never rounded or passed through.
+  also prepare-says-the-caps-are-the-default "no build_caps key: prepare names both caps as the built-in default" \
+    grep -qF 'caps: --max-turns 100 (the built-in default; models.build_caps.max_turns is not set), --max-budget-usd 20.00 (the built-in default; models.build_caps.max_budget_usd is not set).' "$ST/prepare-plan.out"
+  # The template carries the same defaults as its own fallback caps, so the two
+  # cannot drift apart unseen.
+  # shellcheck disable=SC2016  # $1/$2/$3 are expanded by the inner sh, on purpose
+  also template-carries-the-default-caps "templates/build-from-spec.yml's agent step carries --max-turns $DEFAULT_MAX_TURNS and --max-budget-usd $DEFAULT_MAX_BUDGET_USD" \
+    sh -c 'grep -qx "            --max-turns $1" "$3" && grep -qx "            --max-budget-usd $2" "$3"' _ "$DEFAULT_MAX_TURNS" "$DEFAULT_MAX_BUDGET_USD" "$HERE/../templates/build-from-spec.yml"
+  newrepo caps; R="$ST/caps"
+  caps_conf() { printf '{ "models": { "build": { "model": "inherit" }, "build_caps": %s } }\n' "$1" > "$R/.claude/productizer/config.json"; commit_push "$R" "caps $2"; }
+  caps_conf '{ "max_turns": 40, "max_budget_usd": 5.5 }' set
+  drive prepare-caps-from-config 0 "caps: --max-turns 40 (models.build_caps.max_turns), --max-budget-usd 5.50 (models.build_caps.max_budget_usd)." \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-caps-set"
+  also caps-from-config-reach-the-args "the configured caps, the spend in whole cents, after the model flags and before the permission mode" \
+    args_are "$ST/out-caps-set/claude-args" $'--max-turns 40\n--max-budget-usd 5.50\n--permission-mode acceptEdits\n--disallowedTools Bash'
+  caps_conf '{ "max_turns": 1, "max_budget_usd": 0.01 }' least
+  drive prepare-caps-least 0 "caps: --max-turns 1 (models.build_caps.max_turns), --max-budget-usd 0.01 (models.build_caps.max_budget_usd)." \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-caps-least"
+  caps_conf '{ "max_turns": 999999, "max_budget_usd": 999999.99 }' most
+  drive prepare-caps-most 0 "caps: --max-turns 999999 (models.build_caps.max_turns), --max-budget-usd 999999.99 (models.build_caps.max_budget_usd)." \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-caps-most"
+  caps_conf '{ "max_turns": null, "max_budget_usd": 7 }' one-null
+  drive prepare-caps-one-null 0 "caps: --max-turns 100 (the built-in default; models.build_caps.max_turns is not set), --max-budget-usd 7.00 (models.build_caps.max_budget_usd)." \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-caps-one-null"
+  caps_conf '{ "max_turns": null, "max_budget_usd": null }' nulls
+  drive prepare-caps-null 0 "caps: --max-turns 100 (the built-in default; models.build_caps.max_turns is not set), --max-budget-usd 20.00 (the built-in default; models.build_caps.max_budget_usd is not set)." \
+    prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-caps-null"
+  also caps-null-is-no-key "both caps null: byte-identical to a config with no build_caps key" \
+    cmp -s "$ST/out-caps-null/claude-args" "$ST/out-plan/claude-args"
+  # Each refusal: exit 3 naming the key and the value, and no claude-args written.
+  caps_refused() { # caps_refused <name> <build_caps json> <text>
+    caps_conf "$2" "$1"
+    drive "prepare-caps-refuses-$1" 3 "$3" \
+      prepare "$R" --mode plan --issue 7 --default-branch main --out "$ST/out-caps-$1"
+    also "caps-$1-wrote-no-args" "a refused cap writes no claude-args" \
+      test ! -e "$ST/out-caps-$1/claude-args"
+  }
+  caps_refused turns-zero '{ "max_turns": 0 }' 'models.build_caps.max_turns is 0, not a whole number of turns from 1 to 999999'
+  caps_refused turns-negative '{ "max_turns": -5 }' 'models.build_caps.max_turns is -5, not'
+  caps_refused turns-fraction '{ "max_turns": 2.5 }' 'models.build_caps.max_turns is 2.5, not'
+  caps_refused turns-string '{ "max_turns": "40" }' 'models.build_caps.max_turns is "40", not'
+  caps_refused turns-boolean '{ "max_turns": true }' 'models.build_caps.max_turns is true, not'
+  caps_refused turns-too-many '{ "max_turns": 1000000 }' 'models.build_caps.max_turns is 1000000, not'
+  caps_refused budget-zero '{ "max_budget_usd": 0 }' 'models.build_caps.max_budget_usd is 0, not an amount of US dollars above 0 and below 1000000 in whole cents'
+  caps_refused budget-zero-cents '{ "max_budget_usd": 0.00 }' 'models.build_caps.max_budget_usd is 0.00, not'
+  caps_refused budget-negative '{ "max_budget_usd": -1 }' 'models.build_caps.max_budget_usd is -1, not'
+  caps_refused budget-part-cent '{ "max_budget_usd": 5.001 }' 'models.build_caps.max_budget_usd is 5.001, not'
+  caps_refused budget-string '{ "max_budget_usd": "5.00" }' 'models.build_caps.max_budget_usd is "5.00", not'
+  caps_refused budget-boolean '{ "max_budget_usd": false }' 'models.build_caps.max_budget_usd is false, not'
+  caps_refused budget-too-much '{ "max_budget_usd": 1000000 }' 'models.build_caps.max_budget_usd is 1000000, not'
+  caps_refused budget-infinity '{ "max_budget_usd": Infinity }' 'models.build_caps.max_budget_usd is Infinity, not'
+  caps_refused not-an-object '7' 'models.build_caps is 7, not an object'
 
   newrepo ahead; R="$ST/ahead"
   printf 'x\n' > "$R/local.txt"; G "$R" add -A; G "$R" commit --quiet -m local
@@ -787,10 +868,10 @@ STUB
     sh -c 'test -z "$1" && test "$2" -ge 12' _ "$bad" "$n"
   rm -rf "$ST/aa-ok"; mkdir -p "$ST/aa-ok"; cp -R "$ST/out-build" "$ST/aa-ok/.productizer-run"
   : > "$ST/aa-ok.gho"
-  drive agent-args-ok 0 "permissions repo-settings; flags: --model claude-x-1 --effort high --permission-mode acceptEdits --disallowedTools Bash" \
+  drive agent-args-ok 0 "permissions repo-settings; flags: --model claude-x-1 --effort high --max-turns 100 --max-budget-usd 20.00 --permission-mode acceptEdits --disallowedTools Bash" \
     agent-args "$ST/aa-ok" --out "$ST/aa-ok.gho"
   # shellcheck disable=SC2016  # $1/$2 are expanded by the inner sh, on purpose
-  also agent-args-output-is-the-checked-lines "claude_args<<D, exactly prepare's four lines, then D on its own line" \
+  also agent-args-output-is-the-checked-lines "claude_args<<D, exactly prepare's six lines, then D on its own line" \
     sh -c 'd="$(head -n 1 "$1" | sed -n "s/^claude_args<<\(PRODUCTIZER-ARGS-[0-9a-f]\{16\}\)$/\1/p")"; test -n "$d" && sed "1d;\$d" "$1" | cmp -s - "$2" && test "$(tail -n 1 "$1")" = "$d"' _ "$ST/aa-ok.gho" "$ST/out-build/claude-args"
   aa_ws bypass '--disallowedTools Bash\n--permission-mode bypassPermissions\n'
   drive agent-args-refuses-a-shape 3 "holds a line that is not a shape build-dispatch.sh writes: --permission-mode\\ bypassPermissions" \
@@ -815,7 +896,7 @@ STUB
   # B161. agent-args holds --advisor to the same name shape prepare does.
   rm -rf "$ST/aa-adv"; mkdir -p "$ST/aa-adv"; cp -R "$ST/out-adv-id" "$ST/aa-adv/.productizer-run"
   : > "$ST/aa-adv.gho"
-  drive agent-args-passes-the-advisor 0 "flags: --model claude-x-1 --effort high --advisor claude-opus-5-5 --permission-mode acceptEdits --disallowedTools Bash" \
+  drive agent-args-passes-the-advisor 0 "flags: --model claude-x-1 --effort high --advisor claude-opus-5-5 --max-turns 100 --max-budget-usd 20.00 --permission-mode acceptEdits --disallowedTools Bash" \
     agent-args "$ST/aa-adv" --out "$ST/aa-adv.gho"
   aa_ws adv-two '--disallowedTools Bash\n--advisor opus --dangerously-skip-permissions\n'
   drive agent-args-refuses-an-advisor-with-a-flag 3 "holds a line that is not a shape build-dispatch.sh writes: --advisor\\ opus\\ --dangerously-skip-permissions" \
@@ -829,6 +910,39 @@ STUB
   aa_ws adv-repeat '--disallowedTools Bash\n--advisor opus\n--advisor sonnet\n'
   drive agent-args-refuses-a-repeated-advisor 3 "repeats --advisor" \
     agent-args "$ST/aa-adv-repeat" --out "$ST/aa-adv-repeat.gho"
+  # B183. Never uncapped: agent-args refuses a file with no turn cap or no
+  # spend cap, and holds each cap to the shape prepare writes.
+  aa_ws caps-least '--max-turns 1\n--max-budget-usd 0.01\n--disallowedTools Bash\n'
+  : > "$ST/aa-caps-least.gho"
+  drive agent-args-passes-the-least-caps 0 "flags: --max-turns 1 --max-budget-usd 0.01 --disallowedTools Bash" \
+    agent-args "$ST/aa-caps-least" --out "$ST/aa-caps-least.gho"
+  aa_ws no-turns '--max-budget-usd 20.00\n--disallowedTools Bash\n'
+  : > "$ST/aa-no-turns.gho"
+  drive agent-args-refuses-no-turn-cap 3 "has no --max-turns line; the template refuses to run the agent uncapped" \
+    agent-args "$ST/aa-no-turns" --out "$ST/aa-no-turns.gho"
+  also agent-args-uncapped-wrote-no-output "an uncapped claude-args appends nothing to the step output" \
+    test ! -s "$ST/aa-no-turns.gho"
+  aa_ws no-budget '--max-turns 100\n--disallowedTools Bash\n'
+  drive agent-args-refuses-no-spend-cap 3 "has no --max-budget-usd line; the template refuses to run the agent uncapped" \
+    agent-args "$ST/aa-no-budget" --out "$ST/aa-no-budget.gho"
+  aa_ws turns-zero '--max-turns 0\n--max-budget-usd 20.00\n--disallowedTools Bash\n'
+  drive agent-args-refuses-a-zero-turn-cap 3 "holds a line that is not a shape build-dispatch.sh writes: --max-turns\\ 0" \
+    agent-args "$ST/aa-turns-zero" --out "$ST/aa-turns-zero.gho"
+  aa_ws turns-flag '--max-turns 100 --model other-1\n--max-budget-usd 20.00\n--disallowedTools Bash\n'
+  drive agent-args-refuses-a-turn-cap-with-a-flag 3 "holds a line that is not a shape build-dispatch.sh writes: --max-turns\\ 100\\ --model\\ other-1" \
+    agent-args "$ST/aa-turns-flag" --out "$ST/aa-turns-flag.gho"
+  aa_ws budget-zero '--max-turns 100\n--max-budget-usd 0.00\n--disallowedTools Bash\n'
+  drive agent-args-refuses-a-zero-spend-cap 3 "holds a line that is not a shape build-dispatch.sh writes: --max-budget-usd\\ 0.00" \
+    agent-args "$ST/aa-budget-zero" --out "$ST/aa-budget-zero.gho"
+  aa_ws budget-negative '--max-turns 100\n--max-budget-usd -1.00\n--disallowedTools Bash\n'
+  drive agent-args-refuses-a-negative-spend-cap 3 "holds a line that is not a shape build-dispatch.sh writes: --max-budget-usd\\ -1.00" \
+    agent-args "$ST/aa-budget-negative" --out "$ST/aa-budget-negative.gho"
+  aa_ws budget-bare '--max-turns 100\n--max-budget-usd 20\n--disallowedTools Bash\n'
+  drive agent-args-refuses-a-spend-cap-without-cents 3 "holds a line that is not a shape build-dispatch.sh writes: --max-budget-usd\\ 20" \
+    agent-args "$ST/aa-budget-bare" --out "$ST/aa-budget-bare.gho"
+  aa_ws turns-repeat '--max-turns 100\n--max-turns 5000\n--max-budget-usd 20.00\n--disallowedTools Bash\n'
+  drive agent-args-refuses-a-repeated-turn-cap 3 "repeats --max-turns" \
+    agent-args "$ST/aa-turns-repeat" --out "$ST/aa-turns-repeat.gho"
   rm -rf "$ST/aa-missing"; mkdir -p "$ST/aa-missing"
   drive agent-args-refuses-no-file 3 "no claude-args at" \
     agent-args "$ST/aa-missing" --out "$ST/aa-missing.gho"
@@ -847,7 +961,7 @@ STUB
   reached="$(printf '%s' "$CODES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/  *$//')"
   documented="$(awk '/^# Exit codes:/{f=1;next} f&&/^#   [0-9] /{printf "%s ", $2; next} f&&/^#      /{next} f{exit}' "$SELF" | sed 's/  *$//')"
   printf '    exit codes reached: %s   documented: %s\n' "$reached" "$documented"
-  printf '    NOT ASSERTED: that the template hands deliver the body and the protected list prepare wrote and not others (check-ci-template.py'"'"'s protected-list guard asserts deliver passes --protected and the agent job never downloads the body artifact, but not the artifact paths, and GitHub'"'"'s artifact immutability is not measured here); that a protected list beside a matching protected-head is the one prepare wrote (deliver checks the HEAD, and stage-advance.sh validates the list as data); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the CLI inside the action accepts --advisor, attaches the advisor or ever calls it (the cases here assert only the line prepare writes and agent-args passes; models.advisor is advice, never a gate); that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing; the probe refusal when the spec was created in the root commit (the check comes before that branch, and no case drives it); that a probe which exists prints the counts the body reads (pr-spec-comment.sh renders NOT MEASURED for that, it does not refuse).\n'
+  printf '    NOT ASSERTED: that the template hands deliver the body and the protected list prepare wrote and not others (check-ci-template.py'"'"'s protected-list guard asserts deliver passes --protected and the agent job never downloads the body artifact, but not the artifact paths, and GitHub'"'"'s artifact immutability is not measured here); that a protected list beside a matching protected-head is the one prepare wrote (deliver checks the HEAD, and stage-advance.sh validates the list as data); that a repository-configured hook would have run without the hooksPath pin (the self-test repositories configure none, so the pin is present but not driven); a shallow clone (exit 3, its own check); an unreadable config.json; a patch git cannot apply to HEAD (stage-advance.sh refuses it, exit 4, in its own self-test); a requirement superseded or withdrawn as the trailer source; a spec change with no requirement id (no Productizer-Req trailer); the real gh and a real GitHub; that the CLI inside the action accepts --advisor, attaches the advisor or ever calls it (the cases here assert only the line prepare writes and agent-args passes; models.advisor is advice, never a gate); that the CLI inside the action honours --max-turns or --max-budget-usd, stops a run at either, or how far past the spend cap a run goes (the cases assert only the cap lines prepare writes and agent-args passes), and that the built-in defaults fit a real plan or build run (chosen, never measured against one); that GitHub runs the template'"'"'s calls of this script as written (check-ci-template.py'"'"'s guards assert the call text - agent-args, stash-git, capture - and the agent-args cases here drive the subcommand, but no case runs the YAML itself); that the step output agent-args appends is parsed by GitHub as the heredoc it writes; that the action tolerates its .git being moved out before the agent runs (the action logs a git-config error and continues, not measured on a real runner); that the CLI really refuses a .git write or an out-of-cwd write under acceptEdits inside the action (measured only against local claude -p, references/ci-build.md); that a config-driven filter.*.clean, diff.*.textconv, core.fsmonitor or core.hooksPath actually EXECUTES during capture - the config env guards and -c flags are present and the primary defence is that relocating .git puts any agent-written config out of git'"'"'s reach (exit 8 catches a replanted .git), but add -N and diff do not invoke a clean filter, so no self-test case drives such a driver to execution; worktree eol/ident/working-tree-encoding attributes were measured 2026-10-11 as content normalisations that execute nothing; the probe refusal when the spec was created in the root commit (the check comes before that branch, and no case drives it); that a probe which exists prints the counts the body reads (pr-spec-comment.sh renders NOT MEASURED for that, it does not refuse).\n'
   [ "$reached" = "$documented" ] || { printf 'FAIL: reached and documented exit codes differ\n'; return 1; }
   [ "$HELD" -eq "$CASES" ] || return 1
   return 0
@@ -875,7 +989,7 @@ if [ "$CMD" = agent-args ]; then
   PERMS_FILE="$ROOT/.productizer-run/permissions"
   [ -f "$ARGS_FILE" ] && [ ! -L "$ARGS_FILE" ] \
     || fail 3 "no claude-args at $ARGS_FILE (a regular file prepare writes); refusing to run the agent on flags nobody checked"
-  ARG_SHAPE='^(--model [A-Za-z0-9][A-Za-z0-9._:@-]*|--effort (low|medium|high|xhigh|max)|--advisor [A-Za-z0-9][A-Za-z0-9._:@-]*|--permission-mode acceptEdits|--disallowedTools Bash)$'
+  ARG_SHAPE='^(--model [A-Za-z0-9][A-Za-z0-9._:@-]*|--effort (low|medium|high|xhigh|max)|--advisor [A-Za-z0-9][A-Za-z0-9._:@-]*|--max-turns [1-9][0-9]{0,5}|--max-budget-usd ([1-9][0-9]{0,5}\.[0-9]{2}|0\.([1-9][0-9]|0[1-9]))|--permission-mode acceptEdits|--disallowedTools Bash)$'
   CHECKED=(); SEEN=" "; DENIES_BASH=0
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ $ARG_SHAPE ]] \
@@ -888,6 +1002,11 @@ if [ "$CMD" = agent-args ]; then
   done < "$ARGS_FILE"
   [ "$DENIES_BASH" = 1 ] \
     || fail 3 "$ARGS_FILE does not deny Bash; the template refuses to run the agent with a shell (never a shell in CI)"
+  # Never uncapped (B183): a run with no turn cap or no spend cap is refused,
+  # whatever wrote the file.
+  for flag in --max-turns --max-budget-usd; do
+    case "$SEEN" in *" $flag "*) ;; *) fail 3 "$ARGS_FILE has no $flag line; the template refuses to run the agent uncapped" ;; esac
+  done
   PERM_WORD="$(head -n 1 "$PERMS_FILE")" || fail 3 "no permissions file at $PERMS_FILE"
   case "$PERM_WORD" in repo-settings|edits-only) ;; *) fail 3 "$PERMS_FILE names no option prepare writes: $(printf '%q' "$PERM_WORD")" ;; esac
   DELIM="PRODUCTIZER-ARGS-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
@@ -1030,13 +1149,18 @@ done
 # --- config ------------------------------------------------------------------
 CONF="$(python3 -I - "$CONFIG_REL" <<'PY'
 import json, os, re, sys
+from decimal import Decimal
 path = sys.argv[1]
 art, model, effort = "docs/sdlc/<slug>", "inherit", "inherit"
 advisor, advisor_bad = None, None
+caps, caps_bad = {}, []
+def shown(v):
+    return str(v) if isinstance(v, Decimal) else json.dumps(v, default=str)
 if os.path.exists(path):
     try:
         with open(path, encoding="utf-8") as f:
-            cfg = json.load(f)
+            # Decimal, so a spend cap is read as written and never as a float.
+            cfg = json.load(f, parse_float=Decimal)
     except (OSError, ValueError) as e:
         print("cannot read %s: %s" % (path, e), file=sys.stderr)
         sys.exit(3)
@@ -1056,6 +1180,24 @@ if os.path.exists(path):
                 advisor = v
             else:
                 advisor_bad = json.dumps(v)
+        c = m.get("build_caps") if isinstance(m, dict) else None
+        if c is not None and not isinstance(c, dict):
+            caps_bad.append("models.build_caps is %s, not an object" % shown(c))
+        elif isinstance(c, dict):
+            # type() is, not isinstance(): a JSON true is a Python int too.
+            v = c.get("max_turns")
+            if v is not None:
+                if type(v) is int and 1 <= v <= 999999:
+                    caps["TURNS"] = str(v)
+                else:
+                    caps_bad.append("models.build_caps.max_turns is %s, not a whole number of turns from 1 to 999999" % shown(v))
+            v = c.get("max_budget_usd")
+            if v is not None:
+                if (type(v) is int or isinstance(v, Decimal)) and 0 < v < 1000000 \
+                        and v == Decimal(v).quantize(Decimal("0.01")):
+                    caps["BUDGET"] = format(Decimal(v).quantize(Decimal("0.01")), "f")
+                else:
+                    caps_bad.append("models.build_caps.max_budget_usd is %s, not an amount of US dollars above 0 and below 1000000 in whole cents" % shown(v))
 print("ART\t" + art.rstrip("/"))
 print("MODEL\t" + model)
 print("EFFORT\t" + effort)
@@ -1063,6 +1205,10 @@ if advisor is not None:
     print("ADVISOR\t" + advisor)
 if advisor_bad is not None:
     print("ADVISOR_BAD\t" + advisor_bad)
+for k, v in caps.items():
+    print(k + "\t" + v)
+if caps_bad:
+    print("CAPS_BAD\t" + "; ".join(caps_bad))
 PY
 )" || fail 3 "cannot read $CONFIG_REL; the reason is above"
 ART="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="ART"{print $2}')"
@@ -1070,6 +1216,9 @@ MODEL="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="MODEL"{print $2}')"
 EFFORT="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="EFFORT"{print $2}')"
 ADVISOR="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="ADVISOR"{print $2}')"
 ADVISOR_BAD="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="ADVISOR_BAD"{print $2}')"
+MAX_TURNS="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="TURNS"{print $2}')"
+MAX_BUDGET="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="BUDGET"{print $2}')"
+CAPS_BAD="$(printf '%s\n' "$CONF" | awk -F'\t' '$1=="CAPS_BAD"{print $2}')"
 PLAN_PATH="$(printf '%s' "$ART" | sed "s/<[^>]*>/issue-$ISSUE/g")/plan.md"
 
 # --- the base ----------------------------------------------------------------
@@ -1110,6 +1259,20 @@ if [ "$CMD" = prepare ]; then
   [ -z "$ADVISOR_BAD" ] \
     || fail 3 "models.advisor is not a model name this script will pass on: $ADVISOR_BAD. Set a model alias or id (references/models.md, \"The advisor\"), or remove the key or set it to null for no advisor. Refusing the run before any model is called."
   [ -z "$ADVISOR" ] || ARGS_LINES+=("--advisor $ADVISOR")
+  # THE CAPS (B183): always both, from config.json or the built-in default.
+  [ -z "$CAPS_BAD" ] \
+    || fail 3 "$CAPS_BAD. Set a positive number, or remove the key or set it to null for the built-in default (--max-turns $DEFAULT_MAX_TURNS, --max-budget-usd $DEFAULT_MAX_BUDGET_USD; references/ci-build.md, \"The caps\"). Refusing the run before any model is called."
+  if [ -n "$MAX_TURNS" ]; then
+    TURNS_HOW="models.build_caps.max_turns"
+  else
+    MAX_TURNS="$DEFAULT_MAX_TURNS"; TURNS_HOW="the built-in default; models.build_caps.max_turns is not set"
+  fi
+  if [ -n "$MAX_BUDGET" ]; then
+    BUDGET_HOW="models.build_caps.max_budget_usd"
+  else
+    MAX_BUDGET="$DEFAULT_MAX_BUDGET_USD"; BUDGET_HOW="the built-in default; models.build_caps.max_budget_usd is not set"
+  fi
+  ARGS_LINES+=("--max-turns $MAX_TURNS" "--max-budget-usd $MAX_BUDGET")
 
   # The repository's committed Claude Code settings decide the permission
   # mode. A settings.local.json that is committed is read too, and wins, as
@@ -1213,6 +1376,7 @@ PY
   if [ "${#ARGS_LINES[@]}" -gt 0 ]; then printf '%s\n' "${ARGS_LINES[@]}" > "$OUT/claude-args"; else : > "$OUT/claude-args"; fi
   say "build-dispatch: prepared $MODE for issue #$ISSUE at ${HEAD_SHA:0:12}, base ${BASE_SHA:0:12} ($BASE_HOW)."
   say "build-dispatch: permissions $PERMS: $PERM_HOW."
+  say "build-dispatch: caps: --max-turns $MAX_TURNS ($TURNS_HOW), --max-budget-usd $MAX_BUDGET ($BUDGET_HOW)."
   say "build-dispatch: plan path $PLAN_PATH; claude args: ${ARGS_LINES[*]:-none}"
   say "build-dispatch: no model was called here."
   exit 0

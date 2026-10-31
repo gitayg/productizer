@@ -77,6 +77,8 @@ jobs:
           github_token: ${{ github.token }}
           prompt: fixed text
           claude_args: |
+            --max-turns 100
+            --max-budget-usd 20.00
             ${{ steps.args.outputs.claude_args }}
             --disallowedTools Bash
       - env:

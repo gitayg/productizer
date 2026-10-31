@@ -31,7 +31,8 @@
 #             .claude/productizer/checks.yaml runs, read here with PyYAML,
 #             so the write job never parses YAML or installs a package.
 #   generate  contents: read. The agent edits the working tree, under the
-#             committed rules, with Bash ALWAYS denied (no shell in CI);
+#             committed rules, with Bash ALWAYS denied (no shell in CI) and a
+#             turn cap and a spend cap ALWAYS set (B183, never uncapped);
 #             the `permissions` input can only narrow further. Before the agent
 #             runs, the real .git is moved OUT of the agent's working directory,
 #             so no .git/config or hook the agent writes can make the capture
@@ -234,14 +235,16 @@ jobs:
       # prepare wrote zero or more lines, one flag each, from a fixed set:
       # --model and --effort from models.build in config.json; --advisor from
       # models.advisor, only when it is set to a model name (B161, advice
-      # the agent may or may not ask for, never a gate); acceptEdits
-      # only when the committed settings set no defaultMode; and the Bash
-      # deny, which is ALWAYS present (maintainer ruling 2026-10-11, never a
-      # shell in CI). build-dispatch.sh agent-args re-checks every line
-      # against exactly those shapes - a last line with no newline included -
-      # refuses a repeated flag, refuses the run unless the Bash deny is
-      # present, and only then appends the lines it checked to the step output
-      # as claude_args. No other permission mode can pass this step. The check
+      # the agent may or may not ask for, never a gate); --max-turns and
+      # --max-budget-usd, ALWAYS present (B183, never uncapped), from
+      # models.build_caps or the built-in defaults of 100 turns and 20.00
+      # dollars; acceptEdits only when the committed settings set no
+      # defaultMode; and the Bash deny, which is ALWAYS present (maintainer
+      # ruling 2026-10-11, never a shell in CI). build-dispatch.sh agent-args
+      # re-checks every line against exactly those shapes - a last line with
+      # no newline included - refuses a repeated flag, refuses the run unless
+      # the Bash deny and both caps are present, and only then appends the
+      # lines it checked to the step output as claude_args. No other permission mode can pass this step. The check
       # is the script's own code, self-tested, not shell living in this YAML;
       # check-ci-template.py asserts this step calls it (guards).
       - name: Read the flags prepared for this run
@@ -303,7 +306,18 @@ jobs:
           # job runs. The accumulating --disallowedTools means the two copies
           # are harmless. The agent's change stays in the working tree, which
           # the capture step reads with a git it could not have configured.
+          #
+          # NEVER UNCAPPED (B183). The two caps below are the built-in
+          # defaults, here in the template as well as in the prepared flags,
+          # and they come FIRST: the action keeps the last value of a flag
+          # that does not accumulate, so the caps prepared from
+          # models.build_caps, which follow, are the ones the agent gets, and
+          # these hold only if those were missing. Claude Code stops the run at
+          # whichever cap it reaches; the action then fails this job, and no
+          # pull request is opened. timeout-minutes above is the third stop.
           claude_args: |
+            --max-turns 100
+            --max-budget-usd 20.00
             ${{ steps.args.outputs.claude_args }}
             --disallowedTools Bash
 

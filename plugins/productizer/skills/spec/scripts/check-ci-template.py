@@ -25,6 +25,15 @@ WHAT IT ASSERTS, each a separate finding:
                  vector by which a prompt-injected agent in this read-only job
                  could tamper with a file a later token-holding step runs; the
                  maintainer ruled on 2026-10-11 that CI never gives it one
+  caps           the step that runs the agent action caps the run (B183, never
+                 uncapped): its `claude_args` carries `--max-turns N`, N a whole
+                 number from 1 to 999999, and `--max-budget-usd A`, A above
+                 0.00 in whole cents with two decimals - the shapes
+                 build-dispatch.sh writes - each as its own word ahead of
+                 ${{ steps.args.outputs.claude_args }}, and neither after it.
+                 The action keeps a repeated flag's last value, so these hold
+                 only when the prepared flags carry none, and a cap after the
+                 prepared flags would override the one config.json sets
   post-agent-env every run: step that follows the agent action inside the
                  agent's own job pins BASH_ENV to the empty string, so no
                  startup file an agent-influenced environment could name is
@@ -161,7 +170,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "check-ci-template 1.5"
+VERSION = "check-ci-template 1.6"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(HERE, "..", "templates", "build-from-spec.yml")
 FIXTURES = os.path.join(HERE, "..", "fixtures", "ci-template")
@@ -171,6 +180,13 @@ AGENT_ACTION = "anthropics/claude-code-action"
 # `(`, so `--disallowedTools "Bash(git:*)"` - a denial of only git through Bash
 # - does not satisfy it; the whole shell must be gone.
 DENY_BASH_RX = re.compile(r"--disallowedTools\s+[\"']?Bash(?![\w(])")
+# The caps the agent step carries itself (B183), in the shapes
+# build-dispatch.sh writes. Each must be its own word, then its value: the
+# action reads `--max-turns=5` as a flag named `max-turns=5`, which caps nothing.
+CAP_SHAPES = (("--max-turns", re.compile(r"[1-9][0-9]{0,5}"),
+               "a whole number of turns from 1 to 999999"),
+              ("--max-budget-usd", re.compile(r"[1-9][0-9]{0,5}\.[0-9]{2}|0\.(?:[1-9][0-9]|0[1-9])"),
+               "an amount above 0.00 in whole cents, with two decimals"))
 BYPASS_WORDS = ("bypassPermissions", "dangerously-skip-permissions")
 PERMS_OPTIONS = ("repo-settings", "edits-only")
 PIN_RX = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
@@ -602,6 +618,32 @@ def check_guards(jobs, find):
                      "productizer scripts before the step that verifies them")
 
 
+def check_caps(cargs, where, find):
+    """The agent step's own caps: each flag ahead of the prepared flags, as
+    its own word with a value of the shape build-dispatch.sh writes, and none
+    after them."""
+    head, ref, tail = cargs.partition(ARGS_REF)
+    try:
+        words = shlex.split(head, comments=True)
+        later = shlex.split(tail.replace("}}", " "), comments=True) if ref else []
+    except ValueError as e:
+        find("caps", where, "claude_args cannot be read as words (%s), so its caps "
+             "could not be read" % e)
+        return
+    for flag, rx, what in CAP_SHAPES:
+        at = [n for n, w in enumerate(words) if w == flag]
+        if not at:
+            find("caps", where, "the agent action step must cap the run with its own "
+                 "%s, ahead of the prepared flags (never uncapped)" % flag)
+            continue
+        value = words[at[-1] + 1] if at[-1] + 1 < len(words) else ""
+        if not rx.fullmatch(value):
+            find("caps", where, "%s %r is not %s" % (flag, value, what))
+        if flag in later:
+            find("caps", where, "%s after the prepared flags overrides the cap "
+                 "config.json sets; put it ahead of %s" % (flag, ARGS_REF))
+
+
 def check_tools_pin(doc, find):
     env = doc.get("env")
     env = env if isinstance(env, dict) else {}
@@ -694,6 +736,7 @@ def check(path):
                              "checkout in the agent job must set persist-credentials: false")
                 if str(s.get("uses", "")).split("@")[0] == AGENT_ACTION:
                     cargs = str((s.get("with") or {}).get("claude_args") or "")
+                    check_caps(cargs, "jobs.%s.steps[%d].with.claude_args" % (jname, i), find)
                     if not DENY_BASH_RX.search(cargs):
                         find("deny-bash", "jobs.%s.steps[%d].with.claude_args" % (jname, i),
                              "the agent action step must deny the agent a shell with a "
@@ -828,7 +871,7 @@ def check(path):
     return findings, placeholder
 
 
-ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "deny-bash",
+ASSERTIONS = ("trigger", "top-perms", "write-scope", "agent-job", "deny-bash", "caps",
               "post-agent-env", "write-job-no-repo-code", "write-job-no-install",
               "protected-list", "pinned", "yaml-hash-pinned", "run-injection", "swallow",
               "no-bypass", "perms-input", "tools-pin", "guards")
@@ -918,7 +961,11 @@ def selftest():
           "untrusted; YAML anchors and merge keys; any behaviour of GitHub itself; that "
           "the CLI inside the action really removes the Bash tool when deny-bash is "
           "declared (deny-bash checks the workflow declares it, not that the CLI honours "
-          "it - measured against local claude -p, references/ci-build.md); that a "
+          "it - measured against local claude -p, references/ci-build.md); that the "
+          "CLI inside the action stops a run at either cap, or that the action keeps a "
+          "repeated flag's last value so the prepared caps win (caps reads the "
+          "workflow; the last-value rule was read in the action's source at the "
+          "pinned commit, never run); that a "
           "permissions option really narrows - what each one adds to the agent's "
           "arguments is build-dispatch.sh's, asserted in its own self-test; that a "
           "write job runs no repository code beyond what its run: text names - an "

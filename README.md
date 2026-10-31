@@ -52,7 +52,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.75.2"`.
+`plugin.json` sets `"version": "4.76.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -304,6 +304,14 @@ alias or id - is passed to the build agent as `--advisor`: advice the agent
 may ask a second model for, never a gate, and anything but a model name
 refuses the run. See `references/models.md`, "The advisor". An advisor set
 there has never run in CI.
+
+The build agent is never uncapped: every run gets `--max-turns` and
+`--max-budget-usd`, from `models.build_caps` in the same file or the built-in
+defaults of 100 turns and 20.00 dollars, and `prepare` says which. A cap that
+is not a positive number refuses the run before a model is called, and the
+job's `timeout-minutes` stays the third stop. The caps cover this template
+only, not the scheduled prompts, and have never stopped a run on a real
+runner. See `references/ci-build.md`, "The caps".
 
 ### Reporting a change on its pull request
 

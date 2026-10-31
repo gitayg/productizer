@@ -217,4 +217,9 @@ marker, because a table left there would be one nothing writes or checks.
 | R189 | unwanted | active | `stage-advance-guard` |
 | R190 | unwanted | active | `view-builder` |
 | R191 | unwanted | active | `ci-template-safe`, `release-workflow-safe` |
+| R192 | ubiquitous | active | `build-dispatch`, `ci-template-safe` |
+| R193 | ubiquitous | active | `ci-template-safe` |
+| R194 | event | active | `build-dispatch` |
+| R195 | unwanted | active | `build-dispatch` |
+| R196 | unwanted | active | `build-dispatch` |
 <!-- productizer:requirement-index:end -->

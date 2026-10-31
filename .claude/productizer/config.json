@@ -80,7 +80,12 @@
       "why": "2 sigma is summarising; raise it for 3 sigma, which proposes a change"
     },
     "_advisor_note": "advisor = null | <model alias or id>. Optional; null or absent means no advisor. When set, the unattended CI build (templates/build-from-spec.yml) passes it to Claude Code as --advisor <model>: a second model the build agent MAY consult, sent the whole transcript, billed at its own rates. Advice, never a gate - the agent decides whether and when to call it, and no check relies on it. Anything but a model name (a letter or digit, then letters, digits and . _ : @ -) refuses the run. The pairing with the build model is checked by Claude Code, not here. See references/models.md, The advisor.",
-    "advisor": null
+    "advisor": null,
+    "_build_caps_note": "build_caps caps the unattended CI build (templates/build-from-spec.yml) and nothing else: max_turns = null | <whole number 1-999999>, the agentic turns Claude Code may take, passed as --max-turns; max_budget_usd = null | <US dollars above 0, in whole cents, below 1000000>, the spend it may reach by its own client-side estimate, passed as --max-budget-usd. Never uncapped: null or absent takes the built-in default, 100 turns and 20.00 dollars, and prepare says so; any other value - a string, zero, a negative, a fraction of a turn or of a cent - refuses the run before a model is called. Claude Code stops the run at whichever cap it reaches, the job fails and no pull request is opened; the spend can pass its cap by the response that crosses it. The job's timeout-minutes is the third stop. Scheduled prompts get no cap from here. See references/ci-build.md, The caps.",
+    "build_caps": {
+      "max_turns": null,
+      "max_budget_usd": null
+    }
   },
   "bands": {
     "config": "ops/bands.yaml",

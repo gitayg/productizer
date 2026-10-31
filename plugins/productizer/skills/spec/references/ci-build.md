@@ -198,6 +198,62 @@ model's rates. Limits, pairings and the docs are in `references/models.md`,
 "The advisor". Not measured inside the action: that the CLI it runs accepts
 `--advisor`, or that the advisor is attached or called there.
 
+### The caps
+
+Never uncapped (B183). Every run passes the agent two caps, after `--model`,
+`--effort` and `--advisor`:
+
+| Flag | From | Built-in default | Accepted value |
+|---|---|---|---|
+| `--max-turns N` | `models.build_caps.max_turns` | 100 | a JSON whole number from 1 to 999999 |
+| `--max-budget-usd A` | `models.build_caps.max_budget_usd` | 20.00 | a JSON number above 0 and below 1000000, in whole cents; always written with two decimals |
+
+A key that is absent or `null` takes the default, and `prepare` prints, for
+each cap, whether it came from `config.json` or is the built-in default. Any
+other value - a string such as `"40"`, `true` or `false`, zero, a negative, a
+fraction of a turn or of a cent, `Infinity`, or a `build_caps` that is not an
+object - is refused by `prepare` (exit 3) before any model is called, naming
+the key and the value. Nothing is rounded or passed through. `agent-args`
+refuses flags with no `--max-turns` or no `--max-budget-usd` line, and holds
+each to the shape `prepare` writes. The template's agent step carries
+`--max-turns 100` and `--max-budget-usd 20.00` itself, ahead of the prepared
+flags; `check-ci-template.py`'s `caps` holds them there.
+
+Why these defaults, in one sentence each, chosen and not measured:
+
+- **100 turns.** A turn is one round trip to the model; 100 is room for one
+  plan or one build of a committed plan, and a run that needs more is one a
+  person should look at before it costs more. Claude Code's own default is no
+  limit.
+- **20.00 dollars.** The most one forgotten dispatched run may spend: a sum a
+  repository owner can lose without a week's quota going with it.
+
+What Claude Code's own documentation says of them, quoted from its CLI
+reference (code.claude.com/docs/en/cli-reference, read 2026-10-31):
+`--max-turns` - "Limit the number of agentic turns (print mode only). Exits
+with an error when the limit is reached. No limit by default."
+`--max-budget-usd` - "Stop the run once estimated spend on API calls reaches
+this amount (print mode only)", checked against Claude Code's client-side cost
+estimate, which "can differ from your bill"; "Spend can pass the cap", by the
+response that crosses it. `claude --help` in 2.1.295 lists `--max-budget-usd`
+and not `--max-turns`. Claude Code's GitHub Actions page passes `--max-turns`
+in `claude_args` ("Set `--max-turns` in `claude_args` to limit iterations"),
+as does the action's own usage page at the pinned commit, and the action is
+"built on the SDK", whose `maxTurns` and `maxBudgetUsd` options are the same
+caps; the SDK 0.3.296 starts the CLI with stream-json input and output, the
+print-mode path. That last part was read in the SDK's source, not run.
+
+What happens at a cap, read in the action's source at the pinned commit and
+never run: the action keeps the last value of a flag that does not accumulate,
+so the prepared caps override the template's; a result that is not a success
+fails the agent step, so the `generate` job fails, `deliver` never runs, and no
+pull request is opened. The work done up to the cap is lost.
+
+The "set condition" is the job's `timeout-minutes: 60`, which was already
+there; the caps add no other stop condition. The caps bound this template
+only: the scheduled prompts (`templates/scheduled-*.md`) run as scheduled
+agents outside it and get nothing from `models.build_caps`.
+
 ### The base the spec is diffed against
 
 `spec_base` when it is given. Otherwise the base is the first parent of the
@@ -540,9 +596,10 @@ build-dispatch.sh deliver [repo-root] --mode plan|build --issue N
 `generate` job before the agent step. It re-reads `.productizer-run/claude-args`
 (prepare's output, fetched as an artifact) and refuses it - exit 3 - unless
 every line is one of the fixed shapes prepare writes (`--model <id>`,
-`--effort <level>`, `--advisor <id>`, `--permission-mode acceptEdits`,
+`--effort <level>`, `--advisor <id>`, `--max-turns <N>`,
+`--max-budget-usd <A>`, `--permission-mode acceptEdits`,
 `--disallowedTools Bash`),
-no flag repeats, and the Bash deny is present. Only then does it append the
+no flag repeats, and the Bash deny and both caps are present. Only then does it append the
 lines it checked, not the file as it stands, to `$GITHUB_OUTPUT` as
 `claude_args` under a random heredoc delimiter. Until B118 this was shell inside
 the template's YAML, which no self-test ran, and a last line with no newline
@@ -561,7 +618,7 @@ run in the `generate` job around the agent step.
 |---|---|
 | 0 | ok, or the dry run printed what it would have pushed and opened |
 | 2 | usage, including a `--spec-base` that is not 40 lower-case hex digits or does not resolve, and a `--permissions` value outside `repo-settings` and `edits-only` |
-| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, (`prepare --body-out`) no `evals/solver-probe.py`, which the body requires, a body that could not be rendered, or a `checks.yaml` whose protected list could not be read, (`stash-git`/`capture`) the git-dir could not be moved or read, or (`agent-args`) the prepared `claude-args` are missing, hold a line outside the fixed shapes or a repeated flag, or lack the Bash deny |
+| 3 | the repository cannot be read as needed: not a work tree, a shallow clone, an unreadable `config.json` or Claude Code settings file, `HEAD` is not the default-branch tip, (`prepare --body-out`) no `evals/solver-probe.py`, which the body requires, a body that could not be rendered, or a `checks.yaml` whose protected list could not be read, (`stash-git`/`capture`) the git-dir could not be moved or read, (`prepare`) a cap in `models.build_caps` that is not a positive number of the shape passed on, or (`agent-args`) the prepared `claude-args` are missing, hold a line outside the fixed shapes or a repeated flag, or lack the Bash deny, the turn cap or the spend cap |
 | 4 | the spec is unchanged against the base. The run stops before any model call |
 | 5 | build mode, and no plan is committed at the plan path |
 | 6 | refused by `stage-advance.sh`, on the patch or on the commit made from it, whose reason is relayed verbatim. The branch is deleted and nothing is pushed. Also: no `--protected` list while `HEAD` has a `checks.yaml`, or a list read at another `HEAD` |
@@ -607,6 +664,12 @@ workflow given as a path:
 - the agent job holds no write, and its checkouts set `persist-credentials: false`
 - the step that runs the agent action denies the agent a shell: its
   `claude_args` carries a standalone `--disallowedTools Bash` (`deny-bash`)
+- the step that runs the agent action caps the run: its `claude_args` carries
+  `--max-turns N` and `--max-budget-usd A`, each as its own word with a value
+  of the shape `build-dispatch.sh` writes, ahead of
+  `${{ steps.args.outputs.claude_args }}` and neither after it (`caps`, B183).
+  `--max-turns=100` is refused, because the action reads it as a flag named
+  `max-turns=100` that caps nothing
 - every `run:` step after the agent action, in the agent's own job, pins
   `BASH_ENV` to the empty string, so a post-agent shell reading the tree the
   agent edited sources no file an agent-influenced environment could name
@@ -817,6 +880,14 @@ your copy after every edit.
   hands the agent the committed settings, so a committed `advisorModel` would
   reach the agent without `models.advisor` (not measured; `--advisor` takes
   precedence over the key for that session, per the same page).
+- **The caps have never stopped a run.** `--max-turns` and `--max-budget-usd`
+  reach the agent's arguments on every run (B183), and no run has reached
+  either: the template has never run on a runner, and no local `claude -p` was
+  run against them, because that would call a paid model. The spend cap is
+  Claude Code's estimate and can be passed by the response that crosses it; a
+  capped run fails the job and opens nothing; the defaults were chosen, not
+  measured against a real run; and the scheduled prompts are not capped. See
+  "The caps" above.
 - **It has never run end to end here.** This repository is public, holds no
   model secrets, and a run costs model spend. What is measured is the
   template's static properties (`check-ci-template.py`, 16 of 16, actionlint

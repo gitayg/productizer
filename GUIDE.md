@@ -763,6 +763,16 @@ A committed project `.claude/settings.json` holding `advisorModel` can turn an
 advisor on in CI without `models.advisor`; `--advisor` overrides it for the
 session.
 
+**Caps on the unattended build, always.** The CI build passes the agent
+`--max-turns` and `--max-budget-usd` on every run, from `models.build_caps`
+(`max_turns`, `max_budget_usd`) or, when those are absent or `null`, the
+built-in 100 turns and 20.00 dollars - the run is never uncapped, and the
+dispatch log says which values are defaults. Claude Code stops the run at
+either cap; the spend cap is its own estimate and can be passed by one
+response. A cap that is not a positive number refuses the run before a model is
+called. The job's `timeout-minutes` stays the third stop. Scheduled prompts are
+not capped by this, and no capped run has happened on a real runner yet.
+
 ## Starting from a repo that already exists
 
 Stage 0c surveys a repo with history — routes, tests, error paths, config — and
@@ -798,7 +808,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**158 requirements are active**, and they are the whole of what has been
+**163 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -807,7 +817,7 @@ written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
 
-**Always, with no trigger.** Twenty requirements hold whatever else is
+**Always, with no trigger.** Twenty-two requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -854,8 +864,12 @@ happening:
   reference files that the skill's body names at the stage that needs them, so
   that the body loaded on every trigger carries only the routing, the stage
   map and the per-turn rules.
+- **R192** — The lifecycle shall pass the unattended build agent a cap on the
+  number of its agentic turns.
+- **R193** — The lifecycle shall pass the unattended build agent a cap on its
+  spend in US dollars.
 
-**When something arrives.** Forty things happen on a discrete trigger:
+**When something arrives.** Forty-one things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -959,6 +973,9 @@ happening:
 - **R151** — When `models.advisor` is absent or null, the lifecycle shall pass
   the unattended build agent the same arguments as a configuration that lacks
   the key.
+- **R194** — When `models.build_caps` in config.json sets no value for a cap,
+  the lifecycle shall pass the unattended build agent that cap's built-in
+  default, reported by prepare as the default.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
@@ -987,7 +1004,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Seventy-nine defences, written as `If … then`
+**When something goes wrong.** Eighty-one defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1223,6 +1240,11 @@ because a designed path and a defended one are not the same thing:
   `case`, a parameter expansion, a substitution inside double quotes or a
   quote inside backquotes, then the lifecycle shall report that `run:` as not
   read.
+- **R195** — If a cap in `models.build_caps` is set to a value that is not a
+  positive number of the shape the lifecycle passes on, then the lifecycle
+  shall refuse to dispatch the build before a model is called.
+- **R196** — If the flags prepared for an unattended run lack a turn cap or a
+  spend cap, then the lifecycle shall refuse the run.
 
 **Only where the feature is present.** Ten requirements apply only to a build
 that includes the feature:

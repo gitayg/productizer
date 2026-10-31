@@ -9,6 +9,12 @@ write-in-prepare.yml	1	jobs.prepare.permissions: write on contents outside the d
 agent-job-write.yml	1	the agent job holds write on id-token
 agent-checkout-credentials.yml	1	checkout in the agent job must set persist-credentials: false
 agent-no-bash-deny.yml	1	the agent action step must deny the agent a shell with a standalone --disallowedTools Bash
+agent-no-turn-cap.yml	1	caps          jobs.generate.steps[4].with.claude_args: the agent action step must cap the run with its own --max-turns, ahead of the prepared flags (never uncapped)
+agent-no-spend-cap.yml	1	caps          jobs.generate.steps[4].with.claude_args: the agent action step must cap the run with its own --max-budget-usd, ahead of the prepared flags (never uncapped)
+agent-turn-cap-zero.yml	1	caps          jobs.generate.steps[4].with.claude_args: --max-turns '0' is not a whole number of turns from 1 to 999999
+agent-spend-cap-no-cents.yml	1	caps          jobs.generate.steps[4].with.claude_args: --max-budget-usd '20' is not an amount above 0.00 in whole cents, with two decimals
+agent-turn-cap-equals.yml	1	caps          jobs.generate.steps[4].with.claude_args: the agent action step must cap the run with its own --max-turns, ahead of the prepared flags (never uncapped)
+agent-cap-after-args.yml	1	caps          jobs.generate.steps[4].with.claude_args: --max-turns after the prepared flags overrides the cap config.json sets
 unpinned-uses.yml	1	not pinned to a full commit id: actions/checkout@v4
 event-in-run.yml	1	an expression is interpolated into the script: ${{ github.event.inputs.issue }}
 inputs-in-run.yml	1	an expression is interpolated into the script: ${{ inputs.issue }}

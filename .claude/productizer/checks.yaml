@@ -2721,6 +2721,70 @@ checks:
             `-an-empty-advisor`). The seven prepare refusals were red at f248e3f. Falsified
             2026-10-25 by the building agent: the model-name check removed, 119 of 130; the
             agent-args shape widened to any --advisor value, 127 of 130.
+        - id: R192
+          verdict: Partial
+          reason: >-
+            The flag reaches the agent's arguments; that the CLI inside the action stops a run at
+            it is not measured, and the template has never run on a GitHub runner. Claude Code's
+            CLI reference documents --max-turns ("Exits with an error when the limit is reached.
+            No limit by default."), and the action's own docs pass it in claude_args.
+          evidence: >-
+            build-dispatch.sh 1.4 (B183), 179 cases. Every prepare case that asserts exact
+            arguments now carries `--max-turns 100` after the model and advisor flags
+            (`repo-settings-no-mode-adds-accept-edits`, `build-args-from-config`,
+            `owner-mode-passes-no-flag`, `owner-bypass-still-denies-bash`,
+            `advisor-is-one-line-after-the-model`); `caps-from-config-reach-the-args` - a
+            configured 40 is `--max-turns 40`; `agent-args-accepts-every-prepare-output` and
+            `agent-args-ok` pass the line on. Driven against the 48d310b script, 125 of 179 held.
+            Falsified 2026-10-31 by the building agent with the line that adds both caps removed:
+            167 of 179.
+        - id: R193
+          verdict: Partial
+          reason: >-
+            The flag reaches the agent's arguments; that the CLI inside the action stops a run at
+            it, and how far past it a run goes, is not measured. Claude Code's CLI reference: "Stop
+            the run once estimated spend on API calls reaches this amount (print mode only)" and
+            "Spend can pass the cap". The action runs the CLI through the Agent SDK, which documents
+            maxBudgetUsd and spawns the CLI with stream-json input and output; read, not run.
+          evidence: >-
+            build-dispatch.sh 1.4 (B183), the same cases as R192 with `--max-budget-usd 20.00`;
+            `caps-from-config-reach-the-args` - a configured 5.5 is `--max-budget-usd 5.50`, in
+            whole cents; `prepare-caps-least` and `prepare-caps-most` - 0.01 and 999999.99 pass.
+            Falsified 2026-10-31 with the line that adds both caps removed: 167 of 179.
+        - id: R194
+          verdict: Covered
+          evidence: >-
+            With no models.build_caps, or both null, prepare writes `--max-turns 100` and
+            `--max-budget-usd 20.00` and prints that each is the built-in default
+            (`prepare-says-the-caps-are-the-default`, `prepare-caps-null`, byte-identical to no key
+            by `caps-null-is-no-key`); one null and one set takes the default for the null one only
+            (`prepare-caps-one-null`); `template-carries-the-default-caps` - the template's own
+            caps are the same two values. Falsified 2026-10-31 with the default never applied:
+            165 of 179, the three default cases and every exact-arguments case red.
+        - id: R195
+          verdict: Covered
+          evidence: >-
+            prepare exits 3 naming the key and the value, before any model is called, and writes
+            no claude-args, for a turn cap of 0, -5, 2.5, "40", true and 1000000, a spend cap of
+            0, 0.00, -1, 5.001, "5.00", false, 1000000 and Infinity, and a build_caps that is not
+            an object (`prepare-caps-refuses-*`, each with its `caps-*-wrote-no-args`). Driven
+            against the 48d310b script, which ignored the key, every one is red. Falsified
+            2026-10-31: the refusal removed, 149 of 179; a JSON true read as a whole number,
+            176 of 179; a fraction of a cent let through, 177 of 179.
+        - id: R196
+          verdict: Partial
+          reason: >-
+            Same as R124: the subcommand is driven, the YAML step that calls it is not.
+          evidence: >-
+            agent-args exits 3 and appends nothing to the step output for flags with no
+            --max-turns or no --max-budget-usd line (`agent-args-refuses-no-turn-cap`,
+            `agent-args-uncapped-wrote-no-output`, `agent-args-refuses-no-spend-cap`), and holds
+            each cap to the shape prepare writes: 0 turns, a turn cap with a second flag, 0.00,
+            -1.00 and 20 dollars, and a repeated --max-turns are refused
+            (`agent-args-refuses-a-zero-turn-cap`, `-a-turn-cap-with-a-flag`, `-a-zero-spend-cap`,
+            `-a-negative-spend-cap`, `-a-spend-cap-without-cents`, `-a-repeated-turn-cap`);
+            `agent-args-passes-the-least-caps` passes 1 and 0.01. Falsified 2026-10-31: the
+            presence check removed, 176 of 179; both cap shapes widened to any word, 175 of 179.
         - id: R128
           verdict: Covered
           evidence: >-
@@ -2733,6 +2797,7 @@ checks:
       - That GitHub runs the template's calls of this script as written is not measured; check-ci-template.py's guards assert the call text (agent-args, stash-git, capture) and the agent-args cases drive the subcommand, but no case runs the YAML.
       - A config-driven filter.*.clean, diff.*.textconv, fsmonitor or hooksPath EXECUTING during capture is not driven by any case: add -N and diff do not invoke a clean filter, and the relocation puts any agent-written config out of git's reach, so R68 rests on the relocation plus the exit-8 refusal, not on a measured driver execution.
       - That the action tolerates its .git being moved out before the agent runs is not measured on a real runner.
+      - That the CLI inside the action stops a run at --max-turns or --max-budget-usd, and how far past the spend cap a run goes, is not measured; the built-in caps of 100 turns and 20.00 dollars were chosen, not measured against a real plan or build run.
 
   - id: ci-template-safe
     why: the template runs a model in other people's repositories with their secrets, and one edit to its YAML removes a guarantee while every script stays green
@@ -2746,11 +2811,11 @@ checks:
     timeout_seconds: 60
     exit_codes:
       pass: [0]
-      fail: [1]        # at least one of the sixteen assertions does not hold on the template
+      fail: [1]        # at least one of the eighteen assertions does not hold on the template
       refused: [2]     # usage, or a template that could not be read or parsed
     coverage:
       from: stdout_count
-      pattern: '([0-9]+) of 17 assertions held'
+      pattern: '([0-9]+) of 18 assertions held'
       min_covered: 1
       spec_units:
         - id: R112
@@ -2792,6 +2857,30 @@ checks:
             with a standalone `--disallowedTools Bash` (a `Bash(git:*)` deny alone does not satisfy
             it). Fixture agent-no-bash-deny.yml exits 1; falsified 2026-10-11 by making the
             assertion never fire, that case going from exit 1 to exit 0.
+        - id: R192
+          verdict: Partial
+          reason: >-
+            Static only: `caps` reads the YAML. That the action keeps a repeated flag's last value,
+            so the prepared cap overrides the template's, was read in the action's source at the
+            pinned commit (parse-sdk-options.ts) and never run; that the CLI stops at the cap is
+            unmeasured.
+          evidence: >-
+            check-ci-template.py 1.6 (B183), 90 cases. `caps` - the agent step's claude_args
+            carries `--max-turns N`, N a whole number from 1 to 999999, as its own word ahead of
+            the prepared flags and none after them. Fixtures agent-no-turn-cap.yml,
+            agent-turn-cap-zero.yml, agent-turn-cap-equals.yml (`--max-turns=100`, which the action
+            reads as a flag named max-turns=100) and agent-cap-after-args.yml each exit 1.
+            Falsified 2026-10-31 by the building agent: caps never checked, 84 of 90; the value
+            shape not checked, 88 of 90; a cap after the prepared flags allowed, 89 of 90.
+        - id: R193
+          verdict: Partial
+          reason: >-
+            Static only, as for R192.
+          evidence: >-
+            `caps` - the agent step's claude_args carries `--max-budget-usd A`, A above 0.00 in
+            whole cents with two decimals, ahead of the prepared flags. Fixtures
+            agent-no-spend-cap.yml and agent-spend-cap-no-cents.yml (`20`) exit 1. Falsified with
+            R192's mutations: 84 of 90 and 88 of 90.
         - id: R69
           verdict: Partial
           reason: >-

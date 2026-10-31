@@ -1,0 +1,117 @@
+# Fixture for check-ci-template.py: good.yml with ONE change - the agent's claude_args carries no --max-turns, so the run has no turn cap of the template's own (B183).
+name: fixture
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        type: number
+        required: true
+      permissions:
+        type: choice
+        default: repo-settings
+        options:
+          - repo-settings
+          - edits-only
+permissions:
+  contents: read
+env:
+  PRODUCTIZER_REPO: gitayg/productizer
+  PRODUCTIZER_SHA: "0000000000000000000000000000000000000000"
+  TOOLS: .productizer-tools/plugins/productizer/skills/spec/scripts
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - env:
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            exit 1
+          fi
+          if [ "$PRODUCTIZER_SHA" = "0000000000000000000000000000000000000000" ]; then
+            exit 1
+          fi
+          if ! [[ "$PRODUCTIZER_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          set -euo pipefail
+          echo "issue $ISSUE"
+  generate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PRODUCTIZER_REPO }}
+          ref: ${{ env.PRODUCTIZER_SHA }}
+          path: .productizer-tools
+          persist-credentials: false
+      - id: args
+        run: |
+          set -euo pipefail
+          bash "$TOOLS/build-dispatch.sh" agent-args . --out "$GITHUB_OUTPUT"
+      - run: |
+          set -euo pipefail
+          cp "$TOOLS/build-dispatch.sh" "$RUNNER_TEMP/build-dispatch.sh"
+          bash "$RUNNER_TEMP/build-dispatch.sh" stash-git . --git-dir "$RUNNER_TEMP/productizer-gitdir"
+          rm -rf .productizer-tools
+      - uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        with:
+          github_token: ${{ github.token }}
+          prompt: fixed text
+          claude_args: |
+            --max-budget-usd 20.00
+            ${{ steps.args.outputs.claude_args }}
+            --disallowedTools Bash
+      - env:
+          BASH_ENV: ""
+          ENV: ""
+        run: |
+          set -euo pipefail
+          rm -rf .productizer-run
+          bash --noprofile --norc "$RUNNER_TEMP/build-dispatch.sh" capture . \
+            --git-dir "$RUNNER_TEMP/productizer-gitdir" \
+            --out "$RUNNER_TEMP/productizer.patch"
+  deliver:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PRODUCTIZER_REPO }}
+          ref: ${{ env.PRODUCTIZER_SHA }}
+          path: .productizer-tools
+          persist-credentials: false
+      - run: |
+          set -euo pipefail
+          got="$(git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C .productizer-tools rev-parse HEAD)"
+          if [ "$got" != "$PRODUCTIZER_SHA" ]; then
+            exit 1
+          fi
+          dirty="$(git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C .productizer-tools status --porcelain --untracked-files=all)"
+          if [ -n "$dirty" ]; then
+            exit 1
+          fi
+          cp -R "$TOOLS" "$RUNNER_TEMP/productizer-tools"
+          rm -rf .productizer-tools
+      - run: bash "$RUNNER_TEMP/productizer-tools/build-dispatch.sh" deliver . --protected "$RUNNER_TEMP/productizer-body/protected.txt"
+      - run: echo deliver

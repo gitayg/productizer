@@ -125,6 +125,16 @@ reference lists `advisorModel` for every settings file, so a committed project
 `.claude/settings.json` could set it too - which the CI build's `repo-settings`
 option would hand the agent; not measured here.
 
+## The build caps
+
+`models.build_caps` sits beside `models.advisor` and, like it, reaches only the
+unattended CI build. `max_turns` and `max_budget_usd` become `--max-turns` and
+`--max-budget-usd` on every run; `null` or absent takes the built-in 100 turns
+and 20.00 dollars, so the build is never uncapped, and anything but a positive
+number refuses the run before a model is called (B183). A stage run in your
+session takes no cap from here. The values, why the defaults are what they
+are, and what is not measured are in `references/ci-build.md`, "The caps".
+
 ## Stage 5 takes no model, deliberately
 
 `checks: {model: none}` is not an omission. Stage 5 runs the scripts you

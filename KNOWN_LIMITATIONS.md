@@ -880,3 +880,41 @@ repository on D: would not build. That failure was reproduced with `ntpath`,
 not on Windows. The self-test's A17 hands the two functions Windows paths
 through Python's `ntpath` on this machine. No Windows machine has built a page,
 so any other path the builder reads on Windows is not known to work.
+
+## Added in v4.76.0
+
+### 47 · The caps on the unattended build have never stopped a run
+
+Since v4.76.0 (B183) every run of the CI build template passes the agent
+`--max-turns` and `--max-budget-usd`, from `models.build_caps` or the built-in
+defaults of 100 turns and 20.00 dollars, and the template's agent step carries
+those defaults itself. What holds this up is read, not run:
+
+- **No capped run has happened.** The template has never run on a GitHub
+  runner (limitation 18), so no run has been stopped by either cap. The
+  self-tests assert the lines `prepare` writes and `agent-args` passes, and the
+  `caps` assertion reads the YAML.
+- **The flags are taken from Claude Code's documentation.** Its CLI reference
+  documents both as print mode only: `--max-turns` "Exits with an error when the
+  limit is reached. No limit by default.", and `--max-budget-usd` stops the run
+  at Claude Code's own client-side cost estimate, which "can differ from your
+  bill". `claude --help` in 2.1.295 lists `--max-budget-usd` and not
+  `--max-turns`. The action runs the CLI through the Agent SDK, which documents
+  both as options; that it reaches print mode there was read in the SDK's
+  source, not run.
+- **The spend cap can be passed.** Claude Code checks it after each response,
+  so a run can end above it by the response that crossed it, plus what running
+  subagents spend before they stop.
+- **A capped run opens nothing.** Read in the action's source at the pinned
+  commit: a result that is not a success fails the step, so the `generate` job
+  fails and `deliver` never runs. The work done up to the cap is lost, not
+  delivered as a partial draft.
+- **The prepared caps win by the action's parsing.** The template's own caps
+  come first and the prepared ones follow; the action keeps the last value of a
+  flag that does not accumulate. Read in its source at the pinned commit, not
+  run.
+- **The defaults were chosen, not measured.** 100 turns and 20.00 dollars have
+  not been compared with a real plan or build run; a repository whose runs need
+  more sets `models.build_caps`.
+- **The scheduled prompts get no cap from this.** `templates/scheduled-*.md`
+  run as scheduled agents outside the template, and nothing here bounds them.
