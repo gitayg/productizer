@@ -1044,3 +1044,26 @@ does not do:
   noise. Pagination past 100 runs or 100 jobs per run was never exercised
   against the real API.
 - **Nothing runs it on a schedule** and no band holds its figures.
+
+## Added in v4.81.0
+
+### 52 · A path no check examined is named, but an `always` check counts as examining every path
+
+Since v4.81.0 (B189) `run-checks.sh` 1.6 lists every changed path no triggered
+check holds in its scope under the result's `unexamined`, names up to eight in
+the summary, and refuses the run under `policy.empty_run: refuse`. What it does
+not do:
+
+- **An `always` check, or a check a matched tag triggered, holds the whole
+  change in scope.** So a config with one triggered `always` check leaves
+  nothing unexamined, whatever that check actually opened; that is its own
+  coverage assertion's question. A stricter reading that counts only
+  path-matched scope would read 30 of the 149 paths between v4.75.2 and
+  e3102bb unexamined in this repository - a figure from a model of the
+  runner's scope rule, not from the runner - and is not built.
+- **The summary names the first eight paths** and writes `, ...` after them;
+  no case drives more than two. The full list is in the result file.
+- **Only the plain PASS line is driven** under `policy.empty_run: pass`; the
+  same suffix on the waived and the advisory PASS lines is not.
+- **Readers of the result file were not each checked** for a strict key set.
+  The two new keys are additive and the schema id stays `/1`.

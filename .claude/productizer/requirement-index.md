@@ -249,4 +249,9 @@ marker, because a table left there would be one nothing writes or checks.
 | R221 | event | active | `ci-timing` |
 | R222 | event | active | `ci-timing` |
 | R223 | unwanted | active | `ci-timing` |
+| R224 | unwanted | active | `checks-stage-runner` |
+| R225 | unwanted | active | `checks-stage-runner` |
+| R226 | unwanted | active | `checks-stage-runner` |
+| R227 | unwanted | active | `checks-stage-runner` |
+| R228 | optional | active | `checks-stage-runner` |
 <!-- productizer:requirement-index:end -->

@@ -65,7 +65,9 @@
 #   0  every blocking check passed and covered what it declared
 #   3  REFUSED — a deliberate no. A blocking check failed, was hollow, timed
 #      out, hit an exit code the config does not describe, or its tool is not
-#      installed. Also: nothing triggered, under `policy.empty_run: refuse`
+#      installed. Also: nothing triggered, under `policy.empty_run: refuse`,
+#      and, under the same policy, a changed path no triggered check held in
+#      its scope (B190) - named in the summary and in the result's `unexamined`
 #   2  bad usage — missing arguments, or a config that cannot be parsed or
 #      does not validate
 #   1  crashed — this script could not reach a verdict
@@ -84,6 +86,18 @@
 #   - An exit code the config does not map is a failure, not a pass. Vendors
 #     add exit codes between releases; an unrecognised one means this file no
 #     longer understands the tool.
+#   - A CHANGED PATH NO CHECK EXAMINED IS NOT A CLEAN PATH (B190). Scoping by
+#     `when:` fails in the worst direction: hide a path from every check's
+#     `paths` - a directory nobody declared, a deletion or a rename into one, a
+#     file type nobody named - and let any other path trigger one check, and the
+#     run read PASS with the hidden path named only in `change.files`. Now every
+#     changed path no triggered check held in its scope is listed under the
+#     result's `unexamined`, named in the summary, and refuses the run under
+#     `policy.empty_run: refuse` (the default) - the same policy and the same
+#     reason as a run where nothing triggered, one path at a time. `always` and
+#     a matched tag scope a check to the whole change, so a config with one
+#     triggered `always` check leaves nothing in that list; whether that check
+#     opened every path is its own coverage assertion's question.
 #   - A check that examined nothing FAILS, whatever it printed and whatever it
 #     returned. This is the point of the whole script; see the coverage
 #     section of `references/checks.md`.
@@ -238,7 +252,7 @@ on_exit() {
 trap on_exit EXIT
 
 die_usage() { printf 'run-checks: %s\n' "$1" >&2; exit 2; }
-VERSION="run-checks 1.5"
+VERSION="run-checks 1.6"
 
 # Echoes the git work tree containing $1, or nothing. git's own explanation is
 # kept in GIT_WHY rather than discarded: a fallback that cannot say why it fell
@@ -322,8 +336,23 @@ done
 #   not-a-list    --changed handed a file whose lines are a shebang, a
 #                 comment and a sentence rather than paths             -> 2
 #   deleted       a change set naming a path that is NOT there because
-#                 this change deleted it, which is legitimate and must
-#                 still run                                            -> 0
+#                 this change deleted it: accepted as a path and the
+#                 check runs over what is there, but the deleted path
+#                 is in no check's scope, so since B190 the run names
+#                 it and refuses (it was 0, and that 0 was the defect)  -> 3
+#   hidden-path   B190's canary: a file that IS there, reached by no
+#                 check's `paths`, beside one a check reaches and
+#                 passes - refused, the hidden path named              -> 3
+#   hidden-opted-out
+#                 the same under `policy.empty_run: pass`: passes, and
+#                 the PASS line names the path and the opt-out         -> 0
+#   all-skipped   the hidden file alone, so every check is skipped:
+#                 the empty run, refused under its own message         -> 3
+#   all-skipped-opted-out
+#                 the same under `empty_run: pass`, unchanged          -> 0
+#   hidden-rename a rename between two paths no check reaches beside an
+#                 edit one check reaches, in a git repository built
+#                 here, under --base: both halves named               -> 3
 #   deleted-in-scope
 #                 the same, with the absent path INSIDE a per_file
 #                 check's scope, so a tool would have been handed it   -> 0
@@ -455,6 +484,15 @@ if [ "$MODE" = "selftest" ]; then
   # EVERY path in the one check's scope is gone. An empty list is not a small
   # scan, it is no scan, and the run must not read as a pass.
   printf 'fixture/scope/gone.txt\n' > "$SB/changed-scope-all-gone.txt"
+  # B190 - A PATH HIDDEN FROM EVERY CHECK'S `when:`. It is THERE, so nothing
+  # about it is absent or deleted: it is simply a file no `paths` glob of the
+  # one check reaches, beside a file the check does reach. Before B190 that
+  # run read PASS and named the hidden path nowhere but `change.files`.
+  mkdir -p "$SB/fixture/hidden"
+  printf 'a server change no check was told about\n' > "$SB/fixture/hidden/server.py"
+  printf 'fixture/clean.txt\nfixture/hidden/server.py\n' > "$SB/changed-hidden.txt"
+  # And the same path ALONE: every check skips, which is the empty run.
+  printf 'fixture/hidden/server.py\n' > "$SB/changed-hidden-only.txt"
 
   # PREMISE. The scanned files must really differ in the needle, or `clean` and
   # `refused` are the same case twice and one of them is reported as a
@@ -514,6 +552,20 @@ checks:
       must_cover: all_triggering
       min_covered: 1
 SELFTEST_CFG_PASS
+  # The same config with the one committed opt-out the runner has for a change
+  # no check describes. B190 holds it to the hidden path too, and nothing else.
+  sed 's/^  empty_run: refuse$/  empty_run: pass/' "$SB/checks-pass.yaml" > "$SB/checks-pass-empty-ok.yaml"
+  # PREMISE for the four B190 cases. The opt-out config must differ from the
+  # refusing one in that line and no other, or the pair measures two changes at
+  # once; and the hidden file must be on disk, or the cases are about an absent
+  # path, which `deleted` already is.
+  if [ "$(diff "$SB/checks-pass.yaml" "$SB/checks-pass-empty-ok.yaml" | grep -c '^[<>]')" != 2 ] ||
+     ! grep -qx '  empty_run: pass' "$SB/checks-pass-empty-ok.yaml"; then
+    self_unmeasured "the opt-out config does not differ from checks-pass.yaml in exactly the empty_run line, so the B190 pair would not isolate the policy. Unmeasured, not a pass"
+  fi
+  if [ ! -f "$SB/fixture/hidden/server.py" ]; then
+    self_unmeasured "the hidden path is not on disk, so the B190 cases would be about an absent path rather than one no check's scope reaches. Unmeasured, not a pass"
+  fi
 
   cat > "$SB/checks-fail.yaml" <<'SELFTEST_CFG_FAIL'
 version: 1
@@ -969,6 +1021,36 @@ SELFTEST_CFG_GONE_NO_TOOL
     self_unmeasured "git does not report the rename fixture's two commits as a rename even with detection explicitly on, so there is no rename collapse for the runner to be asked about. Unmeasured, not a pass"
   fi
 
+  # B190 - A HIDDEN RENAME, UNDER --base. Commit 1 holds the file the one check
+  # of checks-pass.yaml reaches and a file it does not; commit 2 edits the first
+  # and RENAMES the second, byte for byte, to another path no glob reaches. The
+  # run triggers the check on the edit, and before B190 it passed with both
+  # halves of the rename in `change.files` and in nothing else. Both halves
+  # must be named: the old path is the deletion side, the new one the addition.
+  fixture_hidden_git() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      git -C "$SB/repo-hidden" -c user.name=selftest -c user.email=selftest@example.invalid \
+      -c commit.gpgsign=false -c init.defaultBranch=main "$@" >> "$SB/repo-hidden-build.log" 2>&1
+  }
+  mkdir -p "$SB/repo-hidden/fixture/hidden"
+  { fixture_hidden_git init -q &&
+    printf 'RUN-CHECKS-SELFTEST-NEEDLE\n' > "$SB/repo-hidden/fixture/clean.txt" &&
+    printf 'a module no check was told about\nmoved byte for byte in the next commit\n' > "$SB/repo-hidden/fixture/hidden/legacy.py" &&
+    fixture_hidden_git add fixture/clean.txt fixture/hidden/legacy.py &&
+    fixture_hidden_git commit -q -m one &&
+    printf 'RUN-CHECKS-SELFTEST-NEEDLE\nand an edit the check does reach\n' > "$SB/repo-hidden/fixture/clean.txt" &&
+    fixture_hidden_git mv fixture/hidden/legacy.py fixture/hidden/renamed.py &&
+    fixture_hidden_git commit -q -a -m two; } ||
+    self_unmeasured "the hidden-rename fixture git repository could not be built, so that case was never driven. Unmeasured, not a pass"
+  # PREMISE: git calls it a rename with detection on, so the case is about a
+  # rename and not a plain delete-and-add the `deleted` cases already reach.
+  if hidden_status="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$SB/repo-hidden" \
+       diff --find-renames --name-status HEAD~1 HEAD 2>> "$SB/repo-hidden-build.log")" \
+       && grep -q '^R.*fixture/hidden/legacy.py.*fixture/hidden/renamed.py' <<<"$hidden_status" \
+       && grep -q '^M.*fixture/clean.txt' <<<"$hidden_status"; then :; else
+    self_unmeasured "git does not report the hidden-rename fixture as one rename beside one edit, so the case would not be about a rename hidden from every check. Unmeasured, not a pass"
+  fi
+
   # A THIRD GIT REPOSITORY, for `{base}`, whose --base ref has MOVED PAST THE
   # FORK POINT. Commit 1 on main; a side branch adds a commit on top of it;
   # main adds commit 2. Asked for `--base side`, the runner diffs against the
@@ -1330,10 +1412,70 @@ SELFTEST_ASSERT_AT
     "--changed handed a file that is not a list of paths: a shebang, a comment and a sentence. Believing it makes every line a changed file and writes a result that reads like a real run" \
     --config "$SB/checks-pass.yaml" --root "$SB" \
     --changed "$SB/changed-not-a-list.txt" --out "$SB/not-a-list.json"
-  self_drive deleted 0 \
-    "a change set naming a path this change deleted: absent, path-shaped and legitimate, so the run still reaches a verdict over what is there" \
+  # Was `-> 0` before B190, and that 0 was the defect: the deleted path is in
+  # no check's scope, so no check examined it. The case still asserts what it
+  # was written for - an absent path is ACCEPTED, never refused as not-a-list
+  # (that is exit 2), and the check runs over what is there - and now also that
+  # the run names the path nothing examined and refuses on it.
+  self_drive deleted 3 \
+    "a change set naming a path this change deleted, in no check's scope: accepted as a path, the check runs over what is there, and the run refuses because nothing examined the deleted one" \
     --config "$SB/checks-pass.yaml" --root "$SB" \
     --changed "$SB/changed-deleted.txt" --out "$SB/deleted.json"
+  self_assert "$SB/deleted.json" status '"pass"' \
+    "the check RAN over the file that is there - the absent path did not stop the run reaching it"
+  self_assert_at "$SB/deleted.json" unexamined '["fixture/deleted-by-this-change.txt"]' \
+    "the deleted path is the one named as examined by nothing"
+  self_assert_err "$SB/deleted.err" "1 of 2 changed path(s) are in no triggered check's scope" \
+    "the refusal is B190's, not the change-set check's"
+
+  # B190 - THE CANARY. A file that is THERE, hidden from the one check's
+  # `when:`, beside a file the check reaches and passes. Before B190: exit 0,
+  # `PASS: every blocking check ran, covered what it declared, and found
+  # nothing.`, and the hidden path named nowhere in the output.
+  self_drive hidden-path 3 \
+    "a changed file no check's paths reach, beside one a check reaches and passes: refused, naming the hidden file, never a PASS over a path nothing examined" \
+    --config "$SB/checks-pass.yaml" --root "$SB" \
+    --changed "$SB/changed-hidden.txt" --out "$SB/hidden.json"
+  self_assert "$SB/hidden.json" status '"pass"' \
+    "the one check ran and passed, so the refusal is not that check's"
+  self_assert_at "$SB/hidden.json" unexamined '["fixture/hidden/server.py"]' \
+    "the result names the hidden path, and only that one"
+  self_assert_at "$SB/hidden.json" counts.unexamined 1 \
+    "and counts it"
+  self_assert_at "$SB/hidden.json" verdict '"refused"' \
+    "the verdict is refused"
+  self_assert_err "$SB/hidden-path.err" "no check examined them: fixture/hidden/server.py" \
+    "the summary NAMES the path rather than only counting it"
+  # The committed opt-out, and only that, makes the same run pass - and the
+  # PASS line still says which path it passed without looking at.
+  self_drive hidden-opted-out 0 \
+    "the same change under policy.empty_run: pass: the deliberate opt-out passes it, and says which path was examined by nothing" \
+    --config "$SB/checks-pass-empty-ok.yaml" --root "$SB" \
+    --changed "$SB/changed-hidden.txt" --out "$SB/hidden-ok.json"
+  self_assert_at "$SB/hidden-ok.json" unexamined '["fixture/hidden/server.py"]' \
+    "the hidden path is recorded whatever the policy made of it"
+  self_assert_err "$SB/hidden-opted-out.err" "examined by nothing: fixture/hidden/server.py. \`policy.empty_run: pass\` is what made that acceptable" \
+    "the PASS line names the path and the opt-out that let it through"
+  # EVERY CHECK SKIPPED. The hidden path alone: nothing triggers, and that is
+  # the empty run, refused under its own message, not under B190's.
+  self_drive all-skipped 3 \
+    "the hidden file alone, so every check is skipped: no check examined anything, which is refused rather than green" \
+    --config "$SB/checks-pass.yaml" --root "$SB" \
+    --changed "$SB/changed-hidden-only.txt" --out "$SB/all-skipped.json"
+  self_assert "$SB/all-skipped.json" status '"not_triggered"' \
+    "the one check was skipped by scoping"
+  self_assert_at "$SB/all-skipped.json" counts.triggered 0 \
+    "nothing triggered"
+  self_assert_at "$SB/all-skipped.json" unexamined '["fixture/hidden/server.py"]' \
+    "and the path nothing examined is still named in the result"
+  self_assert_err "$SB/all-skipped.err" "REFUSED: no declared check was triggered by this change" \
+    "refused as the empty run"
+  self_drive all-skipped-opted-out 0 \
+    "the same under policy.empty_run: pass: the opt-out the empty run always had, unchanged by B190" \
+    --config "$SB/checks-pass-empty-ok.yaml" --root "$SB" \
+    --changed "$SB/changed-hidden-only.txt" --out "$SB/all-skipped-ok.json"
+  self_assert_err "$SB/all-skipped-opted-out.err" "PASS: no declared check was triggered, so nothing was examined" \
+    "and its PASS line says nothing was examined"
 
   # THE CASE THE `deleted` CASE ABOVE SAYS IT DOES NOT REACH. Here the absent
   # path is INSIDE the one check's scope, the check is per_file, and without
@@ -1429,6 +1571,17 @@ SELFTEST_ASSERT_AT
     "and it is not called absent, which in this runner's vocabulary is what a typo looks like"
   self_assert "$SB/git-renamed.json" dropped_source "\"git diff --no-renames --diff-filter=D against $GIT_RENAME_BASE_REF\"" \
     "the label names the query that produced it, rename flag included"
+
+  # B190 under --base: a rename hidden from every check, beside an edit the
+  # one check reaches. Both halves of the rename are named.
+  self_drive hidden-rename 3 \
+    "a rename between two paths no check reaches, beside an edit one check reaches, under --base: refused, naming the old path and the new one" \
+    --config "$SB/checks-pass.yaml" --root "$SB/repo-hidden" \
+    --base HEAD~1 --out "$SB/hidden-rename.json"
+  self_assert "$SB/hidden-rename.json" status '"pass"' \
+    "the check ran over the edit and passed"
+  self_assert_at "$SB/hidden-rename.json" unexamined '["fixture/hidden/legacy.py", "fixture/hidden/renamed.py"]' \
+    "both halves of the rename are named as examined by nothing"
 
   # EVERY path in scope gone. Without the guard the drop leaves an empty list,
   # per_file iterates zero times, and the executor's `worst` stays at its
@@ -2189,7 +2342,8 @@ SELFTEST_CFG_RL_DATA
     grep -qx "$want" <<<"$CODES" || MISSING="$MISSING $want"
   done
   printf '  exit codes reached: %s   documented: 0 1 2 3\n' "$REACHED"
-  printf '  NOT ASSERTED for the first eight cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The five cases from `deleted-in-scope` to `all-gone-and-no-tool` are the exception - twenty-four assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope`, `deleted-under-base` and `renamed-away` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'
+  printf '  NOT ASSERTED for the first seven cases: the content of the result file. Each of those reads the exit CODE only, so a run that reached the right code by the wrong route is invisible and is read off the case output by hand. The five cases from `deleted-in-scope` to `all-gone-and-no-tool` are the exception - twenty-four assertions read their result files, because `all-scope-gone` and `all-gone-and-no-tool` share exit 3 with `refused` and with each other, `deleted-in-scope`, `deleted-under-base` and `renamed-away` share exit 0 with `clean` and with each other, and the code alone cannot tell any of them apart.\n'
+  printf '  NOW ASSERTED (B190): a changed path no triggered check holds in its scope refuses the run under policy.empty_run: refuse and is named. `hidden-path` (a file that is there), `deleted` (a deletion, which was a pass) and `hidden-rename` (a rename under --base, both halves) each pass their one check and still exit 3, reading the path list off the result'"'"'s `unexamined`; `all-skipped` is the empty run, refused under its own message, which no case of this self-test drove before; the two `-opted-out` cases pass under empty_run: pass and say so. NOT ASSERTED: a tag-triggered check, whose whole-change scope is the same code path as `always`; a config with an `always` check, which by this rule leaves nothing unexamined - that is a statement about scope, and whether such a check opened each path is its coverage assertion'"'"'s question, not this one.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` case alone proves only that an absent path was ACCEPTED, because the path it names falls outside the one check scope and no tool was asked to open it. `deleted-in-scope` puts an absent path INSIDE a per_file check scope, where the executor would have substituted it into argv, and five assertions read off the result file: the check ran, the scope is still 2, one path was handed over, the dropped one is named, and it is labelled absent and not deleted.\n'
   printf '  NOW ASSERTED, and this line used to say it was not: the `deleted` LABEL, and the git query that produces it. `deleted-under-base` builds a two-commit git repository, deletes an in-scope path in the second commit and runs under --base HEAD~1; assertions read off the result file that git named both paths, one was handed over, the drop is labelled deleted and not absent, dropped_source names git and the ref, and change.base / change.base_ref record the commit and the ref. The --changed case asserts both are null.\n'
   # <!-- EXAMPLE:BEGIN -->
@@ -4726,9 +4880,51 @@ spec_refused = bool(sc["enforced"] and (sc["status"] != "measured" or spec_unsat
 empty = triggered == 0
 refuse_empty = empty and plan["policy"]["empty_run"] == "refuse"
 
+# B190 - A CHANGED PATH NO TRIGGERED CHECK HAD IN ITS SCOPE WAS EXAMINED BY
+# NOTHING, and a run that passes over it is green about a change it never
+# looked at. `empty_run` caught only the run where NOTHING triggered: hide one
+# path from every check's `when:` - a file no `paths` glob matches, a deletion
+# or a rename into a directory nobody declared, a file type nobody named - and
+# let any other path in the same change trigger one check, and the run read
+# PASS with the hidden path in `change.files` and nowhere else. Measured
+# 2026-11-01 in a scratch repository with two path-scoped checks: an edit to
+# docs/a.md beside an edit to src/server.py, a deletion of src/legacy.py, a
+# rename of src/legacy.py to src/legacy2.py, or a new notes.unknownext each
+# exited 0 under --base and under --changed, and the summary named none of them.
+#
+# THE SAME POLICY AS THE EMPTY RUN, BECAUSE IT IS THE SAME STATEMENT ONE PATH
+# AT A TIME: a change nothing checks is a change the config does not describe,
+# and so is a path nothing checks. `empty_run: refuse` refuses both;
+# `empty_run: pass`, the committed opt-out a repo mid-adoption already has,
+# accepts both and says so. A separate key would allow the one combination
+# that means nothing - a change of hidden paths only passing, and the same
+# hidden paths beside one examined file refusing.
+#
+# "IN SCOPE" IS THE SCOPE THIS RUNNER ALREADY COMPUTES, NOT A NEW ONE. A path
+# trigger scopes a check to what it matched; `always` and a matched tag scope
+# it to the whole change, which is what those triggers declare. So a config
+# with a triggered `always` check leaves nothing unexamined by this rule:
+# scoping cannot skip that check, and whether it really opened every path is
+# its coverage assertion's question, answered per check as `hollow`. A disabled
+# or untriggered check holds nothing in scope. A path a triggered check holds
+# in scope but could not hand over - gone from the tree - is that check's
+# `nothing_to_examine` or its drop line, never this list.
+#
+# A REFUSAL, NOT A FINDING. A finding is a check measuring something wrong in
+# the change; this is the absence of any measurement of these paths, the same
+# class as the empty run and `nothing_to_examine`, so it is exit 3 under its
+# own key and its own line, never a `fail` row.
+_held = set()
+for _c in plan["checks"]:
+    if _c["triggered"]:
+        _held.update(_c["files"])
+unexamined = [f for f in plan["files"] if f not in _held]
+refuse_unexamined = bool(not empty and unexamined
+                         and plan["policy"]["empty_run"] == "refuse")
+
 verdict = "pass"
 code = 0
-if blocking_failures or refuse_empty or spec_refused:
+if blocking_failures or refuse_empty or refuse_unexamined or spec_refused:
     verdict = "refused"
     code = 3
 
@@ -4759,6 +4955,10 @@ doc = {
     "root_source": plan["root_source"],
     "change": {"files": plan["files"], "file_count": len(plan["files"]), "tags": plan["tags"],
                "base": plan["base"], "base_ref": plan["base_ref"]},
+    # B190: every changed path no triggered check held in its scope, whatever
+    # the policy made of it. Additive, like `change.base`, so the schema id
+    # stays `/1`; a reader that predates it sees no key, never an empty list.
+    "unexamined": unexamined,
     "verdict": verdict,
     "exit_code": code,
     "counts": {"declared": len(plan["checks"]), "triggered": triggered,
@@ -4771,6 +4971,7 @@ doc = {
                "advisory_failures": len(advisory_failures),
                "disabled": sum(1 for r in results if r["status"] == "disabled"),
                "not_triggered": sum(1 for r in results if r["status"] == "not_triggered"),
+               "unexamined": len(unexamined),
                "spec_units_unsatisfied": (len(spec_unsatisfied)
                                           if sc["status"] == "measured" else None)},
     "spec_coverage": spec_report,
@@ -4917,15 +5118,32 @@ if refuse_empty:
     e.write("REFUSED: no declared check was triggered by this change. "
             "That is a gap in the config, not a clean change. Set `policy.empty_run: pass` "
             "only if you mean it.\n")
+# B190 - named, never only counted: the hidden path is the thing to go and look
+# at, and a number sends nobody anywhere. The full list is in the result file.
+_unx_named = "%s%s" % (", ".join(unexamined[:8]), ", ..." if len(unexamined) > 8 else "")
+if refuse_unexamined:
+    e.write("REFUSED: %d of %d changed path(s) are in no triggered check's scope, so no check "
+            "examined them: %s. A path no `when:` reaches is part of the change the config does "
+            "not describe, not a clean part of it. Declare a check whose `paths` match it, or set "
+            "`policy.empty_run: pass` only if you mean it.\n"
+            % (len(unexamined), len(plan["files"]), _unx_named))
 if advisory_failures:
     e.write("advisory (does not block): %s\n"
             % ", ".join("%s (%s)" % (r["id"], r["status"]) for r in advisory_failures))
 if blocking_failures:
     e.write("REFUSED: %s\n" % ", ".join("%s (%s)" % (r["id"], r["status"]) for r in blocking_failures))
-elif not refuse_empty and not spec_refused:
+elif not refuse_empty and not refuse_unexamined and not spec_refused:
     # Say what actually passed. "PASS" over a run that examined nothing, or one
     # with an unread advisory failure in it, is the same hollow green this
     # whole stage exists to make visible.
+    #
+    # B190: under `empty_run: pass` a run with hidden paths still passes, and
+    # every PASS line below then says which paths it passed without looking at.
+    _unx_tail = ""
+    if unexamined and not empty:
+        _unx_tail = (" %d of %d changed path(s) were in no triggered check's scope and were "
+                     "examined by nothing: %s. `policy.empty_run: pass` is what made that "
+                     "acceptable." % (len(unexamined), len(plan["files"]), _unx_named))
     if empty:
         e.write("PASS: no declared check was triggered, so nothing was examined. "
                 "`policy.empty_run: pass` is what made that acceptable.\n")
@@ -4935,15 +5153,17 @@ elif not refuse_empty and not spec_refused:
         # this whole stage exists to refuse.
         e.write("PASS: %d blocking check(s) FAILED and are waived by a person, not by a "
                 "measurement - each is still recorded `fail` above%s. Everything else ran and "
-                "covered what it declared.\n"
+                "covered what it declared.%s\n"
                 % (len(waived),
                    ", and %d advisory check(s) did not pass" % len(advisory_failures)
-                   if advisory_failures else ""))
+                   if advisory_failures else "", _unx_tail))
     elif advisory_failures:
         e.write("PASS: every blocking check ran and covered what it declared. "
-                "%d advisory check(s) did not — read them above.\n" % len(advisory_failures))
+                "%d advisory check(s) did not — read them above.%s\n"
+                % (len(advisory_failures), _unx_tail))
     else:
-        e.write("PASS: every blocking check ran, covered what it declared, and found nothing.\n")
+        e.write("PASS: every blocking check ran, covered what it declared, and found nothing.%s\n"
+                % _unx_tail)
 # Every relative path in the config resolved against this directory, and the
 # result file landed under it. Naming it is what makes a wrong one visible.
 e.write("config: %s (%s)\n" % (plan["config"], plan["config_source"]))

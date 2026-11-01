@@ -4616,6 +4616,47 @@ checks:
             batch, exit 0, handed over as `./--b165-dash.txt` with an ordinary path beside it
             unchanged, and coverage matches both. Falsified 2026-10-27 with the prefix removed:
             the case exit 3, grep refusing the name as an option.
+        - id: R224
+          verdict: Covered
+          evidence: >-
+            run-checks.sh 1.6 (B189), 141 cases, 265 result-file assertions. `hidden-path` (a file no
+            `paths` glob reaches, beside one the check reaches and passes), `deleted` (a deletion in
+            no check's scope, which exited 0 before), `hidden-rename` (a rename between two unreached
+            paths under --base, both halves) and `all-skipped` each read the path list off the
+            result's `unexamined`; `counts.unexamined` is 1 on `hidden-path`. Falsified 2026-11-01
+            with the list computed empty: 3 cases and 10 assertions red (re-measured at
+            integration: 13 not held).
+        - id: R225
+          verdict: Partial
+          reason: >-
+            The summary names the first eight paths and writes `, ...` after them. No case has more
+            than two hidden paths, so the cut is not asserted; the full list is in the result.
+          evidence: >-
+            `hidden-path` and `deleted` read the REFUSED line naming the path off stderr. Falsified
+            2026-11-01 with the refusal switched off: both stderr assertions red.
+        - id: R226
+          verdict: Covered
+          evidence: >-
+            `hidden-path`, `deleted` and `hidden-rename` exit 3 while their one check reads `pass`,
+            so the refusal is not a check's; `hidden-opted-out`, the same change under
+            `empty_run: pass`, exits 0. Falsified 2026-11-01 with the refusal switched off: 3
+            cases and 3 assertions red (re-measured at integration: 6 not held, the same six).
+        - id: R227
+          verdict: Covered
+          evidence: >-
+            `all-skipped`: the hidden path alone, the one check `not_triggered`, `counts.triggered`
+            0, exit 3 with the empty-run message; `all-skipped-opted-out` exits 0. No case drove the
+            empty run before B189. Falsified 2026-11-01 with `refuse_empty = False`: 1 of 141 cases
+            and 1 of 265 assertions red.
+        - id: R228
+          verdict: Partial
+          reason: >-
+            Only the plain PASS line is driven. The same suffix on the waived and the advisory PASS
+            lines is not, and neither is the eight-path cut.
+          evidence: >-
+            `hidden-opted-out` reads the PASS line's `examined by nothing:
+            fixture/hidden/server.py.` and the `policy.empty_run: pass` it names off stderr. Falsified
+            2026-11-01 with the list computed empty: that assertion red.
     limitations:
       - It is the runner's self-test, not this repository's run. That the real suite's refusals print their tails in CI is seen in the workflow log, not asserted here.
       - A file a tool runs that no argument names - a test runner discovering tests, a config the tool finds by itself (`.semgrepignore`, `.npmrc`, `conftest.py`), a git alias - is not gated. The data-only list rests on the tools' `--help`, read 2026-10-13.

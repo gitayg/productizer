@@ -745,7 +745,7 @@ stage everybody learns to ignore.
 
 ### How the runner fails closed
 
-Fifteen ways a check can look green without being green, and what happens
+Sixteen ways a check can look green without being green, and what happens
 instead:
 
 | Situation | Naive result | Here |
@@ -756,6 +756,7 @@ instead:
 | the tool returns an exit code nobody mapped | treated as success | `unmapped_exit`, the check fails |
 | the tool exits 0 having examined nothing | `PASS` | `hollow`, the check fails |
 | no declared check matches the change | green, no checks ran | refused, unless `policy.empty_run: pass` |
+| a changed path no check's `when:` reaches, beside one that does | green, the hidden path named nowhere but `change.files` | refused and named under `unexamined`, unless `policy.empty_run: pass` |
 | a check quietly shrinks what it claims to cover | green, the check chose its own denominator | the unit is `Missing`, the run refuses |
 | the spec cannot be read, or holds no requirements | "0 units, all covered" | `UNMEASURED`, `units_total: null`, refused |
 | a disabled or skipped check claims a requirement | the requirement reads as covered | the claim is voided, the unit is `Missing` |
@@ -779,11 +780,23 @@ Observed, all in one run:
              -> exited 0 but examined 0, which is below the declared minimum of 1. A check that examined nothing is a failure, not a pass.
 ```
 
-`policy.empty_run: refuse` is the least obvious of the fifteen and the one that
+`policy.empty_run: refuse` is the least obvious of the sixteen and the one that
 catches the most. A change nothing checks is not a clean change; it is a change
 the config does not describe. The `pass` setting exists so a repo mid-adoption
 can opt out of that deliberately, in a committed line someone approved, rather
 than by accident.
+
+Since B189 the same policy holds one path at a time. A path no triggered
+check holds in its scope - a directory nobody declared, a deletion or a
+rename into one, a file type nobody named - is listed under the result's
+`unexamined`, named in the summary, and refuses the run under `refuse`, even
+when other paths in the change triggered checks that passed. Before, hiding
+one path from every `paths` glob while another path triggered any check read
+PASS. `always` and a matched tag scope a check to the whole change, so a
+config with one triggered `always` check leaves nothing in that list; whether
+such a check really opened each path is its own coverage assertion's
+question, reported as `hollow`, not this one. `pass` accepts both, and the
+PASS line names the paths it passed without looking at.
 
 One more, which the runner reports but cannot fix: a check whose exit code says
 *findings* and whose coverage says *nothing examined*. Fixing the finding would

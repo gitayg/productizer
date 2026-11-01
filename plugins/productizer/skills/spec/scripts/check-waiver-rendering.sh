@@ -103,7 +103,7 @@
 # suppresses stderr.
 set -euo pipefail
 
-VERSION="check-waiver-rendering 1.0"
+VERSION="check-waiver-rendering 1.1"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$(dirname "$HERE")"
@@ -630,8 +630,20 @@ for spec in $CASES; do
   # nine cases, so the status is captured rather than allowed to kill the
   # script: under `set -e` an uncaught 3 would end the run mid-case, printing
   # an exit code and no reason, with the remaining cases never attempted.
+  #
+  # EACH CASE IS HANDED ONLY THE FILE ITS ONE CHECK SCOPES (B189). Every config
+  # declares one check whose `paths` reach one of the two fixture files, so the
+  # whole two-file changed.txt left the other file in no triggered check's
+  # scope, and run-checks.sh 1.6 refuses a run over a path nothing examined:
+  # `waived` and `passing` read 5/8 and 6/8 on that refusal, not on a waiver.
+  # The line is taken from changed.txt, so the fixture stays the one list.
+  want=fixture/finding.txt
+  [ "$label" = passing ] && want=fixture/clean.txt
+  grep -qx "$want" "$SANDBOX/changed.txt" ||
+    die_unmeasured "$label: changed.txt does not name $want, the one file this case's check scopes; unmeasured, not a pass"
+  printf '%s\n' "$want" > "$TMP/$label.changed"
   bash "$RUNNER" --config "$SANDBOX/$cfg" --root "$SANDBOX" \
-    --changed "$SANDBOX/changed.txt" --out "$TMP/$label.json" \
+    --changed "$TMP/$label.changed" --out "$TMP/$label.json" \
     > "$TMP/$label.out" 2> "$TMP/$label.err" || RC=$?
 
   ARC=0

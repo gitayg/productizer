@@ -100,6 +100,8 @@ policy:
   # A change that triggers no check at all is not a passing change: it means
   # this file does not describe the repo. `refuse` says so out loud. `pass`
   # hides it, and is here only so a repo mid-adoption can opt in deliberately.
+  # The same holds per path: a changed path no triggered check's scope reaches
+  # refuses the run under `refuse` and is named under the result's `unexamined`.
   empty_run: refuse
 
   # REPOSITORY-DECLARED CHECK TOOLS, shipped OFF. While the line below stays a

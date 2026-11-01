@@ -822,7 +822,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**190 requirements are active**, and they are the whole of what has been
+**195 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -1060,7 +1060,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Ninety-two defences, written as `If … then`
+**When something goes wrong.** Ninety-six defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1338,8 +1338,17 @@ because a designed path and a defended one are not the same thing:
   or one of its non-skipped steps lacks a timestamp or has them out of order,
   then the lifecycle shall count that run or job as unmeasured with its
   reason, and never as zero.
+- **R224** — If a changed path is in the scope of no triggered check, then the
+  lifecycle shall record that path in the checks result as unexamined.
+- **R225** — If a changed path is in the scope of no triggered check, then the
+  lifecycle shall name that path in the checks stage's summary.
+- **R226** — If a change that triggers a check holds a path in the scope of no
+  triggered check, then the lifecycle shall refuse the checks run unless
+  `policy.empty_run` is `pass`.
+- **R227** — If a change triggers no check, then the lifecycle shall refuse
+  the checks run unless `policy.empty_run` is `pass`.
 
-**Only where the feature is present.** Twelve requirements apply only to a
+**Only where the feature is present.** Thirteen requirements apply only to a
 build that includes the feature:
 
 - **R22** — Where a repository declares its own check tools, the lifecycle
@@ -1378,6 +1387,9 @@ build that includes the feature:
   only when the record names the current commit, a tracked tree unchanged from
   that commit, the tool file's current content and a flag the tool dispatches
   on.
+- **R228** — Where `policy.empty_run` is `pass`, the lifecycle shall name in
+  the checks stage's pass line every changed path that no triggered check held
+  in its scope.
 
 Every id above is permanent. A plan, a test or a PR title naming `R1` will
 still mean this sentence in two years, which is why ids are never reused and
