@@ -52,7 +52,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.81.0"`.
+`plugin.json` sets `"version": "4.82.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -152,6 +152,43 @@ templates/<name>                         the plugin's default
 Commit the ones that differ and the whole repo gets them, the same way
 `CLAUDE.md` is the repo's. Override one file and inherit the rest; a plugin
 update never overwrites them.
+
+### A pre-push hook for the cheap checks
+
+`plugins/productizer/skills/spec/scripts/install-hooks.sh --repo .` installs a
+git pre-push hook that runs the checks listed by id under `pre_push.checks` in
+`.claude/productizer/config.json` over the files a push carries, and stops the
+push on a finding. A missing or empty list stops the push too, saying so.
+`--uninstall` removes it, an existing hook of your own is never replaced, and
+`git push --no-verify` bypasses it; CI still runs every check
+(`references/checks.md`, The pre-push hook).
+
+The checks come from the merge base with the clone's trust anchor -
+`refs/remotes/origin/main`, else `refs/remotes/origin/master`, or the ref you
+name with `git config --local productizer.prePush.trustedRef refs/remotes/<remote>/<branch>`
+(`install-hooks.sh --trusted-ref REF`) - never from the commits being pushed,
+and never from the remote being pushed to: a push that changes `checks.yaml`
+or the `pre_push` block stops, and so does a push with no anchor to trust, a
+new repository's first push included. A check that runs a script from the repository is refused until
+you opt in for your own clone with
+`git config --local productizer.prePush.allowRepoLocalTools true`
+(`install-hooks.sh --allow-repo-local-tools` sets it and prints the line), and
+`productizer.prePush.trustPushedConfig` lets a changed config through. None of
+them is set by default, and a committed file cannot set any. The hook runs
+copies of its scripts kept under `.git`, checked by sha256 before each push,
+so re-run the installer after a plugin update. With repository scripts
+allowed, a push that changes one of them is refused unless you trust pushed
+configs.
+
+So is a push that changes a file common tools read as settings or plugin code
+(`.shellcheckrc`, `pyproject.toml`, `eslint.config.*`, `package.json`,
+`Makefile`, `.envrc` and more, at any depth, in any case). That list can never
+be complete: a tool that loads code from a file not on it is not isolated.
+The hook is meant for your own commits. Push someone else's branch with
+`git push --no-verify`; CI still checks everything. In this repository, where
+nearly every commit touches `checks.yaml` or the scripts the checks run, the
+hook stops nearly every push unless you set `trustPushedConfig` for your
+clone.
 
 ## Consumers: enable auto-update
 

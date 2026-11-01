@@ -1,0 +1,191 @@
+#!/bin/sh
+# productizer-pre-push-hook 1.2 - written by install-hooks.sh; this line is how
+#                                 it recognises its own file. Do not edit it out.
+#
+# A git pre-push hook. It runs the declared checks listed under
+# `pre_push.checks` in `.claude/productizer/config.json` over the files the
+# push carries, and stops the push when one of them finds something. The
+# checks are the cheap ones -
+# a type or lint error found here costs seconds; the same error found by CI
+# costs the whole CI run.
+#
+# Install, update or remove it with install-hooks.sh, never by hand:
+#
+#     install-hooks.sh --repo .              # install, or update our own copy
+#     install-hooks.sh --repo . --uninstall  # remove our own copy, nothing else
+#
+# CHAINING. A hook this file did not write is never overwritten. Move yours to
+# `pre-push.chained` in the same hooks directory and install this one: it runs
+# `pre-push.chained` first, with the same arguments and the same stdin, and stops
+# the push if that one does.
+#
+# THE BYPASS, STATED. `git push --no-verify` skips every pre-push hook,
+# this one included. A hook is a local convenience that cannot be forgotten;
+# it is not a gate. The gate is CI, which runs every declared check.
+#
+# WHAT RUNS, AND FROM WHERE. Only copies install-hooks.sh made of the checker,
+# the checks runner and its helper, in a directory under the git directory
+# (`git rev-parse --git-path productizer-pre-push`), which no checkout touches
+# and nothing tracks. Every file the MANIFEST there names is compared with its
+# sha256 before anything runs, and the MANIFEST with the sha256 recorded
+# below. A missing or changed file STOPS the push: re-run install-hooks.sh
+# (a plugin update changes the scripts), or push with --no-verify knowing
+# nothing was checked. The scripts in the plugin, which may live inside the
+# repository being pushed, are never run; nor is any checker the repository
+# holds.
+#
+# $PRODUCTIZER_PRE_PUSH_CHECKS, when set, overrides that: the checker it names
+# runs, with the runner beside it. It is trusted because you set it in your own
+# environment, not the repository; nothing it names is compared.
+#
+# THIS FILE IS /bin/sh, and it rebuilds PATH before running anything: git runs
+# a hook from the repository's top level, so an empty or relative PATH entry,
+# or one inside the work tree, would let the checked-out tree supply `bash`,
+# `git` or `grep`. Each entry is resolved to its physical directory and
+# compared with the work tree's, always without case - so a symlink, a `..`
+# detour or a case variant reaching it is dropped too (a false match only
+# drops an extra entry; a missed fold would let one into the work tree) -
+# and an entry that does not resolve is dropped. BASH_ENV and ENV are unset.
+set -eu
+
+INSTALLED_DIR='@@PRE_PUSH_DIR@@'
+MANIFEST_SHA256='@@PRE_PUSH_MANIFEST_SHA256@@'
+
+note() { printf 'pre-push: %s\n' "$1" >&2; }
+
+# `tr` by absolute path, never through PATH: folding case is part of cleaning
+# PATH, so it cannot use what it cleans.
+TR=""
+for t in /usr/bin/tr /bin/tr; do
+  if [ -x "$t" ]; then TR="$t"; break; fi
+done
+if [ -z "$TR" ]; then
+  printf 'pre-push: neither /usr/bin/tr nor /bin/tr is here, so PATH cannot be compared with the work tree without case. Stopping the push.\n' >&2
+  exit 1
+fi
+lower() { printf '%s' "$1" | "$TR" '[:upper:]' '[:lower:]'; }
+
+# top_by_builtins: the physical work tree holding the current directory - the
+# nearest directory upward with a `.git` - found with builtins alone, so no
+# PATH lookup happens before PATH is clean. git runs a hook from the top level.
+top_by_builtins() {
+  tb_d="$(pwd -P)"
+  while :; do
+    if [ -e "$tb_d/.git" ]; then printf '%s' "$tb_d"; return 0; fi
+    [ -n "$tb_d" ] && [ "$tb_d" != / ] || return 1
+    tb_d="${tb_d%/*}"
+  done
+}
+
+# keep_path [TOP_PHYSICAL]: PATH with every empty, relative or unresolvable
+# entry dropped, and, when TOP is given, every entry whose physical directory
+# is TOP or inside it, compared without case. Builtins and the absolute `tr`.
+keep_path() {
+  kp_out=""
+  kp_rest="$PATH:"
+  while [ -n "$kp_rest" ]; do
+    kp_entry="${kp_rest%%:*}"
+    kp_rest="${kp_rest#*:}"
+    case "$kp_entry" in
+      /*) ;;
+      *) continue ;;
+    esac
+    if ! kp_real="$(cd "$kp_entry" 2>&1 && pwd -P)"; then
+      continue
+    fi
+    if [ -n "${1:-}" ]; then
+      kp_cmp="$(lower "$kp_real")"
+      kp_top="$(lower "$1")"
+      case "$kp_cmp" in "$kp_top" | "$kp_top"/*) continue ;; esac
+    fi
+    kp_out="${kp_out:+$kp_out:}$kp_entry"
+  done
+  printf '%s' "$kp_out"
+}
+TOP_FIRST=""
+TOP_FIRST="$(top_by_builtins)" || TOP_FIRST=""
+PATH="$(keep_path "$TOP_FIRST")"
+export PATH
+unset BASH_ENV ENV
+if TOPLEVEL="$(git rev-parse --show-toplevel)" && TOP_REAL="$(cd "$TOPLEVEL" 2>&1 && pwd -P)"; then
+  PATH="$(keep_path "$TOP_REAL")"
+  export PATH
+fi
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# git hands the ref lines on stdin once. Both the chained hook and the checker
+# need them, so they are kept in a file for the life of this hook.
+STDIN_COPY="$(mktemp "${TMPDIR:-/tmp}/productizer-pre-push.XXXXXX")"
+trap 'rm -f "$STDIN_COPY"' EXIT HUP INT TERM
+cat > "$STDIN_COPY"
+
+if [ -e "$HOOK_DIR/pre-push.chained" ]; then
+  if [ ! -x "$HOOK_DIR/pre-push.chained" ]; then
+    note "$HOOK_DIR/pre-push.chained exists and is not executable, so the hook it holds cannot run. Stopping the push rather than skipping it: chmod +x it, or remove it."
+    exit 1
+  fi
+  local_rc=0
+  "$HOOK_DIR/pre-push.chained" "$@" < "$STDIN_COPY" || local_rc=$?
+  if [ "$local_rc" -ne 0 ]; then
+    note "the chained hook pre-push.chained stopped the push (exit $local_rc)."
+    exit "$local_rc"
+  fi
+fi
+
+# sha256_of FILE -> the hex digest, or nothing. install-hooks.sh computes it
+# the same way. An empty result never equals a recorded digest.
+sha256_of() {
+  if command -v sha256sum >/dev/null; then
+    sha256sum "$1" | awk '{ print $1 }'
+  elif command -v shasum >/dev/null; then
+    shasum -a 256 "$1" | awk '{ print $1 }'
+  fi
+}
+
+REINSTALL="Re-run install-hooks.sh if the change is a plugin update you trust, or push with --no-verify knowing nothing was checked."
+
+if [ -n "${PRODUCTIZER_PRE_PUSH_CHECKS:-}" ]; then
+  CHECKER="$PRODUCTIZER_PRE_PUSH_CHECKS"
+  if [ ! -f "$CHECKER" ] || [ ! -x "$CHECKER" ]; then
+    note "\$PRODUCTIZER_PRE_PUSH_CHECKS is '$CHECKER', which is not an executable file. Stopping the push rather than passing it unchecked. Unset it to use the copies install-hooks.sh made."
+    exit 1
+  fi
+  note "running \$PRODUCTIZER_PRE_PUSH_CHECKS ($CHECKER), trusted because you set it; nothing it runs is compared."
+else
+  MANIFEST="$INSTALLED_DIR/MANIFEST"
+  if [ ! -f "$MANIFEST" ]; then
+    note "the copies install-hooks.sh made are not at '$INSTALLED_DIR' (no MANIFEST). Stopping the push rather than passing it unchecked, and never running a checker the repository holds. Re-run install-hooks.sh, or push with --no-verify knowing nothing was checked."
+    exit 1
+  fi
+  if [ "$(sha256_of "$MANIFEST")" != "$MANIFEST_SHA256" ]; then
+    note "'$MANIFEST' has changed since install-hooks.sh wrote it, or cannot be hashed (neither sha256sum nor shasum). Stopping the push. $REINSTALL"
+    exit 1
+  fi
+  HAS_CHECKER=0
+  while read -r want name; do
+    case "$name" in
+      "" | */* | .*)
+        note "'$MANIFEST' names '$name', which is not a plain file name. Stopping the push. $REINSTALL"
+        exit 1 ;;
+    esac
+    if [ ! -f "$INSTALLED_DIR/$name" ]; then
+      note "'$INSTALLED_DIR/$name', a file the hook runs, is missing. Stopping the push. $REINSTALL"
+      exit 1
+    fi
+    if [ "$(sha256_of "$INSTALLED_DIR/$name")" != "$want" ]; then
+      note "'$INSTALLED_DIR/$name' has changed since install-hooks.sh recorded it (sha256 $(sha256_of "$INSTALLED_DIR/$name"), recorded $want). Stopping the push rather than running code nobody installed. $REINSTALL"
+      exit 1
+    fi
+    [ "$name" != pre-push-checks.sh ] || HAS_CHECKER=1
+  done < "$MANIFEST"
+  CHECKER="$INSTALLED_DIR/pre-push-checks.sh"
+  if [ "$HAS_CHECKER" -ne 1 ] || [ ! -x "$CHECKER" ]; then
+    note "'$MANIFEST' does not name pre-push-checks.sh, or '$CHECKER' is not executable. Stopping the push. $REINSTALL"
+    exit 1
+  fi
+fi
+
+checker_rc=0
+"$CHECKER" --remote "${1:-origin}" < "$STDIN_COPY" || checker_rc=$?
+exit "$checker_rc"

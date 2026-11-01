@@ -1067,3 +1067,90 @@ not do:
   same suffix on the waived and the advisory PASS lines is not.
 - **Readers of the result file were not each checked** for a strict key set.
   The two new keys are additive and the schema id stays `/1`.
+
+## Added in v4.82.0
+
+### 53 · The pre-push hook is a convenience, and a large push is not fast
+
+Since v4.82.0 (B190) `scripts/install-hooks.sh` installs a git pre-push hook
+that runs the checks listed under `pre_push.checks` in `config.json` over the
+files a push carries (`references/checks.md`, The pre-push hook). What it does
+not do:
+
+- **`git push --no-verify` skips it.** Every refusal says so; CI is the gate.
+- **A large push is not fast.** Measured through the installed hook in a
+  scratch clone of this repository at load 14 to 24: one or two files 2.0-4.3s,
+  a 55-file change holding 40 shell scripts 27.5-29.1s, because shellcheck runs
+  once per file for two checks and the runner runs checks one after another.
+- **Untracked files are read from the work tree.** Only tracked files are
+  compared with the pushed commit.
+- **The list and the commands are the trusted commit's**, the merge base with
+  the clone's trust anchor - `productizer.prePush.trustedRef`, else
+  `refs/remotes/origin/main`, else `refs/remotes/origin/master` - never the
+  pushed commit's. A change to `checks.yaml` or to the `pre_push` block is
+  refused until it reaches the anchor, unless the clone sets
+  `git config --local productizer.prePush.trustPushedConfig true` - which then
+  takes every pushed config whole, a fetched one included. A list edited and
+  not committed is never what runs.
+- **Trust is the anchor branch.** A config change that reached it, by
+  whatever review that branch has, is trusted from then on, and nothing else
+  is. If `origin` is itself a fork someone else controls, `origin/main` is
+  theirs: name the branch you trust with `trustedRef`. With no anchor, or no
+  history shared with it, every push is refused until the clone sets
+  `trustedRef` or `trustPushedConfig` - a first push of a new repository
+  included (or push that one with `--no-verify`; the `origin/main` it creates
+  is the anchor from the next push on). A stale anchor refuses more, never
+  less.
+- **The new-branch diff base still follows the push target.** Which files a
+  new branch is checked over comes from the remote's own default branch,
+  `<remote>/HEAD` included (R230). A fork can narrow that file set; it cannot
+  choose the commands, which come from the anchor.
+- **Repo-local tools are off in the hook** unless the clone sets
+  `git config --local productizer.prePush.allowRepoLocalTools true`, so in a
+  repository whose checks run its own scripts - this one - the hook refuses
+  every push until that is set. The refusal prints the line.
+- **A repo-local tool is compared, not isolated.** With
+  `allowRepoLocalTools` a listed check's repository script runs from the
+  pushed tree; the push stops if that script, or anything under its
+  directory (for a top-level tool or one run as a module, any top-level
+  file), differs from the trusted commit, read through the runner's own argv
+  classification; a form it cannot map to files stops the push. A file it sources or imports from elsewhere in the
+  repository is not compared. Running the trusted tool over the pushed
+  files would need `run-checks.sh` to take programs and data from two roots.
+- **Tools read config from the pushed tree.** A system tool a check runs
+  (shellcheck reads `.shellcheckrc`) takes its settings from the tree it
+  checks: the pushed commit can change a verdict, not what runs.
+- **The foreign-config list can never be complete.** A push changing a file
+  on `CONFIG_DENY` in `pre-push-checks.sh` is refused, but a tool that loads
+  settings or code from a file not on that list is not isolated, and nor is an
+  allowed repository script that sources a helper the list does not name. The
+  hook is for your own commits: push someone else's branch with
+  `git push --no-verify`, and CI still checks everything.
+- **On this repository the hook stops nearly every push without
+  `trustPushedConfig`.** Measured, each commit pushed alone onto its parent:
+  all 7 of v4.75.2..b26d750 are stopped - each changes `checks.yaml`, and each
+  touches a directory the listed checks name - and 46 of 47 since v4.60.0. The
+  config list alone stops 0 of 7, and 1 of 47.
+- **PATH cleaning needs `/usr/bin/tr` or `/bin/tr`** to compare without case;
+  with neither, the hook stops the push. Every entry is compared without
+  case, so on a case-sensitive disk an entry differing from the work tree
+  only in case is dropped too - harmless, and fail closed.
+- **A manual run's own interpreter comes from your PATH.** The hook is
+  `/bin/sh` and cleans PATH first; run by hand, `pre-push-checks.sh`'s
+  `#!/usr/bin/env bash` is resolved before it can clean anything - measured,
+  with `.` first on PATH the work tree's `bash` ran it.
+- **git runs your own configured code.** Filters, diff drivers and hooks are
+  defined in your git config; the hook reads attributes from the trusted
+  commit and gives its temporary worktree no hooks, but `core.fsmonitor`, a
+  filter the trusted attributes select (git-lfs, say) and your other config
+  run as configured. Needs git 2.40 or later (`--attr-source`).
+- **What runs is the installed copy.** The hook runs copies of
+  `pre-push-checks.sh`, `run-checks.sh` and `argv-classify.py` under the git
+  directory and refuses a changed or missing one; `$PRODUCTIZER_PRE_PUSH_CHECKS`
+  is trusted as set, and python3, PyYAML and the system tools are your
+  installs.
+- **Not driven by a case:** a tag push, sha256 repositories, a remote with no
+  HEAD symref but a `master`, an opt-in in the
+  system config or a linked worktree's `config.worktree`, a bare repository or
+  a shared absolute `core.hooksPath` for the installer, git older than 2.40,
+  and `GIT_ATTR_SOURCE` reaching a check's own git call.

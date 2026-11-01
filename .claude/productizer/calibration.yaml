@@ -562,6 +562,14 @@ checks:
     status: uncalibrated
     reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.80.0 change replayed at the window's head, which is not merged history. ci-timing.py did not exist before v4.80.0, so no past commit carries it"
     measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-11-01", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.80.0 change", command: "measure-check-overfire.sh --check ci-timing --commits 30 --history clone"}
+  - id: pre-push-hook
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.82.0 change replayed at the window's head, which is not merged history. pre-push-checks.sh did not exist before v4.82.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-11-01", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.82.0 change", command: "measure-check-overfire.sh --check pre-push-hook --commits 30 --history clone"}
+  - id: hook-installer
+    status: uncalibrated
+    reason: "measured nothing over merged history - it triggered on 30 of the 30 commits: 29 tool absent at that commit, and the one verdict (pass) was on the uncommitted v4.82.0 change replayed at the window's head, which is not merged history. install-hooks.sh did not exist before v4.82.0, so no past commit carries it"
+    measured_by: {tool: measure-check-overfire.sh, version: "1.1", date: "2026-11-01", config: "checks.yaml in a scratch clone at a throwaway commit holding the v4.82.0 change", command: "measure-check-overfire.sh --check hook-installer --commits 30 --history clone"}
   - id: approval-rules
     status: measured
     window: {first: 547684e9cef46cdd05bc5b5adbab1bfab4e887f5, last: 7e21e09a32674357200bde8aa997914ec7704b5c, commits: 29, history: clone}

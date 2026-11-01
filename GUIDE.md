@@ -822,7 +822,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**195 requirements are active**, and they are the whole of what has been
+**220 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -893,7 +893,7 @@ happening:
   fetch the repository, set up a runtime or cache, or a name that says it
   installs or caches, together with the patterns the person adds.
 
-**When something arrives.** Fifty-one things happen on a discrete trigger:
+**When something arrives.** Fifty-seven things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -1032,6 +1032,22 @@ happening:
 - **R222** — When a step's durations over at least 5 timed runs split into two
   modes, the higher mode's median at least 3 times the lower mode's and each
   mode holding at least 20% of the runs, the lifecycle shall flag that step.
+- **R230** — When a pushed ref is new on the remote, the lifecycle shall diff
+  it from the commit it shares with the remote's default branch and name that
+  branch in its output.
+- **R231** — When a pushed ref is a deletion, the lifecycle shall let it
+  through, stating that a deletion holds no file to read.
+- **R232** — When several refs are pushed at once, the lifecycle shall run the
+  pre-push hook over each of them, naming the ref a finding was made on.
+- **R233** — When the pushed commit is not HEAD, or a tracked file differs
+  from it, the lifecycle shall read the pushed commit's files, not the work
+  tree's.
+- **R235** — When the lifecycle installs the pre-push hook, the lifecycle
+  shall place it where git runs pre-push hooks for that repository, honouring
+  `core.hooksPath`.
+- **R237** — When the hook installer is run again, run with `--dry-run`, or
+  run with `--uninstall`, the lifecycle shall leave an up-to-date own hook
+  unchanged, write no file, or remove only its own hook, respectively.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
@@ -1060,8 +1076,8 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Ninety-six defences, written as `If … then`
-because a designed path and a defended one are not the same thing:
+**When something goes wrong.** 107 defences, written as `If … then` because a
+designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
   inline program, then the lifecycle shall refuse to run it.
@@ -1347,8 +1363,48 @@ because a designed path and a defended one are not the same thing:
   `policy.empty_run` is `pass`.
 - **R227** — If a change triggers no check, then the lifecycle shall refuse
   the checks run unless `policy.empty_run` is `pass`.
+- **R234** — If a listed pre-push check finds something or cannot reach a
+  verdict, then the lifecycle shall stop the push, name the check, print the
+  command that re-runs it, and state that `git push --no-verify` bypasses the
+  hook.
+- **R236** — If a pre-push hook the installer did not write is present, then
+  the lifecycle shall refuse to replace or remove it, change nothing, and say
+  how to chain the two.
+- **R238** — If `pre_push.checks` is missing or empty, or names a check that
+  is not an enabled declared check, then the lifecycle shall stop the push and
+  say why.
+- **R240** — If the pushed commit's checks configuration or `pre_push` block
+  differs from the trusted commit's and the clone has not opted in to trusting
+  it, then the lifecycle shall stop the push and name the files that differ.
+- **R242** — If the trusted checks configuration permits repository-local
+  tools and the clone has not opted in to them, then the lifecycle shall run
+  the pre-push checks with repository-local tools refused and print the git
+  config line that permits them.
+- **R243** — If a file the hook installer copied for the pre-push hook is
+  missing or no longer has the sha256 the installer recorded, then the
+  lifecycle shall stop the push and say to re-run the installer.
+- **R245** — If the hook installer is run with no opt-in flag, then the
+  lifecycle shall set no pre-push opt-in.
+- **R247** — If the pushed commit shares no commit with the clone's trust
+  anchor, or the clone has no trust anchor, and the clone has not opted in to
+  trusting pushed configuration, then the lifecycle shall stop the push and
+  say why.
+- **R249** — If repository-local tools are allowed and the pushed commit
+  differs from the trusted commit in a file a listed pre-push check names or
+  under that file's directory, and the clone has not opted in to trusting
+  pushed configuration, then the lifecycle shall stop the push and name the
+  files.
+- **R252** — If repository-local tools are allowed and a listed pre-push check
+  runs something in the repository that the lifecycle cannot map to files both
+  commits name, and the clone has not opted in to trusting pushed
+  configuration, then the lifecycle shall stop the push and say what it could
+  not map.
+- **R253** — If the pushed commit changes, against the trusted commit, a file
+  whose name is on the pre-push hook's list of tool configuration names, and
+  the clone has not opted in to trusting pushed configuration, then the
+  lifecycle shall stop the push and name each such file.
 
-**Only where the feature is present.** Thirteen requirements apply only to a
+**Only where the feature is present.** Twenty-one requirements apply only to a
 build that includes the feature:
 
 - **R22** — Where a repository declares its own check tools, the lifecycle
@@ -1390,6 +1446,31 @@ build that includes the feature:
 - **R228** — Where `policy.empty_run` is `pass`, the lifecycle shall name in
   the checks stage's pass line every changed path that no triggered check held
   in its scope.
+- **R229** — Where a repository's pre-push hook is installed, the lifecycle
+  shall run on each push only the checks listed in `pre_push.checks`, each
+  over the pushed files its own `when` scopes it to.
+- **R239** — Where a repository's pre-push hook is installed, the lifecycle
+  shall take the checks it runs, and their commands, from the commit the
+  pushed commit shares with the clone's trust anchor, not from the pushed
+  commit.
+- **R241** — Where a repository's pre-push hook is installed, the lifecycle
+  shall take its opt-ins only from the clone's local git configuration.
+- **R244** — Where a repository's pre-push hook is installed, the lifecycle
+  shall run only the copies the hook installer made under the git directory,
+  or the checker the user's environment names.
+- **R246** — Where a repository's pre-push hook is installed, the lifecycle
+  shall run the hook's Python with no module search path inside the repository
+  and no `PYTHON` environment variable.
+- **R248** — Where a repository's pre-push hook is installed, the lifecycle
+  shall take the clone's trust anchor from its local
+  `productizer.prePush.trustedRef`, else `refs/remotes/origin/main`, else
+  `refs/remotes/origin/master`, following no symbolic ref.
+- **R250** — Where a repository's pre-push hook is installed, the lifecycle
+  shall run the hook with no `PATH` entry that is empty, relative or
+  unresolvable, or whose physical directory lies in the work tree.
+- **R251** — Where a repository's pre-push hook is installed, the lifecycle
+  shall read git attributes from the trusted commit and run no git hook when
+  it checks out or compares the pushed commit.
 
 Every id above is permanent. A plan, a test or a PR title naming `R1` will
 still mean this sentence in two years, which is why ids are never reused and

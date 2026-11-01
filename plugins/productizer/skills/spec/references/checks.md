@@ -388,6 +388,178 @@ not. `scripts/*.sh` does not match `scripts/deploy/rollback.sh`. Shell-style
 globbing that lets `*` cross `/` reads as if it scopes tightly while matching
 half the repo, and nobody notices until an audit.
 
+## The pre-push hook
+
+A full CI run here takes about nineteen minutes; the checks that catch a shell
+warning, a suppressed stderr or a leaked name take seconds.
+`install-hooks.sh --repo .` installs a git pre-push hook that runs those, and
+only those, over the files the push carries. The checks are listed by id under
+`pre_push.checks` in `.claude/productizer/config.json`. List only what
+finishes in seconds, measured.
+
+**A list, not a tag.** A `when.tags` entry would share the requirement-tag
+space, and `run-checks.sh --tags` adds a trigger; it does not filter.
+Measured: `--tags pre-push` over a one-file change ran 67 of the 77 checks,
+because 63 are `always`, and it widened a tagged path check to every changed
+file. So nothing in `checks.yaml` marks a check for the hook. The hook writes
+a derived copy of the trusted `checks.yaml` with every unlisted check removed,
+`spec_coverage: "off"`, `empty_run: pass` and `allow_repo_local_tools` off
+unless this clone allows it, and runs the runner on that with `--changed`.
+Every other key is the trusted config's, and each listed check keeps its own
+`when`. Under `empty_run: pass` a pushed path no listed check scopes is named
+on the PASS line as examined by nothing, never a refusal.
+
+**Whose config: a trusted commit's, never the pushed one's.** A branch fetched
+from someone else and pushed on carries their `checks.yaml`. Measured at
+pre-push-checks.sh 1.0: a fetched branch whose `checks.yaml` swapped a listed
+check's command for `touch <file>` ran it on push, and the push passed. Since
+1.1 the list and the commands are read with git from the merge base of the
+pushed commit with the clone's TRUST ANCHOR: the remote-tracking ref named by
+`git config --local productizer.prePush.trustedRef refs/remotes/<remote>/<branch>`
+(`install-hooks.sh --trusted-ref REF` sets it), else `refs/remotes/origin/main`,
+else `refs/remotes/origin/master`. Nothing else is trusted. The anchor never
+depends on the remote being pushed to, and no symbolic ref is followed:
+measured, a branch fetched from a fork that was also the fork's `main`,
+pushed back to the fork, was its own anchor when the push target's
+`<remote>/main` or `<remote>/HEAD` chose it, and its `touch` ran. A push to
+any remote is judged against the same anchor. With no anchor, or no history
+shared with it, the push stops (exit 2), naming both git config lines - a
+first push of a new repository included. Not the remote tip of the pushed ref
+and not HEAD either: once a fetched branch was on the remote its tip carried
+its own `checks.yaml`, and HEAD is the pushed commit whenever a fetched branch
+is checked out and pushed; trusting either ran its `touch`. When the pushed commit's `checks.yaml` differs by a byte, or its
+`config.json` `pre_push` block differs, the push stops (exit 2) and names the
+files: the trusted checks may not be the ones the commit means, and running
+them silently would read as its verdict. A stale anchor gives an older
+trusted commit, so more refusals, never a weaker check: fetch.
+
+**Two opt-ins, per clone, outside the repository.** Read with `git config
+--local` only, never from the global or system config and never from a key in
+`config.json` or `checks.yaml`, so no commit can grant them:
+
+```
+git config --local productizer.prePush.trustPushedConfig true    # check a changed config with its own commands
+git config --local productizer.prePush.allowRepoLocalTools true  # run check tools inside the repository
+```
+
+The second matters for any repository whose checks run its own scripts. This
+one's do (`./scripts/check-hygiene.sh` and the plugin's checkers): with it
+off, the runner refuses the derived config at load and the push stops, the
+refusal printing the line above. `allow_repo_local_tools: true` in
+`checks.yaml` is the project's word that its scripts are check tools; whether
+this machine runs a repository's scripts on push is the user's, so the hook
+needs both. `install-hooks.sh --allow-repo-local-tools` and
+`--trust-pushed-config` set them and print the line they ran; nothing sets
+them by default.
+
+**What runs: copies under the git directory.** The installer copies the
+checker, `run-checks.sh` and `argv-classify.py` - the files a push runs,
+measured by running one with the plugin directory deleted - to
+`git rev-parse --git-path productizer-pre-push`, writes a MANIFEST of their
+sha256s there, and records the MANIFEST's sha256 in the hook. No checkout
+touches that directory and nothing tracks it. Before running anything the hook
+compares every file, and stops the push on a missing or changed one, saying to
+re-run the installer; it never runs the plugin's own files, which in this
+repository live in the work tree, nor a checker the repository holds. Measured
+at the first 1.1, which hashed the checker only: a checked-out branch whose
+`run-checks.sh` wrote a marker had it run on push. `$PRODUCTIZER_PRE_PUSH_CHECKS`
+overrides the copies for one push; it is trusted because you set it, and
+nothing it runs is compared.
+
+**Repo-local tools are the trusted commit's, or nothing runs.** With
+`allowRepoLocalTools`, a check's repository script runs from the tree being
+checked, the pushed commit. `run-checks.sh` has one root for both the files a
+check reads and the programs it runs, and a pushed change to a tool is both,
+so running the trusted commit's tool over the pushed files is not possible
+without changing it. Instead the push stops when the pushed commit differs from
+the trusted one in any repository path a listed check's argv names - read
+through the runner's own `argv-classify.py`, so the program, every value an
+argument can carry and a dotted name as its module (`-m a.b` is `a/b.py`,
+`a/b/__init__.py`, `a.py` and the whole `a/`) - or under that path's
+directory - for a tool at the top level, every top-level file -
+unless the clone trusts pushed configs. A file a tool sources from elsewhere
+is not compared. A repository-local form the hook cannot pin to a path both
+commits spell the same way - a symlink, a case variant, an untracked file -
+stops the push too, fail closed (measured: a tool named through a symlink, and
+`python3 -m pkg.tool`, each ran the pushed code under the first gate, which
+matched words to paths as strings). In this repository the listed checks name ten such paths,
+so a push that changes a script under the plugin's `scripts/` is refused
+without `trustPushedConfig` (measured, 0.79s); a README change passes.
+
+**Foreign config is refused too** (the maintainer's decision, 2026-11-01).
+Tools load settings, and sometimes code, from the tree - an eslint config is
+JavaScript - and an allowed repository script can source a helper from
+anywhere. A push that changes, against the trusted commit, any file named on
+`CONFIG_DENY` in `pre-push-checks.sh` - shellcheck, Python, JavaScript,
+semgrep, gitleaks, pre-commit, make, direnv and version files, at any depth,
+in any case - stops, naming each file, unless the clone trusts pushed configs.
+The list can never be complete: a tool that loads code from a file not on it
+is not isolated. The hook is for your own commits; push someone else's branch
+with `git push --no-verify`, and CI still checks everything. Measured on this
+repository, each commit pushed alone: all 7 of v4.75.2..b26d750 are stopped by
+one rule or another, and the list alone stops 0 of them.
+
+**Nothing on PATH, in git or in the environment that the tree can supply.**
+The hook is `/bin/sh` and, before running anything, drops every empty,
+relative or unresolvable PATH entry and every entry whose physical directory
+(`cd ... && pwd -P`) is the work tree's or inside it, always compared without
+case - a false match only drops an extra entry - so a symlink, a `..` detour
+or a case variant is dropped like the plain spelling. The work tree is first
+found with builtins (up to its `.git`), so not even `git` is looked up
+through an entry into it, and `tr` is called as `/usr/bin/tr`; and unsets
+`BASH_ENV` and `ENV`; the checker does the same. Measured: with `.` first on
+PATH, a branch's top-level `bash` ran as a listed check's interpreter. Every
+checkout and content comparison of the pushed commit reads `.gitattributes`
+from the trusted commit (`git --attr-source`, git 2.40 or later), the
+temporary worktree is made with no git hooks, and the runner's git calls get
+`GIT_ATTR_SOURCE`. Measured: a plain `git worktree add` ran the smudge filter
+the pushed `.gitattributes` selected and the clone's post-checkout hook, and
+`git diff --quiet HEAD` the clean filter.
+
+**No Python the repository can reach.** git runs a hook from the repository's
+top level, and a plain `python3 -` there puts the current directory first on
+`sys.path`. Measured: a branch shipping a top-level `json.py` had it imported
+twice by the checker, and the push read PASS; with `PYTHONPATH` at the work
+tree the runner imported it too. Every Python the checker runs is
+`python3 -I`, from its temporary directory; the one that needs PyYAML adds back
+only the user site directory, which `-I` drops and where PyYAML is often
+installed. The runner is handed no `PYTHON*` variable, so a PyYAML reachable
+only through one is not found, and the runner refuses rather than passes.
+
+**A list that selects nothing stops the push.** A missing or empty
+`pre_push.checks`, a value that is not a list of ids, or an id that is not an
+enabled check declared in `checks.yaml` refuses the push and names what is
+wrong: a hook that runs nothing reads like one that ran and found nothing.
+
+**What it checks.** Per pushed ref: a deletion, nothing; a branch the remote
+has, the merge base with the remote tip to the pushed commit; a new branch,
+the merge base with the remote's default branch (`<remote>/HEAD`, else `main`,
+else `master`), named in the output; no remote-tracking default at all, every
+file in the commit, named. Deleted paths are left out. When the pushed commit
+is not HEAD, or a tracked file differs from it, the commit is read from a
+temporary worktree, not from the work tree.
+
+**When it stops a push** it names the check and prints the line that re-runs
+that one check over the same files:
+`pre-push-checks.sh --base <sha> --head <sha> --only <id>`.
+
+**`git push --no-verify` skips it.** It is a convenience in front of CI that
+cannot be forgotten, not a gate; CI runs every check. Every refusal says so.
+
+**Your own pre-push hook is never overwritten.** The installer refuses and says
+how to chain: move yours to `pre-push.chained` beside it, and the installed
+hook runs it first with the same arguments and stdin. `--uninstall` removes
+only the installer's own hook.
+
+Measured through the installed hook in a scratch clone of this repository, nine
+checks listed, load average 14 to 24: a one-file change 4.3s, a two-file change
+2.0-2.3s, a 55-file change holding 40 shell scripts 27.5-29.1s - shellcheck
+runs once per file for `shell-lint` (9s) and `shell-quoting` (8s), and the
+runner runs the checks one after another. The ten-second aim holds for a small
+push and not for a large one. Re-measured at 1.1, load 10 to 12, both opt-ins
+set: a one-file change 1.97s, a two-file change 3.29s, a change to
+`checks.yaml` alone 1.64s; with the repo-local opt-in off, refused in 1.17s.
+
 ## Control frameworks: a tag is just a string
 
 `when.tags` matches the tags a change's requirements carry, and a tag is an

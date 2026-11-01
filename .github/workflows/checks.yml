@@ -396,7 +396,9 @@ jobs:
               record bash plugins/productizer/skills/spec/scripts/check-spec-home.sh --selftest
               record bash plugins/productizer/skills/spec/scripts/check-spec-integrity.sh --selftest
               record bash plugins/productizer/skills/spec/scripts/check-unmeasured-report.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/install-hooks.sh --selftest
               record bash plugins/productizer/skills/spec/scripts/pr-spec-comment.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/pre-push-checks.sh --selftest
               record bash plugins/productizer/skills/spec/scripts/record-classification.sh --selftest
               record bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
               ;;

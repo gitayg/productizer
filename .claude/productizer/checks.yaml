@@ -5050,6 +5050,286 @@ checks:
       - GitHub's step timestamps are whole seconds; a step under a few seconds cannot be told apart from noise.
       - The real API is never called by the self-test; the gh path is driven through a stub.
 
+  # --- the pre-push hook (B190) ---------------------------------------------
+  #
+  # The checks the hook runs are listed by id under `pre_push.checks` in
+  # config.json, not tagged here: a `when.tags` entry shares the requirement-tag
+  # space, and `run-checks.sh --tags` is a trigger that widens a check to the
+  # whole change. Nothing in this file changes for a check the hook runs.
+
+  - id: pre-push-hook
+    why: a push hook that runs the wrong checks, reads the wrong tree, passes a finding or silently runs nothing costs the nineteen-minute CI run it exists to save, or lets the finding through
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/pre-push-checks.sh, ./plugins/productizer/skills/spec/scripts/run-checks.sh, git, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/pre-push-checks.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/pre-push-checks.sh, --selftest]
+    timeout_seconds: 300
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the sentence it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'cases driven: ([0-9]+)\. Assertions that did not hold: 0'
+      min_covered: 57
+      spec_units:
+        - id: R229
+          verdict: Covered
+          evidence: >-
+            pre-push-checks.sh 1.0 (B190), 20 cases, the push cases real pushes through
+            templates/pre-push into a bare remote. `clean-push` exits 0 with "1 of 2 declared checks
+            are listed in pre_push.checks" while an unlisted `always` check that fails on everything
+            sits in the same config; `scope-kept` pushes a .md beside a .txt to a tool that refuses
+            any non-.txt file and exits 0; `only-unlisted` refuses --only on an unlisted check.
+            Falsified 2026-11-01: every declared check kept, 6 of 20 cases red; --only on an
+            unlisted check accepted, 1 of 20.
+        - id: R230
+          verdict: Partial
+          reason: >-
+            A remote with no HEAD symref but a master branch is not driven, and a stale
+            remote-tracking ref is trusted (it can only widen the file set).
+          evidence: >-
+            `new-branch` pushes a branch whose base on main holds a forbidden file and exits 0 naming
+            "merge base with refs/remotes/origin/"; `first-push-all-files` pushes to an empty remote
+            and exits 1 naming "checking every file in". Falsified 2026-11-01 with the base always
+            the empty tree: `new-branch` red, 1 of 20.
+        - id: R231
+          verdict: Covered
+          evidence: >-
+            `deletion` exits 0 with "is a deletion; nothing to check"; `only-deletions` pushes a
+            commit that only deletes a checked file and exits 0 with "only deletions". Falsified
+            2026-11-01 with deletions handed to the runner: `only-deletions` red, 1 of 20.
+        - id: R232
+          verdict: Covered
+          evidence: >-
+            `multi-ref` hands one clean and one failing ref and exits 1 with "BLOCKED:
+            'no-forbidden' came back fail on refs/heads/bad.".
+        - id: R233
+          verdict: Partial
+          reason: Untracked files are not compared; a check reading one reads the work tree's.
+          evidence: >-
+            `not-head` pushes a non-checked-out branch holding a forbidden file over a clean work
+            tree, `dirty-tree` pushes a forbidden commit with the fix uncommitted; both exit 1 and
+            name the temporary worktree. Falsified 2026-11-01 with the work tree always read: 3 of
+            20 red.
+        - id: R234
+          verdict: Covered
+          evidence: >-
+            `finding-blocks` exits 1, prints "--only no-forbidden" and "--no-verify", and the bare
+            remote's main did not move; `missing-tool` exits 2 "could not reach a verdict";
+            `bad-stdin` exits 2; `manual-base` re-runs the printed command shape and exits 1;
+            `no-verify-bypasses` shows the bypass is real. Falsified 2026-11-01 with a finding
+            mapped to 0: 9 assertions red over 7 cases.
+        - id: R238
+          verdict: Covered
+          evidence: >-
+            `list-missing`, `list-empty`, `list-undeclared` and `list-disabled` each push a change
+            holding a forbidden file a listed check would find, and exit 2 naming what is wrong with
+            the list, so a run that skipped every check and passed would read 0. Falsified
+            2026-11-01: a missing list read as an empty one and an empty one run, 2 of 20 red
+            (list-missing, list-empty); the empty-list refusal alone off, 1 of 20; an undeclared or
+            disabled id silently dropped, 2 of 20 (list-undeclared, list-disabled).
+        - id: R239
+          verdict: Covered
+          evidence: >-
+            pre-push-checks.sh 1.1 (B190, security), 38 cases. The trusted commit is the merge base
+            with the clone's trust anchor (R248) and nothing else. A branch whose checks.yaml swaps
+            the listed check's command for `touch <marker>`: `foreign-config-push` is stopped, the
+            marker absent and the remote unmoved; `foreign-config-exit` exits 2 naming the trust
+            anchor refs/remotes/origin/main; `foreign-on-remote` is stopped once that branch is on
+            the remote; `no-anchor-head` and `no-anchor-tip` are refused with no anchor, the marker
+            absent. Falsified 2026-11-01: the remote tip trusted before the default branch, 2 of 29
+            red; the checks.yaml comparison off, 6 of 29; the HEAD fallback restored alone, 6 of
+            38; the remote-tip fallback restored alone, 1 of 33.
+        - id: R240
+          verdict: Covered
+          evidence: >-
+            `foreign-config-push` and `foreign-config-exit` name .claude/productizer/checks.yaml,
+            `foreign-list` changes only the pre_push block and exits 2 naming it, and each prints
+            `git config --local productizer.prePush.trustPushedConfig true`; `trust-optin` sets it
+            and exits 0 with the pushed config's marker present. Falsified 2026-11-01: the opt-in
+            always on, 4 of 29 red; the checks.yaml comparison off, 6 of 29; the pre_push block
+            comparison off, 4 of 29.
+        - id: R241
+          verdict: Partial
+          reason: The system config, a linked worktree's config.worktree and include paths are not driven.
+          evidence: >-
+            `global-optin-ignored` sets trustPushedConfig in a global config file and is refused;
+            `committed-optin` commits allowRepoLocalTools, allow_repo_local_tools and
+            trustPushedConfig keys into the trusted pre_push block and is refused. Falsified
+            2026-11-01: the opt-in read with `git config` instead of `git config --local`, 1 of 29
+            red (global-optin-ignored).
+        - id: R242
+          verdict: Covered
+          evidence: >-
+            `repo-local-off` unsets the clone's opt-in over a config setting
+            allow_repo_local_tools true whose listed check runs ./check.sh, and exits 2 printing
+            `git config --local productizer.prePush.allowRepoLocalTools true`. Measured on this
+            repository in a scratch clone: with the opt-in off the runner refuses the derived
+            config at load and the push stops in 1.2s, printing the line. Falsified 2026-11-01:
+            the committed setting kept as is, 2 of 29 red (repo-local-off, committed-optin).
+        - id: R246
+          verdict: Partial
+          reason: >-
+            A check's own tool, run by the runner, is the repository's under allowRepoLocalTools and
+            is not isolated; a sitecustomize or .pth file in the user site directory is not driven.
+          evidence: >-
+            `py-shadow` checks out a branch shipping a top-level json.py and yaml.py, each writing a
+            marker and then loading the real module, and pushes it for real with PYTHONPATH at the
+            work tree; the push passes and no marker is written. Reproduced before the fix: the
+            branch's json.py imported twice and the push read PASS; with PYTHONPATH set, the runner
+            imported it twice as well. Falsified 2026-11-01: -I and the cd both dropped, 1 of 29
+            red; -I alone dropped, 1 of 29; the runner handed PYTHON* variables, 1 of 29; the cd
+            alone dropped stays green, because -I already leaves the current directory off the path.
+        - id: R247
+          verdict: Covered
+          evidence: >-
+            `first-push-refused` pushes a brand-new repository's first commit and is stopped, saying
+            there is no trust anchor and naming the trustPushedConfig and trustedRef git config
+            lines; `no-anchor-head` and `no-anchor-tip` exit 2 with that sentence; with the opt-in,
+            `first-push-all-files` checks every file and `no-anchor-optin` runs the pushed config.
+            Falsified 2026-11-01: the HEAD fallback restored, 6 of 38 red.
+        - id: R248
+          verdict: Covered
+          evidence: >-
+            `fork-push-back` pushes a fetched branch that is also the fork's main back to the fork,
+            and `fork-symref` pushes to a fork whose HEAD symref, and origin's, point at it; both are
+            stopped with the marker absent. Reproduced at d48c84e: both passed and the marker was
+            written. `trusted-ref-valid` names refs/remotes/up/main and runs; `trusted-ref-missing`
+            and `trusted-ref-short` exit 2. Falsified 2026-11-01: the push target's main as the
+            anchor, 1 of 38 red; origin's HEAD symref followed, 1 of 38.
+        - id: R249
+          verdict: Partial
+          reason: >-
+            A file a tool sources or imports from outside its own directory, and outside the top
+            level for a module, is not compared; running the trusted tools over the pushed files
+            would need run-checks.sh to take programs and data from two roots.
+          evidence: >-
+            pre-push-checks.sh 1.1, 54 cases. `tool-drift`, `root-helper`, `m-module` (python3 -m
+            pkg.tool, a change to pkg/tool.py) and `m-rootimport` (a change to a top-level module it
+            imports) are each stopped with the marker absent; the tools are read through the
+            runner's own argv-classify.py. Falsified 2026-11-01: the gate off, 3 of 47 red; a
+            top-level tool counted as its own path only, 1 of 47; the module reading off, 2 of 53.
+        - id: R250
+          verdict: Covered
+          evidence: >-
+            `path-dot`, `path-symlink` (a symlink to the work tree, a `..` detour, and a branch
+            shipping git), `path-case` (an upper-cased spelling) and the manual `path-dot-manual`,
+            `path-case-manual` (under /bin/bash 3.2) and `path-canon-manual` write no marker. Reproduced at 467bfdb: the symlink, the detour and the case variant each let
+            the branch's bash run. Falsified 2026-11-01: the hook's physical comparison off, 2 of
+            53 red; the checker's, 1 of 53; at 54 cases the hook's case folding off, 1 of 54, the checker's, 2 of 54, the checker's builtin first pass off, 2 of 54; the hook's first pass off, 0 of 54 (git's exec-path comes first on a hook's PATH).
+        - id: R251
+          verdict: Covered
+          evidence: >-
+            This clone's config defines a filter and a post-checkout hook writing a marker, and a
+            branch's .gitattributes selects the filter: `git-runs-nothing` (worktree) and
+            `dirty-check-filter` (stat-dirty work tree) write none. Measured before the fix: git
+            worktree add ran the smudge filter and post-checkout, git diff --quiet the clean filter.
+            Falsified 2026-11-01: --attr-source off on the worktree, 1 of 46 red; core.hooksPath
+            off, 1 of 46; --attr-source off on the dirty check, 1 of 46.
+        - id: R252
+          verdict: Covered
+          evidence: >-
+            `unmapped-tool`: the trusted config names the tool by an absolute path outside the
+            repository that a symlink points back into it; a branch changes the tool to write a
+            marker; the push stops saying the hook cannot map it, the marker absent. Reproduced at
+            467bfdb: the tool ran. Falsified 2026-11-01: the refusal off, 1 of 53 red.
+        - id: R253
+          verdict: Partial
+          reason: >-
+            The list can never be complete: a tool that loads code from a file not on it is not
+            isolated. The hook is for your own commits; others' branches go with --no-verify, and CI
+            still checks everything.
+          evidence: >-
+            The maintainer's decision "Refuse foreign config" (2026-11-01). `config-envrc`: the
+            trusted tool sources a top-level .envrc and a branch's .envrc writes a marker - refused,
+            absent; `config-envrc-optin` runs it under the opt-in, present. `config-names` pushes
+            .ShellCheckRC, a nested pyproject.toml and an eslint.config.js, and the refusal names
+            each. Reproduced at b26d750: the .envrc ran. Falsified 2026-11-01: the refusal off, 2 of
+            57 red; case kept, 1 of 57; whole paths matched, 1 of 57.
+    limitations:
+      - Timing is not asserted. Measured through the installed hook in a scratch clone (load 14 to 24) - 1 file 4.3s, 2 files 2.0-2.3s, a 55-file change holding 40 shell scripts 27.5-29.1s, of which shell-lint 9s and shell-quoting 8s, shellcheck once per file and the checks one after another.
+      - A tag push, sha256 repositories and a remote without a HEAD symref are not driven; neither is a pre_push.checks value that is not a list.
+      - The list and the checks are read from the trusted commit - the merge base with the remote's default branch - so a config change is refused until it reaches that branch, unless the clone sets productizer.prePush.trustPushedConfig; a list edited and not committed is never what runs.
+      - Timing re-measured at 1.1 through the installed hook in a scratch clone of this repository, load 10 to 12, both opt-ins set - 1 file 1.97s, 2 files 3.29s, a checks.yaml-only change 1.64s; with the repo-local opt-in off the push is refused in 1.17s.
+
+  - id: hook-installer
+    why: an installer that overwrites someone's hook destroys their work, and one that writes where git does not look reports success over a hook that never runs
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/install-hooks.sh, git]
+    version_command: [./plugins/productizer/skills/spec/scripts/install-hooks.sh, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/install-hooks.sh, --selftest]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'cases driven: ([0-9]+)\. Assertions that did not hold: 0'
+      min_covered: 31
+      spec_units:
+        - id: R235
+          verdict: Partial
+          reason: A bare repository and an absolute core.hooksPath shared by several repositories are not driven.
+          evidence: >-
+            install-hooks.sh 1.0 (B190), 17 cases. `install` writes an executable hook carrying the
+            marker and the checker's path; `hookspath` lands it in core.hooksPath and not in
+            .git/hooks; `linked-worktree` reaches the common hooks directory. Falsified 2026-11-01 by
+            the building agent with .git/hooks hardcoded: 2 of 17 red.
+        - id: R236
+          verdict: Covered
+          evidence: >-
+            `foreign-refused`, `foreign-dry` and `foreign-uninstall` exit 2 and leave the foreign
+            hook byte-identical; `symlink-refused` exits 2 and the outdated own hook the link points
+            at is not written through; `chain-push` is a real push in which pre-push.chained ran
+            first and its exit 7 stopped the push. Falsified 2026-11-01 by the building agent:
+            refusal removed, 3 of 17 cases red (5 assertions); both symlink guards removed,
+            `symlink-refused` red.
+        - id: R237
+          verdict: Covered
+          evidence: >-
+            `idempotent` leaves the hook byte-identical, `update-own` rewrites an outdated own hook,
+            `dry-install` and `dry-uninstall` write and remove nothing, `uninstall` removes only its
+            own. Falsified 2026-11-01 by the building agent: idempotence check removed, 1 of 17 red;
+            dry install writes, 1 of 17; dry uninstall removes, 2 of 17.
+        - id: R243
+          verdict: Covered
+          evidence: >-
+            install-hooks.sh 1.1 (B190, security), 31 cases. The installer copies pre-push-checks.sh,
+            run-checks.sh and argv-classify.py under --git-path productizer-pre-push with a sha256
+            MANIFEST whose own sha256 the hook records. `copy-changed-*` alters each copy and is
+            stopped, nothing run; `copy-missing`, `manifest-changed` and `checker-missing` are
+            stopped; `reinstall-accepts` re-installs and goes through. Falsified 2026-11-01: the
+            sha256 comparison off, 1 of 25 red; only the checker compared, 3 of 31.
+        - id: R244
+          verdict: Covered
+          evidence: >-
+            `source-swapped` replaces the plugin's runner after install and the copy runs; the
+            repository holds checkers at both paths 1.0 fell back to and none runs; `env-override`
+            runs what $PRODUCTIZER_PRE_PUSH_CHECKS names. pre-push-hook's `runner-in-tree` and
+            `copies-only` run the real chain from the copies. Measured on this repository with bash
+            and python3 logging their argv and the plugin deleted after install: only the three
+            copies of the plugin ran. Falsified 2026-11-01: the in-repo fallback restored, 2 of 25
+            red; the environment override ignored, 1 of 25.
+        - id: R245
+          verdict: Covered
+          evidence: >-
+            `install` asserts neither opt-in is set; `optin-flags` sets both by flag and prints each
+            line it ran; `optin-dry` sets nothing; `optin-uninstall` refuses the flags with
+            --uninstall. Falsified 2026-11-01: an opt-in set by default, 5 of 25 red; a dry run
+            writing it, 1 of 25. --trusted-ref (26 cases): set and printed by `optin-flags`, a short
+            name refused by `trusted-ref-short`, never set by `install`; set by default, 5 of 26 red.
+    limitations:
+      - A bare repository, an absolute core.hooksPath shared by several repositories and git older than 2.31 are not driven.
+      - The hook records the checker's absolute path and sha256; after a plugin update moves or changes it, the hook stops the push and asks for the installer to be re-run (driven, `checker-missing` and `checker-changed`). Only the checker is hashed, not run-checks.sh or the files beside it.
+
   - id: plan-record-checker
     why: a change whose plan cannot say how it was shown to work or how to undo it has its rollback invented during the incident
     when:
