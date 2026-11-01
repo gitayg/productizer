@@ -3354,6 +3354,61 @@ checks:
             case exited 2. Measured here on 2026-10-28 with the per-probe limit raised to 900s:
             one at a time at 81c6031, 63 probes in 1271s at load average 55 to 69; four at a
             time, 270.9s at 69 to 115, slowest probe 165.4s, the same R39 and R40 lines.
+        - id: R213
+          verdict: Partial
+          reason: >-
+            Alone means alone among this check's probes, after its pool has drained; other load
+            on the machine is not seen. A self-test that starts a child in a session of its own
+            escapes the process-group kill. Several contended timeouts are retried one after
+            another and can carry the check past its own 600s, which run-checks then refuses.
+          evidence: >-
+            check-selftest-coverage.sh 1.2 (B187), 35 cases. `contended`: needs-alone.sh stalls
+            past its limit whenever crowd.sh is running and answers once crowd.sh is done; under
+            --probe-jobs 2 --probe-timeout 8 it times out beside crowd.sh, is probed again alone,
+            answers, and the case exits 0. `stillslow`: a self-test too slow alone too times out
+            twice and exits 2. Falsified 2026-11-01: no retry, 33 of 35 (contended, stillslow
+            red); contention never measured, 33 of 35; a timeout that kills only the shell, 34 of
+            35 (contended red - the killed attempt's child is still running when it is probed
+            alone).
+        - id: R214
+          verdict: Covered
+          evidence: >-
+            `timeout` asserts `timed out after 1s, probed alone (` and `stillslow` asserts `under
+            contention, beside 1 other probe(s) ... probed again alone, it timed out again after
+            2s`. Falsified 2026-11-01 by dropping `probed alone` from the sentence: 34 of 35,
+            `timeout` red.
+        - id: R215
+          verdict: Partial
+          reason: >-
+            A record is the workflow's account of a run: commit, file hash and flag are compared, the
+            output and exit code are taken as written, so a record forged with the right three is
+            read as a run. Whoever can write one into the runner's temp directory can also edit
+            the workflow that sets the variable.
+          evidence: >-
+            `records`: once.sh answers its first run and stalls on every later one; recorded
+            with --record and read with --records, the case exits 0 reading `1 read from records
+            ..., 0 executed here`. Falsified 2026-11-01: records never read, 30 of 35; HEAD not
+            compared, 34 of 35 (rechead red); a dirty tracked tree not refused, 34 of 35
+            (recdirty); the file hash not compared, 34 of 35 (recforged); the flag not compared, 34 of
+            35 (recflag).
+        - id: R216
+          verdict: Covered
+          evidence: >-
+            `recdirty`, `rechead` and `recforged` exit 2 because once.sh was probed a second time
+            and stalled; `recflag` exits 0 having probed it live; each names why its record was
+            not used.
+        - id: R217
+          verdict: Partial
+          reason: >-
+            The workflow calls --record through a shell function on each run block's first line;
+            that the function returns the wrapper's status is read by no check, only by this
+            case's assertion on the wrapper itself.
+          evidence: >-
+            `recordrc`: a self-test exiting 1 run through `check-selftest-coverage.sh --record`
+            exits 1, its stdout and stderr pass through, and the record says exit 1.
+            `recordusage`: a command with no self-test flag is refused, exit 2. Falsified
+            2026-11-01: the shell wrapper exiting 0, 33 of 35; the Python writer returning 0, 34
+            of 35.
       from: stdout_paths
       pattern: '^(\S+)$'
       min_covered: 20
@@ -3364,6 +3419,8 @@ checks:
       - --probe-jobs 4 shortens the run, not any one probe (B160): a machine slow enough that one self-test alone passes the 180s per-probe limit still reads ? and refuses, and probes side by side compete for the same cores. That no two self-tests write one shared path is read off their source, not enforced.
       - Third-party tools are n/a, not findings. `shellcheck` is a check tool the suite invokes and nobody here can give it a self-test; it is named and counted separately so neither number contaminates the other.
       - Superseded 2026-09-06: it used to report ITSELF as a self-test nothing reaches, because the declared command runs the measurement and not the self-test. The workflow now names `check-selftest-coverage.sh --selftest` on its own line, so the finding is resolved rather than exempted - it was never waived, and the fix was to reach it.
+      - B186 records are trusted for their output and exit code; only the commit, the tracked tree, the tool file's sha256 and the flag are compared. In CI every self-test is read from a record, so the Stage 5 run of this check executes none, and its probe-time limitations apply only where no record is given - every local run.
+      - B187 retries are serial after the pool drains, each with the full --probe-timeout; several contended timeouts can exceed the check's 600s.
 
   # --- the retrieval budget, which nothing ran until now -------------------
   #
@@ -4594,6 +4651,21 @@ checks:
             init.defaultBranch pin removed: 17 of 18, the runner's-git case red. The bare-origin case
             stayed red without the pin, because with no system or global configuration this git's
             own default is already master; the pin is what makes that independent of the git.
+        - id: R218
+          verdict: Partial
+          reason: >-
+            Jobs are replayed one after another on this machine, not side by side on separate
+            runners. The artifact actions are emulated for what the workflow uses - name or
+            pattern, merge-multiple, if-no-files-found, hidden files left out - and not for a
+            pattern matching nothing, retention, or GitHub's name rules. YAML anchors are resolved
+            by PyYAML; that GitHub resolves them the same way is documented, not measured here.
+          evidence: >-
+            replay-ci.py --selftest, 23 cases; five added for B186 over a fixture whose `checks`
+            needs a two-leg matrix job that hands files over. Falsified 2026-11-01: one workspace
+            for every leg, 22 of 23; artifact steps skipped, 20 of 23; a duplicate artifact name
+            accepted, 22 of 23; hidden files uploaded, 22 of 23; a job `if:` not refused, 22 of
+            23; `needs.<job>.result` always success, 21 of 23; a job CI would skip not marked, 22
+            of 23; only the `checks` job replayed, 19 of 23.
     limitations:
       - The replay's version is python3's, because replay-ci.py takes no --version; the script itself is pinned only by the commit.
       - The runner's own identity refusal and LANG are not measured; only the default branch is quoted from a runner log.

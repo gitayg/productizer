@@ -41,9 +41,40 @@ defaults:
     shell: bash
 
 jobs:
-  checks:
+  # --- EACH SELF-TEST RUNS ONCE, IN PARALLEL JOBS (B186) ---------------------
+  #
+  # Measured on main run 41231708700 (19m19s, then one `checks` job): the
+  # self-test step took 424s and Stage 5 693s, everything else under 40s. And
+  # Stage 5 ran every self-test a SECOND time: its `selftest-coverage` check
+  # probes each one to see that it answers and to read its exit-code
+  # declaration. So the self-tests now run once, split across the shards of
+  # `selftests` below, each through `check-selftest-coverage.sh --record`,
+  # which passes the self-test's output and exit code through unchanged and
+  # keeps a record of the run. `checks` downloads the records, and
+  # `selftest-coverage` reads a record in place of a probe when it is about the
+  # same commit, an unchanged tracked tree and the same tool file. A self-test
+  # with no such record is probed, as it always was - which is every self-test
+  # on a machine that runs the declared checks without this workflow.
+  #
+  # THE SHARDS ARE BALANCED ON MEASURED TIMES, the per-self-test durations in
+  # that run's log (the time between consecutive `exit codes reached:` lines).
+  # The three slowest - check-view-rendered.sh 95.6s, check-view-readonly.sh
+  # 84.5s, check-unmeasured-report.sh 79.3s - each lead a shard, and no shard
+  # was measured above about 100s. A self-test that becomes slow moves a shard
+  # past the others; the fix is to move a line, not to add a job.
+  #
+  # EVERY JOB INSTALLS THE SAME TOOLS AND ASSERTS THEM. The setup steps are
+  # written once, in `selftests`, with a YAML anchor each, and repeated in
+  # `checks` by alias, so the pins cannot drift between the two jobs.
+  selftests:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      # Every shard reports, even after one fails: a failure hidden behind the
+      # first is the one pushed next.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
 
     steps:
       # Third-party actions are pinned to a full commit SHA. A major-version
@@ -59,7 +90,8 @@ jobs:
       # tag, type `commit`), and `action.yml` at that SHA reads `using: node24`.
       # The only inputs this file passes - fetch-depth, node-version,
       # python-version - are still declared there.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - &checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The Stage 5 gate diffs against a base commit. A shallow clone has
           # no base to diff against, and run-checks.sh reads an unresolvable
@@ -69,10 +101,12 @@ jobs:
 
       # Pinned runtimes, so a runner-image bump cannot change what was checked
       # without a diff saying so.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - &setup-node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - &setup-python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
@@ -86,7 +120,8 @@ jobs:
       # aarch64, read from PyPI's JSON API for that release;
       # --only-binary keeps pip from building the sdist, whose build code would
       # run here.
-      - name: PyYAML, which the runner refuses to work without
+      - &pyyaml
+        name: PyYAML, which the runner refuses to work without
         run: |
           printf '%s\n' 'PyYAML==6.0.2 --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476 --hash=sha256:1f71ea527786de97d1a0cc0eacd1defc0985dcf6b3f17bb77dcfc8c34bec4dc5' > "$RUNNER_TEMP/pyyaml-requirements.txt"
           python3 -m pip install --disable-pip-version-check --only-binary :all: --require-hashes -r "$RUNNER_TEMP/pyyaml-requirements.txt"
@@ -110,7 +145,8 @@ jobs:
       # `semgrep/console_scripts/entrypoint.py` at 1.171.0. Homebrew installs
       # semgrep in exactly this shape: its `bin/semgrep` is a symlink into a
       # private venv.
-      - name: semgrep, which the declared sast check runs
+      - &semgrep
+        name: semgrep, which the declared sast check runs
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/semgrep-venv"
@@ -131,7 +167,8 @@ jobs:
       # asset. `sha256sum -c` exits non-zero on a mismatch and `set -e` stops the
       # step there. Only the `gitleaks` member is extracted, into the same
       # one-purpose directory as semgrep.
-      - name: gitleaks, which the declared secret-scan check runs
+      - &gitleaks
+        name: gitleaks, which the declared secret-scan check runs
         env:
           GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
         run: |
@@ -169,7 +206,8 @@ jobs:
       # It is matched to puppeteer's version, not verified against a digest -
       # named here rather than left implied. The launch below is a real one, so
       # a browser that cannot start fails at this step by name, not at Stage 5.
-      - name: puppeteer, which the declared view-rendered check drives
+      - &puppeteer
+        name: puppeteer, which the declared view-rendered check drives
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/puppeteer"
@@ -191,7 +229,8 @@ jobs:
       # failed until Stage 5 refused many steps later, naming PyYAML and not
       # the step that caused it. This runs straight after every step that
       # writes $GITHUB_PATH, so the same mistake fails here, by name.
-      - name: Guard — python3 is still the interpreter with PyYAML
+      - &guard
+        name: Guard — python3 is still the interpreter with PyYAML
         run: |
           set -euo pipefail
           py="$(command -v python3)"
@@ -211,7 +250,8 @@ jobs:
       # quietly did not run. This is the same rule run-checks.sh enforces
       # internally: a declared tool that is absent FAILS its check, it is never
       # skipped. CI must not undercut that.
-      - name: Preflight — tools this job refuses to run without
+      - &preflight
+        name: Preflight — tools this job refuses to run without
         run: |
           set -euo pipefail
           missing=()
@@ -238,103 +278,6 @@ jobs:
           semgrep --version --disable-version-check
           gitleaks version
 
-      # Pinned exactly. `claude plugin validate` is the gate on both manifests,
-      # and a validator that changes what it accepts between two runs of an
-      # unchanged repo is not a gate. Bump this deliberately, in a diff.
-      - name: Install the Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.251
-
-      # README, "Publisher: shipping a change", step 3: both must pass.
-      # Manifest validation only — reads two JSON files, needs no account.
-      - name: Manifests — plugin and marketplace, strict
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          claude plugin validate ./plugins/productizer --strict
-          claude plugin validate . --strict
-
-      # Grammar, then permanence. Exit 4 is NOT MEASURED — a file that could
-      # not be read, or holds no requirements — and it is non-zero on purpose:
-      # a spec nobody parsed has not passed.
-      #
-      # --strict SINCE v4.66.0: a WARN now fails this step. It was deliberately
-      # not --strict while the spec carried WARNs - three requirements with two
-      # `shall` clauses, since split - because a step that fails on a
-      # pre-existing condition is a step somebody deletes. Measured 2026-10-10:
-      # the last WARN was P1 naming a script that does not exist
-      # (PRINCIPLE_CHECK_ABSENT), removed by the maintainer's amendment, and
-      # `validate-spec.py --repo . --strict` then printed
-      # `2 file(s) checked: 0 error(s), 0 warning(s)` and exited 0. So the bar
-      # rose with nothing to fix, and a new WARN is now a red step on the change
-      # that introduced it rather than a line nobody reads. See references/ci.md.
-      #
-      # `--repo .` rather than a list of paths. The cross-file checks
-      # (ID_DEFINED_TWICE, COUNTER_DISAGREES, SIBLING_ID_AT_OR_ABOVE_COUNTER,
-      # TEXT_DUPLICATE_ACROSS_FILES, and citations resolved across siblings)
-      # only ever ran over the files the command line named, so with a hardcoded
-      # list the day someone splits the spec is the day this step goes quiet
-      # about the half it was never told to read. `--repo` derives the list from
-      # `spec.path` in .claude/productizer/config.json and turns any undeclared
-      # spec file in that directory into an ERROR. On this repo, which has one
-      # spec file, it discovers exactly the two paths this step used to name and
-      # its output is byte for byte what the list produced.
-      - name: Spec — EARS grammar and id permanence
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --self-test
-          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --repo . --strict
-
-      # B63. The step above validates `--repo .`, which discovers the spec and
-      # the constitution from `spec.path` in config.json. It deliberately does
-      # NOT discover the backlog: `--repo` treats any other file in the spec
-      # directory that reads as a spec as an ERROR rather than a silent
-      # inclusion, and the backlog is a different document kind. Measured:
-      # `--repo .` reports 2 file(s) checked - spec.md and constitution.md - and
-      # exits 0 with backlog.md sitting in that same directory. So nothing in
-      # CI, and nothing in the declared suite, had ever read backlog.md.
-      #
-      # MEASURED 2026-09-14, at a tagged release: the backlog's `Next backlog
-      # id` counter read B48 while its rows ran to B53, and had done since
-      # v4.53.0 - five BACKLOG_ID_AT_OR_ABOVE_COUNTER errors. The next id
-      # allocated would have been B48, which already names shipped work. It was
-      # found by running this command by hand, which is the only way it could
-      # have been found.
-      #
-      # A SEPARATE STEP, NOT A LINE APPENDED ABOVE. The step above is
-      # `set -euo pipefail`: a spec error there would stop the run before the
-      # backlog was read, so a stale counter would stay invisible for as long as
-      # the spec had any error at all. `if: ${{ !cancelled() }}` on its own step
-      # is what makes the two documents independently reported.
-      #
-      # A WORKFLOW STEP AND NOT A `checks.yaml` CHECK, decided on one measured
-      # fact rather than on taste: `run-checks.sh` refuses to load a `block`
-      # check that declares no `version_command`, and `validate-spec.py` has no
-      # `--version` flag - `--version` exits 2, "unrecognized arguments". Every
-      # version_command available for it therefore records either python3's
-      # version or, on a non-zero exit, `"version": null` in
-      # checks-result.json - a blocking check whose tool version is permanently
-      # unknown, which is the hollow evidence this repo refuses everywhere else.
-      # Adding `--version` to validate-spec.py is the change that would make the
-      # declared check honest, and it is a change to the validator, not to this
-      # config. Until then the backlog belongs beside the spec, on the same tool,
-      # in the same job.
-      #
-      # `--kind backlog` is passed explicitly although the kind is auto-detected
-      # from the heading. A backlog whose heading is rewritten into something the
-      # detector reads as another kind would then be validated under the wrong
-      # grammar and pass; named explicitly, it is an error. Not `--strict`: a
-      # WARN is printed and does not block. The spec step above went strict in
-      # v4.66.0 once it measured zero WARNs; this step was not part of that
-      # change, although the backlog also measured 0 warnings on 2026-10-10.
-      - name: Backlog — id permanence and header counts
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --kind backlog .claude/productizer/backlog.md
-
-      # Precision must stay at 1.00. A contradiction checker that halts on a
-      # non-conflict gets switched off, and then nothing is checked.
       - name: Self-tests — every check tool the suite invokes
         # R40: "When the check suite runs, the lifecycle shall run the self-test
         # of every check tool it invokes." R39 obliges the self-test to EXIST;
@@ -394,66 +337,239 @@ jobs:
         # `spec-diff.sh` and `pr-spec-comment.sh` joined in v4.67.0 for the
         # same reason: the copyable CI template runs both, through
         # `build-dispatch.sh`, and neither was named in either file before.
+        #
+        # SHARDED SINCE B186. Each shard runs its share of the lines below, one
+        # self-test per line, as before. `record` is a function defined on the
+        # first line of the block: it runs the line's command through
+        # `check-selftest-coverage.sh --record`, which hands back the
+        # self-test's own exit code, so `set -e` stops the shard on a failure
+        # exactly as it stopped the single step. Every line still names its tool
+        # and its flag, which is what the scanner reads.
+        #
+        # The checks.yaml-only self-tests - record-classification.sh,
+        # build-view.sh and the ten Python checkers - are named here too since
+        # B186. Each is still run by its declared check in Stage 5; named here,
+        # it is recorded, so the probe inside Stage 5 reads it instead of
+        # running it a third time on the slowest job's clock.
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
-          python3 evals/check-hard-corpus.py --selftest
-          python3 evals/check-mech-corpus.py --selftest
-          python3 evals/solver-probe.py --selftest
-          python3 plugins/productizer/skills/spec/scripts/argv-classify.py --selftest
-          python3 plugins/productizer/skills/spec/scripts/check-ci-template.py --selftest
-          python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
-          python3 plugins/productizer/skills/spec/scripts/check-release-workflow.py --selftest
-          python3 plugins/productizer/skills/spec/scripts/check-skill-body.py --selftest
-          bash plugins/productizer/skills/help/scripts/list-commands.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/build-dispatch.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/build-requirement-index.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/build-release-notes.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-cannot-run-coverage.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-changelog-row.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-citations.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-classification-provenance.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-declared-scope.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-diff-paths-named.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-governance-weakening.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-import-marking.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-installed-copies.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-jira-unbound.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-missing-tool.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-no-fabricated-zero.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-nothing-merged.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-pending-ruling-scope.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-ruling-requested.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-sigpipe.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-spec-home-stop.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-spec-home.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-spec-integrity.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-stderr.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-superseded-text.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-suspect-links.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-unmeasured-report.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-untrusted-execution.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-view-publish-refused.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-view-readonly.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-view-rendered.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/check-waiver-rendering.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/classify-change-risk.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/graduate.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/measure-check-underfire.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/pr-spec-comment.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/req-trailer.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/spec-diff.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/spec-doctor.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/spec-requirements.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/stage-advance.sh --selftest
-          bash plugins/productizer/skills/spec/scripts/upgrade-drift.sh --selftest
-          bash scripts/check-hygiene.sh --selftest
-          python3 scripts/replay-ci.py --selftest
+          record() { bash plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh --record "$RUNNER_TEMP/selftest-records" -- "$@"; }
+          case "$SHARD" in
+            1)
+              record python3 plugins/productizer/skills/spec/scripts/argv-classify.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-diff-paths-named.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-jira-unbound.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-plan-page.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-view-rendered.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/classify-change-risk.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/score-reviewer-case.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/spec-diff.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/upgrade-drift.sh --selftest
+              ;;
+            2)
+              record python3 evals/check-hard-corpus.py --selftest
+              record python3 evals/check-mech-corpus.py --selftest
+              record python3 evals/solver-probe.py --selftest
+              record python3 plugins/productizer/skills/spec/scripts/band-review-rounds.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/build-requirement-index.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-classification-provenance.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-frontmatter.py --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-revert-cases.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-view-readonly.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/graduate.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/spec-doctor.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/spec-requirements.sh --selftest
+              record bash scripts/check-hygiene.sh --selftest
+              ;;
+            3)
+              record bash plugins/productizer/skills/spec/scripts/build-plan-page.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-ci-template.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-installed-copies.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-no-fabricated-zero.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-review-record.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-ruling-requested.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-sigpipe.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-spec-home-stop.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-spec-home.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-spec-integrity.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-unmeasured-report.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/pr-spec-comment.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/record-classification.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/retrieval-budget.sh --selftest
+              ;;
+            4)
+              record bash plugins/productizer/skills/help/scripts/list-commands.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/band-revert-rate.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/build-guide.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/build-release-notes.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/build-view.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-calibration-recorded.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-changelog-row.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-governance-weakening.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-import-marking.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-pending-ruling-scope.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-release-workflow.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-stderr.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-superseded-text.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-untrusted-execution.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/measure-check-overfire.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/run-checks.sh --selftest
+              record python3 scripts/replay-ci.py --selftest
+              ;;
+            5)
+              record bash plugins/productizer/skills/spec/scripts/build-dispatch.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-approval-rules.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-cannot-run-coverage.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-citations.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-declared-scope.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-missing-tool.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-nothing-merged.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-plan-record.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/check-skill-body.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-suspect-links.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-view-publish-refused.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/check-waiver-rendering.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/measure-check-underfire.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/plan-answers.py --selftest
+              record bash plugins/productizer/skills/spec/scripts/req-trailer.sh --selftest
+              record bash plugins/productizer/skills/spec/scripts/stage-advance.sh --selftest
+              ;;
+            *)
+              echo "::error::no self-test shard named '$SHARD'"
+              exit 1 ;;
+          esac
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: selftest-records-${{ matrix.shard }}
+          path: ${{ runner.temp }}/selftest-records/
+          if-no-files-found: error
+          retention-days: 5
+
+  # --- THE GATE: manifests, spec, backlog, solver, and Stage 5 ---------------
+  #
+  # Named `checks`, as the single job was, so the status check and the release
+  # jobs' `needs:` keep that name. It waits for every shard, because Stage 5's
+  # `selftest-coverage` reads their records, and it runs when a shard FAILED
+  # too (`!cancelled()`): Stage 5 then probes whatever has no record, and its
+  # findings are reported rather than hidden behind the shard's. The last step
+  # fails this job unless every shard passed, so `checks` passing means all of
+  # it passed.
+  checks:
+    needs: selftests
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - *checkout
+      - *setup-node
+      - *setup-python
+      - *pyyaml
+      - *semgrep
+      - *gitleaks
+      - *puppeteer
+      - *guard
+      - *preflight
+
+      # Pinned exactly. `claude plugin validate` is the gate on both manifests,
+      # and a validator that changes what it accepts between two runs of an
+      # unchanged repo is not a gate. Bump this deliberately, in a diff.
+      - name: Install the Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.251
+
+      # README, "Publisher: shipping a change", step 3: both must pass.
+      # Manifest validation only — reads two JSON files, needs no account.
+      - name: Manifests — plugin and marketplace, strict
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          claude plugin validate ./plugins/productizer --strict
+          claude plugin validate . --strict
+
+      # Grammar, then permanence. Exit 4 is NOT MEASURED — a file that could
+      # not be read, or holds no requirements — and it is non-zero on purpose:
+      # a spec nobody parsed has not passed.
+      #
+      # --strict SINCE v4.66.0: a WARN now fails this step. It was deliberately
+      # not --strict while the spec carried WARNs - three requirements with two
+      # `shall` clauses, since split - because a step that fails on a
+      # pre-existing condition is a step somebody deletes. Measured 2026-10-10:
+      # the last WARN was P1 naming a script that does not exist
+      # (PRINCIPLE_CHECK_ABSENT), removed by the maintainer's amendment, and
+      # `validate-spec.py --repo . --strict` then printed
+      # `2 file(s) checked: 0 error(s), 0 warning(s)` and exited 0. So the bar
+      # rose with nothing to fix, and a new WARN is now a red step on the change
+      # that introduced it rather than a line nobody reads. See references/ci.md.
+      #
+      # `--repo .` rather than a list of paths. The cross-file checks
+      # (ID_DEFINED_TWICE, COUNTER_DISAGREES, SIBLING_ID_AT_OR_ABOVE_COUNTER,
+      # TEXT_DUPLICATE_ACROSS_FILES, and citations resolved across siblings)
+      # only ever ran over the files the command line named, so with a hardcoded
+      # list the day someone splits the spec is the day this step goes quiet
+      # about the half it was never told to read. `--repo` derives the list from
+      # `spec.path` in .claude/productizer/config.json and turns any undeclared
+      # spec file in that directory into an ERROR. On this repo, which has one
+      # spec file, it discovers exactly the two paths this step used to name and
+      # its output is byte for byte what the list produced.
+      - name: Spec — EARS grammar and id permanence
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          record() { bash plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh --record "$RUNNER_TEMP/selftest-records" -- "$@"; }
+          record python3 plugins/productizer/skills/spec/scripts/validate-spec.py --self-test
+          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --repo . --strict
+
+      # B63. The step above validates `--repo .`, which discovers the spec and
+      # the constitution from `spec.path` in config.json. It deliberately does
+      # NOT discover the backlog: `--repo` treats any other file in the spec
+      # directory that reads as a spec as an ERROR rather than a silent
+      # inclusion, and the backlog is a different document kind. Measured:
+      # `--repo .` reports 2 file(s) checked - spec.md and constitution.md - and
+      # exits 0 with backlog.md sitting in that same directory. So nothing in
+      # CI, and nothing in the declared suite, had ever read backlog.md.
+      #
+      # MEASURED 2026-09-14, at a tagged release: the backlog's `Next backlog
+      # id` counter read B48 while its rows ran to B53, and had done since
+      # v4.53.0 - five BACKLOG_ID_AT_OR_ABOVE_COUNTER errors. The next id
+      # allocated would have been B48, which already names shipped work. It was
+      # found by running this command by hand, which is the only way it could
+      # have been found.
+      #
+      # A SEPARATE STEP, NOT A LINE APPENDED ABOVE. The step above is
+      # `set -euo pipefail`: a spec error there would stop the run before the
+      # backlog was read, so a stale counter would stay invisible for as long as
+      # the spec had any error at all. `if: ${{ !cancelled() }}` on its own step
+      # is what makes the two documents independently reported.
+      #
+      # A WORKFLOW STEP AND NOT A `checks.yaml` CHECK, decided on one measured
+      # fact rather than on taste: `run-checks.sh` refuses to load a `block`
+      # check that declares no `version_command`, and `validate-spec.py` has no
+      # `--version` flag - `--version` exits 2, "unrecognized arguments". Every
+      # version_command available for it therefore records either python3's
+      # version or, on a non-zero exit, `"version": null` in
+      # checks-result.json - a blocking check whose tool version is permanently
+      # unknown, which is the hollow evidence this repo refuses everywhere else.
+      # Adding `--version` to validate-spec.py is the change that would make the
+      # declared check honest, and it is a change to the validator, not to this
+      # config. Until then the backlog belongs beside the spec, on the same tool,
+      # in the same job.
+      #
+      # `--kind backlog` is passed explicitly although the kind is auto-detected
+      # from the heading. A backlog whose heading is rewritten into something the
+      # detector reads as another kind would then be validated under the wrong
+      # grammar and pass; named explicitly, it is an error. Not `--strict`: a
+      # WARN is printed and does not block. The spec step above went strict in
+      # v4.66.0 once it measured zero WARNs; this step was not part of that
+      # change, although the backlog also measured 0 warnings on 2026-10-10.
+      - name: Backlog — id permanence and header counts
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          python3 plugins/productizer/skills/spec/scripts/validate-spec.py --kind backlog .claude/productizer/backlog.md
 
       - name: Acceptance rows — check-acceptance-rows self-test
         # R40 obliges the suite to RUN the self-tests R39 obliges tools to carry.
@@ -464,13 +580,17 @@ jobs:
         # thing this repository refuses to call evidence.
         run: |
           set -euo pipefail
-          bash plugins/productizer/skills/spec/scripts/check-acceptance-rows.sh --selftest
+          record() { bash plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh --record "$RUNNER_TEMP/selftest-records" -- "$@"; }
+          record bash plugins/productizer/skills/spec/scripts/check-acceptance-rows.sh --selftest
 
+      # Precision must stay at 1.00. A contradiction checker that halts on a
+      # non-conflict gets switched off, and then nothing is checked.
       - name: Solver — contradiction-check self-test
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          python3 plugins/productizer/skills/spec/scripts/contradiction-check.py --selftest
+          record() { bash plugins/productizer/skills/spec/scripts/check-selftest-coverage.sh --record "$RUNNER_TEMP/selftest-records" -- "$@"; }
+          record python3 plugins/productizer/skills/spec/scripts/contradiction-check.py --selftest
 
       # THE 26-CASE PROBE, GATED. The step above runs the solver against the
       # corpus its own author wrote. `evals/solver-probe.py` runs it against
@@ -628,7 +748,17 @@ jobs:
           print("solver probe at or above the 2026-09-06 baseline: %s" % this_run)
           PY
 
-      # Stage 5, last because it is the slowest: shellcheck runs per changed
+      # The records every shard uploaded, merged into the directory the steps
+      # above recorded into. A shard that failed before uploading leaves its
+      # self-tests without a record, and Stage 5 then probes them.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ !cancelled() }}
+        with:
+          pattern: selftest-records-*
+          path: ${{ runner.temp }}/selftest-records
+          merge-multiple: true
+
+      # Stage 5, the slowest step of the run: shellcheck runs per changed
       # file. Exit 3 is REFUSED (a blocking check failed, was hollow, timed
       # out, or its tool is missing); exit 2 is bad usage; exit 1 is a crash,
       # which reads as unverified and never as a pass. All three fail the job.
@@ -663,9 +793,27 @@ jobs:
             base="$(git rev-parse --verify HEAD^)"
           fi
           echo "base: $base"
+          # B186: selftest-coverage reads these records instead of running every
+          # self-test a second time. See the comment above the `selftests` job.
+          export PRODUCTIZER_SELFTEST_RECORDS="$RUNNER_TEMP/selftest-records"
           plugins/productizer/skills/spec/scripts/run-checks.sh \
             --base "$base" \
             --out "$RUNNER_TEMP/checks-result.json"
+
+      # THE SHARDS' VERDICT. `needs.selftests.result` is `success` only when
+      # every shard passed. Without this step a failed shard would leave
+      # `checks` green, because this job runs after a failed shard on purpose.
+      - name: Self-tests — every shard passed
+        if: ${{ !cancelled() }}
+        env:
+          SHARDS: ${{ needs.selftests.result }}
+        run: |
+          set -euo pipefail
+          echo "self-test shards: $SHARDS"
+          if [ "$SHARDS" != success ]; then
+            echo "::error::the self-test shards read '$SHARDS', not success; see the selftests jobs"
+            exit 1
+          fi
 
   # --- A TAG PUSH DRAFTS ITS RELEASE. A PERSON PUBLISHES IT. -----------------
   #
@@ -717,13 +865,13 @@ jobs:
   #
   # PERMISSIONS. The workflow's default stays `contents: read`. Only
   # release-draft can write, only on a tag push, and only after `checks` passed
-  # on that tag - so a pull request never gets a token that can create a
+  # on that tag, with every self-test shard - so a pull request never gets a token that can create a
   # release, and a tag that fails the gate never gets a draft. release-prep adds
   # `pull-requests: read`, the permission GitHub lists for reading pull requests
   # (`GET /repos/{owner}/{repo}/pulls`: read), because build-release-notes.sh
   # reads merged PRs with `gh pr list`.
   release-prep:
-    needs: checks
+    needs: [selftests, checks]
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
@@ -850,7 +998,7 @@ jobs:
           retention-days: 5
 
   release-draft:
-    needs: [checks, release-prep]
+    needs: [selftests, checks, release-prep]
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:

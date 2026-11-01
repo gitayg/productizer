@@ -238,4 +238,10 @@ marker, because a table left there would be one nothing writes or checks.
 | R210 | ubiquitous | active | `plan-answers` |
 | R211 | optional | active | `plan-page-builder` |
 | R212 | unwanted | active | `plan-page-builder` |
+| R213 | unwanted | active | `selftest-coverage` |
+| R214 | event | active | `selftest-coverage` |
+| R215 | optional | active | `selftest-coverage` |
+| R216 | unwanted | active | `selftest-coverage` |
+| R217 | event | active | `selftest-coverage` |
+| R218 | event | active | `ci-replay` |
 <!-- productizer:requirement-index:end -->

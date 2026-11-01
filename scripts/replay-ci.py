@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Replay CI's `checks` job against a clean clone of one commit, before you push.
+"""Replay CI's `checks` job, and every job it needs, against clean clones of one
+commit, before you push.
 
 WHY. Four CI failures reached `main` in v4.61.0-v4.62.0 behind a green local
 suite, and every one was a gap between a working tree and a fresh runner
@@ -12,24 +13,36 @@ WHAT IT DOES.
   1. Clones the repository into a temporary directory and checks out the exact
      commit, so nothing uncommitted can leak in. It asserts 0 local changes.
   2. Reads .github/workflows/checks.yml FROM THAT COMMIT, takes the `checks`
-     job's steps in order, and runs each `run:` block verbatim with
+     job and every job it needs, in the order `needs:` puts them (B186), and
+     for each job - each value of a one-key `strategy.matrix`, one at a time -
+     a fresh clone, as a fresh runner gets. It runs each `run:` block verbatim with
      `bash --noprofile --norc -e -o pipefail -c`, in the clone, with
      RUNNER_TEMP, GITHUB_ENV, GITHUB_PATH and GITHUB_WORKSPACE pointed into the
      temporary directory. What a step writes to GITHUB_ENV and GITHUB_PATH is
      carried into every later step, as the runner does. A step's `env:` is
      applied with `${{ github.event.before }}` replaced by the push base and
-     `${{ github.event.pull_request.base.sha }}` by empty - a push to main.
+     `${{ github.event.pull_request.base.sha }}` by empty - a push to main -
+     `${{ matrix.<key> }}` by the leg's value, `${{ runner.temp }}` by the
+     leg's runner temp, and `${{ needs.<job>.result }}` by what that job came
+     to here (`skipped` where CI would not have run it).
   3. Skips `uses:` steps and steps that only INSTALL a tool (semgrep, gitleaks,
      a global npm install such as the Claude Code CLI), naming each skip and
-     the copy of the tool this machine will use instead.
+     the copy of the tool this machine will use instead. The two artifact
+     actions are not skipped, because the jobs hand records over through them:
+     actions/upload-artifact copies its `path` into a store under its `name`
+     (refusing a name already taken, and an empty path under
+     `if-no-files-found: error`), and actions/download-artifact copies by
+     `name` or `pattern` into its `path`, merged under `merge-multiple: true`.
   4. Prints one line per step with its exit code, and the tail of each failing
      step's log.
   5. Runs every step under RUNNER-LIKE GIT AND HOST SETTINGS, not this
      machine's (B124). See RUNNER_GIT below for what is pinned and why.
 
-Every step runs, even after one fails. A step CI would skip after a failure
-(no `if: !cancelled()`) is marked so; its result is still reported, because a
-second failure hidden behind the first is the one you push next.
+Every step runs, even after one fails, and every job, even after one it needs
+failed. A step or job CI would skip after a failure (no `if: !cancelled()`) is
+marked so; its result is still reported, because a second failure hidden behind
+the first is the one you push next. A job whose `if:` is anything but
+`!cancelled()` or `always()` cannot be evaluated here and the replay refuses.
 
 THE ONE REFUSAL IT FORGIVES, AND HOW. Measured on a Mac: the PyYAML install
 step fails because Homebrew's Python refuses a system-wide pip install
@@ -82,6 +95,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import fnmatch
 import signal
 import time
 
@@ -152,6 +166,9 @@ EXPRESSIONS = {
 EXPR = re.compile(r"\$\{\{\s*([^}]*?)\s*\}\}")
 IF_ALWAYS = {"!cancelled()", "always()"}
 STEP_KEYS = {"name", "id", "uses", "with", "run", "env", "if"}
+JOB_KEYS = {"runs-on", "timeout-minutes", "needs", "if", "strategy", "steps", "permissions"}
+UPLOAD = "actions/upload-artifact@"
+DOWNLOAD = "actions/download-artifact@"
 
 
 class CannotRun(Exception):
@@ -206,7 +223,9 @@ def snapshot(top):
     return h.hexdigest(), files
 
 
-def load_steps(ws):
+def load_jobs(ws):
+    """[(job, matrix key, [values] or [None], needs, steps, `if:`)] for
+    `checks` and every job it needs, each after the jobs it needs."""
     try:
         import yaml
     except ImportError:
@@ -220,28 +239,82 @@ def load_steps(ws):
     except yaml.YAMLError as e:
         raise CannotRun(f"workflow unparseable: {WORKFLOW}: {e}")
     try:
-        steps = doc["jobs"][JOB]["steps"]
+        jobs = doc["jobs"]
+        jobs[JOB]["steps"]
     except (TypeError, KeyError):
         raise CannotRun(f"workflow unparseable: {WORKFLOW} has no jobs.{JOB}.steps")
+    order, seen = [], set()
+
+    def visit(name, chain):
+        if name in seen:
+            return
+        if name in chain:
+            raise CannotRun(f"workflow unparseable: `needs:` runs in a circle through {name}")
+        job = jobs.get(name)
+        if not isinstance(job, dict):
+            raise CannotRun(f"workflow unparseable: a job needs {name}, and there is no such job")
+        needs = job.get("needs") or []
+        needs = [needs] if isinstance(needs, str) else list(needs)
+        for n in needs:
+            visit(n, chain + [name])
+        seen.add(name)
+        order.append((name, needs))
+
+    visit(JOB, [])
+    out = []
+    for name, needs in order:
+        job = jobs[name]
+        extra = set(job) - JOB_KEYS
+        if extra:
+            raise CannotRun(f"workflow unparseable: job {name} uses {sorted(extra)}, which this replay "
+                            f"does not implement - refusing rather than ignoring it")
+        cond = str(job.get("if", "")).strip()
+        m = EXPR.fullmatch(cond)
+        if cond and (m.group(1) if m else cond) not in IF_ALWAYS:
+            raise CannotRun(f"workflow unparseable: job {name} has `if: {cond}`, which this replay cannot evaluate")
+        key, values = None, [None]
+        strategy = job.get("strategy")
+        if strategy is not None:
+            matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+            if (not isinstance(strategy, dict) or set(strategy) - {"matrix", "fail-fast"}
+                    or not isinstance(matrix, dict) or len(matrix) != 1):
+                raise CannotRun(f"workflow unparseable: job {name}'s strategy is not one `matrix` key with "
+                                f"a list of values, which is all this replay implements")
+            key, values = next(iter(matrix.items()))
+            if not isinstance(values, list) or not values or any(isinstance(v, (dict, list)) for v in values):
+                raise CannotRun(f"workflow unparseable: job {name}'s matrix.{key} is not a list of values")
+        allowed = set(EXPRESSIONS) | {"runner.temp"} | {f"needs.{n}.result" for n in needs}
+        if key is not None:
+            allowed.add(f"matrix.{key}")
+        out.append((name, key, values, needs, check_steps(name, job.get("steps"), allowed), cond))
+    return out
+
+
+def check_steps(job, steps, allowed):
     if not isinstance(steps, list) or not steps:
-        raise CannotRun(f"workflow unparseable: jobs.{JOB}.steps is not a non-empty list")
+        raise CannotRun(f"workflow unparseable: jobs.{job}.steps is not a non-empty list")
     for i, s in enumerate(steps, 1):
+        where = f"step {i}" if job == JOB else f"job {job} step {i}"
         if not isinstance(s, dict) or ("run" in s) == ("uses" in s):
-            raise CannotRun(f"workflow unparseable: step {i} is not exactly one of `run:` or `uses:`")
+            raise CannotRun(f"workflow unparseable: {where} is not exactly one of `run:` or `uses:`")
         extra = set(s) - STEP_KEYS
         if extra:
-            raise CannotRun(f"workflow unparseable: step {i} uses {sorted(extra)}, which this replay "
+            raise CannotRun(f"workflow unparseable: {where} uses {sorted(extra)}, which this replay "
                             f"does not implement - refusing rather than ignoring it")
         cond = str(s.get("if", "")).strip()
         m = EXPR.fullmatch(cond)
         if cond and (m.group(1) if m else cond) not in IF_ALWAYS:
-            raise CannotRun(f"workflow unparseable: step {i} has `if: {cond}`, which this replay cannot evaluate")
+            raise CannotRun(f"workflow unparseable: {where} has `if: {cond}`, which this replay cannot evaluate")
         if "run" in s and "${{" in str(s["run"]):
-            raise CannotRun(f"workflow unparseable: step {i}'s run: block holds a `${{{{ }}}}` expression")
-        for k, v in (s.get("env") or {}).items():
+            raise CannotRun(f"workflow unparseable: {where}'s run: block holds a `${{{{ }}}}` expression")
+        artifact = "uses" in s and str(s["uses"]).startswith((UPLOAD, DOWNLOAD))
+        values = list((s.get("env") or {}).items())
+        if artifact:
+            values += list((s.get("with") or {}).items())
+        for k, v in values:
             for expr in EXPR.findall(str(v)):
-                if expr not in EXPRESSIONS:
-                    raise CannotRun(f"workflow unparseable: step {i} env {k} uses `${{{{ {expr} }}}}`, "
+                if expr not in allowed:
+                    raise CannotRun(f"workflow unparseable: {where} {k} uses `${{{{ {expr} }}}}`, "
                                     f"which this replay cannot evaluate")
     return steps
 
@@ -306,13 +379,11 @@ def step_name(s):
 
 def replay(src, commit, base, base_why, keep):
     top = os.path.realpath(tempfile.mkdtemp(prefix="replay-ci-"))
-    ws = os.path.join(top, "ws")
-    rt = os.path.join(top, "runner-temp")
-    logs = os.path.join(top, "logs")
-    os.makedirs(rt)
-    os.makedirs(logs)
+    store = os.path.join(top, "artifacts")
+    os.makedirs(store)
     print(f"replay-ci: workspace {top}", flush=True)
     try:
+        ws = os.path.join(top, "ws")
         clone(src, commit, base, ws)
         subject = git(["log", "-1", "--format=%s", commit], ws).strip()
         print(f"replay-ci: commit {commit}  {subject}")
@@ -321,9 +392,35 @@ def replay(src, commit, base, base_why, keep):
             print("replay-ci: base equals the commit - the change set is EMPTY, so change-set-driven checks "
                   "measure nothing here; pass --base to replay a real push")
         print(f"replay-ci: clean clone, HEAD {commit}, 0 local changes")
-        steps = load_steps(ws)
-        print(f"replay-ci: {len(steps)} steps in jobs.{JOB} of {WORKFLOW} at that commit", flush=True)
-        return run_steps(steps, ws, rt, logs, base)
+        jobs = load_jobs(ws)
+        print(f"replay-ci: {len(jobs)} job(s) of {WORKFLOW} at that commit, in the order `needs:` runs them: "
+              + ", ".join(n if k is None else f"{n} ({k}: {', '.join(str(v) for v in vs)})"
+                          for n, k, vs, _, _, _ in jobs), flush=True)
+        results, outcome = [], {}
+        for n, (name, key, values, needs, steps, cond) in enumerate(jobs):
+            failed_needs = [x for x in needs if outcome.get(x) != "success"]
+            ci_skips = bool(failed_needs) and not cond
+            leg_failed = False
+            for v, value in enumerate(values):
+                label = name if key is None else f"{name} ({key} {value})"
+                ws = os.path.join(top, f"ws-{n}-{v}")
+                rt = os.path.join(top, f"runner-temp-{n}-{v}")
+                logs = os.path.join(top, f"logs-{n}-{v}")
+                os.makedirs(rt)
+                os.makedirs(logs)
+                clone(src, commit, base, ws)
+                note = ""
+                if ci_skips:
+                    note = (f" - CI would skip this job: {', '.join(failed_needs)} did not succeed and it has "
+                            f"no `if: !cancelled()`; replayed anyway")
+                print(f"replay-ci: job {label}, a fresh clone at {commit[:12]}{note}", flush=True)
+                ctx = {"matrix": (key, value), "needs": {x: outcome.get(x, "skipped") for x in needs},
+                       "store": store}
+                got = run_steps(steps, ws, rt, logs, base, ctx)
+                results.extend((label,) + r for r in got)
+                leg_failed = leg_failed or any(r[2] == "FAIL" for r in got)
+            outcome[name] = "skipped" if ci_skips else ("failure" if leg_failed else "success")
+        return results
     finally:
         if keep:
             print(f"replay-ci: kept {top}")
@@ -331,7 +428,65 @@ def replay(src, commit, base, base_why, keep):
             shutil.rmtree(top, ignore_errors=False)
 
 
-def run_steps(steps, ws, rt, logs, base):
+def evaluate(text, base, rt, ctx):
+    """A value with its `${{ }}` expressions replaced. load_jobs refused every
+    expression this does not know, so none reaches here unknown."""
+    def one(mm):
+        e = mm.group(1)
+        if e == "github.event.before":
+            return base
+        if e in EXPRESSIONS:
+            return EXPRESSIONS[e]
+        if e == "runner.temp":
+            return rt
+        key, value = ctx["matrix"]
+        if key is not None and e == f"matrix.{key}":
+            return str(value)
+        return ctx["needs"][e[len("needs."):-len(".result")]]
+    return EXPR.sub(one, str(text))
+
+
+def artifact_step(s, ws, rt, base, ctx):
+    """(exit code, what happened) for actions/upload-artifact or
+    actions/download-artifact, emulated over a store shared by the run."""
+    w = {str(k): evaluate(v, base, rt, ctx) for k, v in (s.get("with") or {}).items()}
+    store = ctx["store"]
+    if str(s["uses"]).startswith(UPLOAD):
+        name, path = w.get("name", ""), w.get("path", "")
+        if not name or not path:
+            return 1, "upload-artifact needs a name and a path"
+        dest = os.path.join(store, name)
+        if os.path.exists(dest):
+            return 1, f"an artifact named {name} was already uploaded in this run"
+        hidden = str(w.get("include-hidden-files", "false")).lower() == "true"
+        files = []
+        if os.path.isdir(path):
+            for root, dirs, names in os.walk(path):
+                if not hidden:
+                    dirs[:] = [d for d in dirs if not d.startswith(".")]
+                files += [n for n in names if hidden or not n.startswith(".")]
+        if not files:
+            if w.get("if-no-files-found", "warn") == "error":
+                return 1, f"upload-artifact {name}: no files at {path}, and if-no-files-found is error"
+            return 0, f"upload-artifact {name}: no files at {path}, nothing uploaded"
+        shutil.copytree(path, dest, ignore=None if hidden else shutil.ignore_patterns(".*"))
+        return 0, f"upload-artifact {name}: {len(files)} file(s)"
+    path = w.get("path") or ws
+    merge = str(w.get("merge-multiple", "false")).lower() == "true"
+    if w.get("name"):
+        names, into = [w["name"]], lambda n: path
+        if not os.path.isdir(os.path.join(store, w["name"])):
+            return 1, f"download-artifact: no artifact named {w['name']} was uploaded in this run"
+    else:
+        pattern = w.get("pattern", "*")
+        names = sorted(n for n in os.listdir(store) if fnmatch.fnmatchcase(n, pattern))
+        into = (lambda n: path) if merge else (lambda n: os.path.join(path, n))
+    for n in names:
+        shutil.copytree(os.path.join(store, n), into(n), dirs_exist_ok=True)
+    return 0, f"download-artifact: {len(names)} artifact(s) ({', '.join(names) or 'none matched'}) into {path}"
+
+
+def run_steps(steps, ws, rt, logs, base, ctx):
     carried_env = {}
     prepend = []
     base_path = os.environ.get("PATH", "")
@@ -346,6 +501,19 @@ def run_steps(steps, ws, rt, logs, base):
     for i, s in enumerate(steps, 1):
         name = step_name(s)
         tag = f"  #{i:<2}"
+        if "uses" in s and str(s["uses"]).startswith((UPLOAD, DOWNLOAD)):
+            cond = str(s.get("if", "")).strip()
+            m = EXPR.fullmatch(cond)
+            skip_note = ""
+            if failed_so_far and not (cond and (m.group(1) if m else cond) in IF_ALWAYS):
+                skip_note = " (CI would skip this step: an earlier step failed and it has no `if: !cancelled()`)"
+            rc, what = artifact_step(s, ws, rt, base, ctx)
+            status = "PASS" if rc == 0 else "FAIL"
+            print(f"{tag} {status:<13} exit {rc:<3}   0.0s  {name} - {what}{skip_note}", flush=True)
+            if status == "FAIL":
+                failed_so_far = True
+            results.append((i, name, status, rc))
+            continue
         if "uses" in s:
             print(f"{tag} SKIP          `uses:` action, not replayed ({s['uses']})", flush=True)
             results.append((i, name, "SKIP", None))
@@ -374,8 +542,7 @@ def run_steps(steps, ws, rt, logs, base):
         env = dict(runner_env)
         env.update(carried_env)
         for k, v in (s.get("env") or {}).items():
-            env[str(k)] = EXPR.sub(lambda mm: base if mm.group(1) == "github.event.before"
-                                   else EXPRESSIONS[mm.group(1)], str(v))
+            env[str(k)] = evaluate(v, base, rt, ctx)
         env.update(RUNNER_TEMP=rt, GITHUB_ENV=env_file, GITHUB_PATH=path_file, GITHUB_WORKSPACE=ws,
                    PATH=os.pathsep.join(prepend + [base_path]))
         log = os.path.join(logs, f"step-{i:02d}.log")
@@ -434,20 +601,21 @@ def run_steps(steps, ws, rt, logs, base):
 
 
 def summarize(results, commit, base):
-    failed = [r for r in results if r[2] == "FAIL"]
-    passed = [r for r in results if r[2] == "PASS"]
-    skipped = [r for r in results if r[2] == "SKIP"]
-    host = [r for r in results if r[2] == "HOST-REFUSED-VERIFIED"]
+    """results: (job label, step index, step name, status, exit code)."""
+    failed = [r for r in results if r[3] == "FAIL"]
+    passed = [r for r in results if r[3] == "PASS"]
+    skipped = [r for r in results if r[3] == "SKIP"]
+    host = [r for r in results if r[3] == "HOST-REFUSED-VERIFIED"]
     where = f"commit {commit[:12]}, base {base[:12]}"
     if failed:
-        names = "; ".join(f"#{i} {n}" for i, n, _, _ in failed)
+        names = "; ".join(f"{j} #{i} {n}" for j, i, n, _, _ in failed)
         print(f"replay-ci: FAIL - {len(failed)} step(s) failed of {len(results) - len(skipped)} that ran: "
               f"{names}. ({where})")
         return 1
     extra = ""
     if host:
         extra = (f", {len(host)} HOST-REFUSED with the postcondition verified by a later step - not counted as "
-                 f"passed ({'; '.join(f'#{i} {n}' for i, n, _, _ in host)})")
+                 f"passed ({'; '.join(f'{j} #{i} {n}' for j, i, n, _, _ in host)})")
     print(f"replay-ci: PASS - every step that ran passed: {len(passed)} passed, {len(skipped)} skipped "
           f"(named above){extra}. ({where})")
     return 0
@@ -631,6 +799,65 @@ FIXTURE_STEPS = {
 
 PRISTINE = ["checkout", "pyyaml", "gitleaks", "tool", "guard", "carry", "clean", "event"]
 
+# B186: `checks` needs a matrix job that hands files over as artifacts.
+JOBS = """\
+name: checks
+on:
+  push:
+    branches: [main]
+jobs:
+  shards:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [a, b]
+    steps:
+      - uses: actions/checkout@0000000000000000000000000000000000000000
+      - name: Write - each leg, on a fresh clone, writes its own file
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain -uall)"
+          test ! -e leg.txt
+          echo "$PART" > leg.txt
+          test "$PART" != "${FIXTURE_FAIL_PART:-}"
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "$PART" > "$RUNNER_TEMP/out/$PART.txt"
+          echo hidden > "$RUNNER_TEMP/out/.hidden"
+      - uses: actions/upload-artifact@0000000000000000000000000000000000000000
+        with:
+          name: @NAME@
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+  checks:
+    needs: shards
+@IF@    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@0000000000000000000000000000000000000000
+        if: ${{ !cancelled() }}
+        with:
+          pattern: out-*
+          path: ${{ runner.temp }}/in
+          merge-multiple: true
+      - name: Read - both legs handed their files over
+        if: ${{ !cancelled() }}
+        env:
+          SHARDS: ${{ needs.shards.result }}
+        run: |
+          set -euo pipefail
+          echo "shards: $SHARDS"
+          test "$(cat "$RUNNER_TEMP/in/a.txt")" = a
+          test "$(cat "$RUNNER_TEMP/in/b.txt")" = b
+          test ! -e "$RUNNER_TEMP/in/.hidden"
+          test "$SHARDS" = success
+"""
+
+
+def _jobs(name="out-${{ matrix.part }}", cond="    if: ${{ !cancelled() }}\n"):
+    return JOBS.replace("@NAME@", name).replace("@IF@", cond)
+
 
 def _workflow(parts):
     return ("name: checks\non:\n  push:\n    branches: [main]\njobs:\n  checks:\n    runs-on: ubuntu-latest\n"
@@ -697,6 +924,24 @@ def _cases():
         ("B124: a fixture whose bare origin takes git's default branch goes red, as it did on the runner",
          P + ["bare-origin"], lambda s, a, b: [], lambda a, b: {"FIXTURE_EXPECT_BASE": a}, True, 1,
          ["1 step(s) failed", "#9 Bare origin", "remote HEAD refers to nonexistent ref"]),
+        ("B186: checks and the job it needs, each matrix leg on a fresh clone, artifacts handed over",
+         _jobs(), lambda s, a, b: [], lambda a, b: {}, True, 0,
+         ["in the order `needs:` runs them: shards (part: a, b), checks", "job shards (part a), a fresh clone",
+          "job shards (part b), a fresh clone", "upload-artifact out-a: 1 file(s)",
+          "download-artifact: 2 artifact(s) (out-a, out-b)", "every step that ran passed"]),
+        ("B186: a failed leg makes the job it belongs to fail, and a job with `if: !cancelled()` still runs",
+         _jobs(), lambda s, a, b: [], lambda a, b: {"FIXTURE_FAIL_PART": "b"}, True, 1,
+         ["3 step(s) failed", "shards (part b) #2 Write", "shards (part b) #3", "checks #2 Read", "shards: failure",
+          "CI would skip this step"]),
+        ("B186: a job with no `if:` after a failed need is replayed, and marked as one CI would skip",
+         _jobs(cond=""), lambda s, a, b: [], lambda a, b: {"FIXTURE_FAIL_PART": "b"}, True, 1,
+         ["CI would skip this job: shards did not succeed", "shards: failure"]),
+        ("B186: two legs uploading one artifact name: the second upload fails, as on GitHub",
+         _jobs(name="out-same"), lambda s, a, b: [], lambda a, b: {}, True, 1,
+         ["an artifact named out-same was already uploaded in this run", "shards (part b) #3"]),
+        ("B186: a job `if:` the replay cannot evaluate: could not run",
+         _jobs(cond="    if: ${{ github.event_name == 'push' }}\n"), lambda s, a, b: [], lambda a, b: {}, True, 2,
+         ["could not run: workflow unparseable: job checks has `if:"]),
         ("an expression the replay cannot evaluate: could not run",
          P + ["secret"], lambda s, a, b: [], lambda a, b: {}, True, 2,
          ["could not run: workflow unparseable", "secrets.TOKEN"]),
@@ -775,7 +1020,10 @@ def selftest():
           "it takes minutes; that a skipped install's local tool matches CI's pinned version; that a `uses:` "
           "action's effect (setup-node, setup-python) is matched by this machine's own runtimes; that the "
           "runner-like git and host settings are ALL the differences that matter - the runner's own identity "
-          "refusal and its LANG are not measured here, only the git default branch is quoted from a runner log.")
+          "refusal and its LANG are not measured here, only the git default branch is quoted from a runner log; "
+          "that the artifact actions behave as emulated in what no case drives - a download whose pattern matches "
+          "nothing, retention, a name GitHub would refuse; that GitHub reads YAML anchors and aliases as PyYAML does; "
+          "that jobs run one after another here behave as they do side by side on separate runners.")
     missing = {0, 1, 2} - set(codes)
     if missing:
         sys.stdout.flush()

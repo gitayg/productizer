@@ -808,7 +808,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**179 requirements are active**, and they are the whole of what has been
+**185 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -875,7 +875,7 @@ happening:
 - **R210** — The lifecycle shall write what an answer set holds into the plan
   that answer set names and into no further file.
 
-**When something arrives.** Forty-five things happen on a discrete trigger:
+**When something arrives.** Forty-eight things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -997,6 +997,14 @@ happening:
 - **R209** — When the lifecycle applies an answer set, the lifecycle shall
   move the questions it answers from the plan's open questions into the plan's
   Decisions section, with the answer and the note given.
+- **R214** — When a self-test probe times out, the lifecycle shall report
+  whether it timed out alone or under contention, and the seconds it ran.
+- **R217** — When the lifecycle runs a self-test to keep a record of that run,
+  the lifecycle shall exit with the self-test's own exit code and pass its
+  output through unchanged.
+- **R218** — When the CI replay replays a job, the lifecycle shall also replay
+  every job that job needs, each value of a job's matrix on a fresh clone of
+  the commit, with artifacts handed between them as the workflow declares.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
@@ -1025,7 +1033,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Eighty-nine defences, written as `If … then`
+**When something goes wrong.** Ninety-one defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1293,8 +1301,14 @@ because a designed path and a defended one are not the same thing:
   configured cannot be read, lies outside the repository or sets no usable
   property, then the lifecycle shall build the page in its built-in theme and
   name on the page why.
+- **R213** — If a self-test probe of the self-test coverage check times out
+  while another probe overlaps it in time, then the lifecycle shall probe that
+  self-test once more alone, with the full probe time limit, before it counts
+  the probe as timed out.
+- **R216** — If the self-test coverage check has no usable record of a
+  self-test, then the lifecycle shall probe that self-test.
 
-**Only where the feature is present.** Eleven requirements apply only to a
+**Only where the feature is present.** Twelve requirements apply only to a
 build that includes the feature:
 
 - **R22** — Where a repository declares its own check tools, the lifecycle
@@ -1328,6 +1342,11 @@ build that includes the feature:
   lifecycle shall take the page's colours and fonts only from custom
   properties that stylesheet sets on `:root` or a dark-scheme root, each value
   of a colour or font-name shape.
+- **R215** — Where the self-test coverage check is given records of self-test
+  runs, the lifecycle shall read a self-test's record in place of probing it
+  only when the record names the current commit, a tracked tree unchanged from
+  that commit, the tool file's current content and a flag the tool dispatches
+  on.
 
 Every id above is permanent. A plan, a test or a PR title naming `R1` will
 still mean this sentence in two years, which is why ids are never reused and

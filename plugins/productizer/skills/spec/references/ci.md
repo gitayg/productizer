@@ -1,7 +1,20 @@
 # CI
 
-`.github/workflows/checks.yml`. One workflow, one job, four gates, and a
+`.github/workflows/checks.yml`. One workflow, two jobs that gate, and a
 deliberately short list of things it does not do.
+
+`selftests` runs every self-test once, split across five shards that run side by
+side, each line through `check-selftest-coverage.sh --record`. `checks` waits for
+it, runs the manifests, spec, backlog and solver steps and Stage 5, and reads the
+shards' records: `selftest-coverage` reads a record instead of running the
+self-test again when the record names this commit, an unchanged tracked tree, the
+tool's current file and a flag it dispatches on. Measured before the split, on
+main run 41231708700: one job, 19m19s, of which the self-tests 424s and Stage 5
+693s - with every self-test run a second time inside Stage 5. A shard is
+balanced on the self-test times in that run's log; a new self-test goes on a
+shard's line list, not in `checks`. `checks` runs even after a shard failed,
+so Stage 5 still reports, and its last step fails unless every shard passed. The
+release jobs need both.
 
 ## Why it exists
 
@@ -25,7 +38,8 @@ a green theatre step is worse than no step.
 | Manifests | `claude plugin validate ./plugins/productizer --strict`, then `claude plugin validate . --strict` | exit 1 — missing required field, malformed JSON, or any unknown field (`--strict` promotes that warning) |
 | Spec | `validate-spec.py --self-test`, then `validate-spec.py --repo . --strict` over `spec.md` and `constitution.md` | exit 1 (ERROR — a reused id, an unparseable document), 3 (a WARN under `--strict`, or the self-test failed), 4 (NOT MEASURED) |
 | Solver | `contradiction-check.py --selftest` | exit 1 — the corpus no longer decides what it decided |
-| Stage 5 | `run-checks.sh --base <sha>` | exit 3 REFUSED, 2 bad usage, 1 crashed |
+| Self-tests (5 shards) | each self-test through `check-selftest-coverage.sh --record`, in the `selftests` job | its own non-zero exit |
+| Stage 5 | `run-checks.sh --base <sha>`, with `PRODUCTIZER_SELFTEST_RECORDS` naming the shards' records | exit 3 REFUSED, 2 bad usage, 1 crashed |
 
 The order is cheapest first. The gate is last because `shell-lint` runs
 shellcheck once per changed shell script and is the only step measured in

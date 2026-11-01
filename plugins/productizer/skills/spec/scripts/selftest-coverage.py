@@ -24,16 +24,29 @@ dropped: it is a third figure on its own line. A repo-local path that is not on
 disk is an absent tool, never a third party.
 
 
+B186: given --records, a self-test the CI workflow already ran is read from
+the record `--record` wrote as it ran, instead of being run a second time - but
+only when the record is about this commit, this unchanged tracked tree and this
+tool file. Without a usable record the self-test is probed, as before.
+
+B187: a probe that times out while other probes run beside it is probed once
+more, alone, with the full limit, before it counts as a timeout; the report
+says whether a timeout happened alone or under contention, and how long it ran.
+
 stdout: bare relative paths, unindented, for every file the verdict rests on;
 everything else indented. Exit 0 all held, 1 a finding, 2 could not measure.
 """
 
 import argparse
 import concurrent.futures
+import hashlib
+import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import time
 from typing import NoReturn
 
 NA = "n/a"
@@ -247,29 +260,251 @@ def declared_codes(text):
 
 
 def probe(root, relpath, flag, timeout):
-    """Run the self-test. (state, detail, output).
+    """Run the self-test. A dict: state, detail, output, elapsed, timed_out.
 
     state: "answered" | "rejected" | UNREADABLE
     output: stdout and stderr together, and empty for anything but "answered".
     Both streams are read because the probe captures both, so a declaration is
     a declaration wherever the self-test writes it.
+
+    B187: the self-test runs in a session of its own, and a timeout kills that
+    whole process group. Killing only the shell left its children running, so a
+    self-test probed again "alone" after a timeout would still have the first
+    attempt's processes beside it.
     """
     full = os.path.join(root, relpath)
     if relpath.endswith(".py"):
         argv = [sys.executable, full, flag]
     else:
         argv = ["bash", full, flag]
+    started = time.monotonic()
     try:
-        proc = subprocess.run(argv, cwd=root, capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return UNREADABLE, "timed out after %ds" % timeout, ""
+        proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, start_new_session=True)
     except OSError as exc:
-        return UNREADABLE, "could not be executed (%s)" % exc.__class__.__name__, ""
-    err = proc.stderr.decode("utf-8", "replace")
-    if proc.returncode == 2 and REJECTED_RE.search(err):
-        return "rejected", "exit 2, argument rejected", ""
-    out_text = proc.stdout.decode("utf-8", "replace")
-    return "answered", "exit %d" % proc.returncode, out_text + "\n" + err
+        return {"state": UNREADABLE, "timed_out": False, "output": "",
+                "elapsed": time.monotonic() - started,
+                "detail": "could not be executed (%s)" % exc.__class__.__name__}
+    try:
+        out_b, err_b = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        proc.wait()
+        for pipe in (proc.stdout, proc.stderr):
+            pipe.close()
+        return {"state": UNREADABLE, "timed_out": True, "output": "",
+                "elapsed": time.monotonic() - started,
+                "detail": "timed out after %ds" % timeout}
+    elapsed = time.monotonic() - started
+    return answer(proc.returncode, out_b, err_b, elapsed)
+
+
+def answer(returncode, out_b, err_b, elapsed):
+    """What one run of a self-test says, whether it ran here or was recorded."""
+    err = err_b.decode("utf-8", "replace")
+    if returncode == 2 and REJECTED_RE.search(err):
+        return {"state": "rejected", "timed_out": False, "output": "",
+                "elapsed": elapsed, "detail": "exit 2, argument rejected"}
+    out_text = out_b.decode("utf-8", "replace")
+    return {"state": "answered", "timed_out": False, "elapsed": elapsed,
+            "detail": "exit %d" % returncode, "output": out_text + "\n" + err}
+
+
+def run_probes(root, wanted, timeout, jobs):
+    """B160 and B187. Up to `jobs` probes at once, each under its own limit.
+
+    A probe that TIMED OUT while another ran beside it is probed once more,
+    alone, with the full limit, after every other probe has finished. Tag run
+    41258217956 refused on `check-view-readonly.sh: timed out after 180s` with
+    three other self-tests competing for four cores; the same self-test took
+    69s alone on a machine at load 28 to 45, and the same commit passed on
+    main. A timeout under contention measures the neighbours as much as the
+    self-test, so it is not counted until the self-test has had the machine to
+    itself. A timeout that happened ALONE is never retried: that one measured
+    the self-test.
+
+    Returns {name: result} where a result also carries `contended` (how many
+    other probes overlapped it in time) and, when it was probed again,
+    `first` (the contended attempt).
+    """
+    def one(item):
+        name, flag = item
+        started = time.monotonic()
+        res = probe(root, name, flag, timeout)
+        res["span"] = (started, time.monotonic())
+        return name, res
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        results = dict(pool.map(one, wanted))
+    spans = {name: res["span"] for name, res in results.items()}
+    for name, res in results.items():
+        lo, hi = spans[name]
+        res["contended"] = sum(1 for other, (olo, ohi) in spans.items()
+                               if other != name and olo < hi and ohi > lo)
+    # Alone: the pool has drained, and these run one at a time.
+    for name, flag in wanted:
+        res = results[name]
+        if not (res["timed_out"] and res["contended"]):
+            continue
+        again = probe(root, name, flag, timeout)
+        again["contended"] = 0
+        again["first"] = res
+        results[name] = again
+    return results
+
+
+def timeout_detail(res, timeout):
+    """The sentence a final timeout is reported with: alone or under contention,
+    and how long it actually ran."""
+    if "first" in res:
+        first = res["first"]
+        return ("timed out after %ds under contention, beside %d other probe(s) "
+                "(%.1fs elapsed); probed again alone, it timed out again after "
+                "%ds (%.1fs elapsed)" % (timeout, first["contended"],
+                                          first["elapsed"], timeout, res["elapsed"]))
+    return "timed out after %ds, probed alone (%.1fs elapsed)" % (timeout, res["elapsed"])
+
+
+# --- records: a self-test run once, read here instead of run again (B186) ---
+#
+# CI used to run every self-test twice: once in the workflow, where its exit
+# code gates the run, and again here, as this check's probe. Measured on main
+# run 41231708700: the self-test step took 424s and the declared checks 693s,
+# with this probe inside the second. A RECORD is one workflow run of one
+# self-test, written by `--record` as it ran: its stdout, its stderr, its exit
+# code and how long it took, bound to the commit and to the tool file it ran.
+#
+# A record is read in place of a probe only when it is about THIS tree: HEAD is
+# the commit it names, no tracked file differs from HEAD, the tool file is the
+# blob it names, and the flag it ran is one the source dispatches on. Anything
+# else and the self-test is probed here, as before - a record never turns a
+# probe into a pass it could not have earned, it only saves running it twice.
+# Locally no records are given, so every self-test is probed exactly as it was.
+RECORD_META = "meta.json"
+
+
+def git_out(root, args):
+    proc = subprocess.run(["git", *args], cwd=root, capture_output=True)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.decode("utf-8", "replace").strip()
+
+
+def blob_id(path):
+    """sha256 of the file's bytes, computed here so writer and reader agree
+    whatever git's filters are. Not git's own blob id: that is sha1, which the
+    declared sast check refuses, and nothing here needs git to agree."""
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def record_key(relpath):
+    return relpath.replace("/", "__")
+
+
+def record_main(argv):
+    """`--record DIR -- CMD...`: run one self-test, pass its output and exit
+    code through unchanged, and keep a record of it in DIR."""
+    if len(argv) < 3 or argv[1] != "--":
+        refuse("--record needs a directory, then --, then the self-test command")
+    rec_dir, cmd = argv[0], argv[2:]
+    root = git_out(os.getcwd(), ["rev-parse", "--show-toplevel"])
+    head = git_out(os.getcwd(), ["rev-parse", "--verify", "HEAD^{commit}"])
+    if not root or not head:
+        refuse("--record must run inside a git work tree with a commit, so the "
+               "record can name the commit it is about")
+    root = os.path.realpath(root)
+    tool = None
+    for tok in cmd:
+        cand = os.path.realpath(os.path.join(os.getcwd(), tok)) if tok else ""
+        if tok and not PLACEHOLDER_RE.search(tok) and os.path.isfile(cand) \
+                and cand.startswith(root + os.sep):
+            tool = rel(root, cand)
+            break
+    flags = [t for t in cmd if FLAG_RE.fullmatch(t)]
+    if tool is None or not flags:
+        refuse("--record runs a self-test: the command must name a file in this "
+               "work tree and a self-test flag; got: %s" % " ".join(cmd))
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(cmd, capture_output=True)
+    except OSError as exc:
+        refuse("--record could not execute %s (%s)" % (cmd[0], exc.__class__.__name__))
+    elapsed = time.monotonic() - started
+    sys.stdout.buffer.write(proc.stdout)
+    sys.stdout.flush()
+    sys.stderr.buffer.write(proc.stderr)
+    sys.stderr.flush()
+    dest = os.path.join(rec_dir, record_key(tool))
+    try:
+        os.makedirs(dest, exist_ok=True)
+        with open(os.path.join(dest, "stdout"), "wb") as fh:
+            fh.write(proc.stdout)
+        with open(os.path.join(dest, "stderr"), "wb") as fh:
+            fh.write(proc.stderr)
+        with open(os.path.join(dest, RECORD_META), "w", encoding="utf-8") as fh:
+            json.dump({"tool": tool, "flag": flags[0], "exit": proc.returncode,
+                       "seconds": round(elapsed, 1), "head": head,
+                       "blob": blob_id(os.path.join(root, tool))}, fh)
+    except OSError as exc:
+        refuse("--record could not write the record for %s (%s); the self-test "
+               "itself exited %d" % (tool, exc.__class__.__name__, proc.returncode))
+    return proc.returncode
+
+
+def load_records(root, rec_dir, wanted):
+    """({name: result}, [why a record was not used], header line)."""
+    if not os.path.isdir(rec_dir):
+        return {}, [], ("records: %s is not a directory, so every self-test was "
+                        "executed here" % rec_dir)
+    head = git_out(root, ["rev-parse", "--verify", "HEAD^{commit}"])
+    dirty = git_out(root, ["status", "--porcelain", "--untracked-files=no"])
+    whole = None
+    if head is None or dirty is None:
+        whole = "this work tree has no readable git HEAD to bind a record to"
+    elif dirty:
+        whole = ("%d tracked file(s) differ from HEAD, so no record can be about "
+                 "this tree" % len(dirty.splitlines()))
+    used, not_used = {}, []
+    for name, flags in wanted:
+        path = os.path.join(rec_dir, record_key(name))
+        if not os.path.isdir(path):
+            continue
+        try:
+            with open(os.path.join(path, RECORD_META), encoding="utf-8") as fh:
+                meta = json.load(fh)
+            with open(os.path.join(path, "stdout"), "rb") as fh:
+                out_b = fh.read()
+            with open(os.path.join(path, "stderr"), "rb") as fh:
+                err_b = fh.read()
+            code, seconds = int(meta["exit"]), float(meta["seconds"])
+        except (OSError, ValueError, KeyError, TypeError):
+            not_used.append("%s: its record could not be read" % name)
+            continue
+        if whole:
+            not_used.append("%s: %s" % (name, whole))
+        elif meta.get("tool") != name:
+            not_used.append("%s: its record names %s" % (name, meta.get("tool")))
+        elif meta.get("head") != head:
+            not_used.append("%s: recorded at commit %s, and HEAD is %s"
+                            % (name, str(meta.get("head"))[:12], head[:12]))
+        elif meta.get("blob") != blob_id(os.path.join(root, name)):
+            not_used.append("%s: the file is not the one the record ran" % name)
+        elif meta.get("flag") not in flags:
+            not_used.append("%s: recorded with %s, which its source does not "
+                            "dispatch on" % (name, meta.get("flag")))
+        else:
+            res = answer(code, out_b, err_b, seconds)
+            res["recorded"] = True
+            res["contended"] = 0
+            used[name] = res
+    header = ("records: %s - %d self-test(s) read from records their own run "
+              "wrote at HEAD %s, %d record(s) not used"
+              % (rec_dir, len(used), (head or "?")[:12], len(not_used)))
+    return used, not_used, header
 
 
 def load_yaml(path, what):
@@ -289,6 +524,8 @@ def load_yaml(path, what):
 
 
 def main():
+    if sys.argv[1:2] == ["--record"]:
+        return record_main(sys.argv[2:])
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--root", required=True)
     ap.add_argument("--checks", required=True)
@@ -296,6 +533,7 @@ def main():
     ap.add_argument("--no-probe", dest="probe", action="store_false")
     ap.add_argument("--probe-timeout", type=int, default=30)
     ap.add_argument("--probe-jobs", type=int, default=1)
+    ap.add_argument("--records", default=None)
     args = ap.parse_args()
 
     root = os.path.abspath(args.root)
@@ -449,19 +687,37 @@ def main():
             {"state": NEVER_RUN, "detail": "the self-test was never run"})
 
     probed = 0
+    records_header = None
+    records_unused = []
+    from_records = 0
+    reprobed = []                                   # (name, first, final)
+    slowest = None
     if args.probe:
+        # The results are applied in the tools' own order, so the report does
+        # not depend on which probe finished first.
+        wanted = [(name, rec) for name, rec in tools.items() if rec.get("flags")]
+        answers = {}
+        if args.records is not None:
+            answers, records_unused, records_header = load_records(
+                root, os.path.abspath(args.records),
+                [(name, rec["flags"]) for name, rec in wanted])
+            from_records = len(answers)
         # B160: up to --probe-jobs self-tests run at once, each under its own
         # --probe-timeout. Serially, 62 probes took 644s on a loaded machine
-        # against a 600s budget for the whole check. The results are applied
-        # in the tools' own order, so the report does not depend on which
-        # probe finished first.
-        wanted = [(name, rec) for name, rec in tools.items() if rec.get("flags")]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.probe_jobs) as pool:
-            answers = list(pool.map(
-                lambda item: probe(root, item[0], item[1]["flags"][0], args.probe_timeout),
-                wanted))
-        for (name, rec), (state, detail, output) in zip(wanted, answers):
+        # against a 600s budget for the whole check. B187: one that timed out
+        # beside others is probed again alone before it counts as a timeout.
+        live = [(name, rec["flags"][0]) for name, rec in wanted if name not in answers]
+        answers.update(run_probes(root, live, args.probe_timeout, args.probe_jobs))
+        for name, rec in wanted:
+            res = answers[name]
             probed += 1
+            if "first" in res:
+                reprobed.append((name, res["first"], res))
+            if slowest is None or res["elapsed"] > slowest[1]["elapsed"]:
+                slowest = (name, res)
+            state, detail, output = res["state"], res["detail"], res["output"]
+            if res["timed_out"]:
+                detail = timeout_detail(res, args.probe_timeout)
             if state == "rejected":
                 # The source reads as if it dispatches and the parser says
                 # otherwise. The parser is what runs, so it wins.
@@ -638,7 +894,26 @@ def main():
            sum(1 for n in absent_names if tools[n]["disabled"])))
     if args.probe:
         out("  probe: %d self-test(s) executed with the flag their source "
-            "dispatches on." % probed)
+            "dispatches on - %d read from records of the workflow's own run of "
+            "them, %d executed here." % (probed, from_records, probed - from_records))
+        if records_header is None:
+            out("  records: none given, so every self-test was executed here.")
+        else:
+            out("  " + records_header + ".")
+            for why in records_unused:
+                out("  record not used, so probed here - %s" % why)
+        if slowest is not None:
+            out("  slowest probe: %s, %.1fs%s." % (
+                slowest[0], slowest[1]["elapsed"],
+                " (recorded)" if slowest[1].get("recorded") else ""))
+        for name, first, final in reprobed:
+            if final["timed_out"]:
+                continue                            # reported with the ? below
+            out("  %s: timed out after %ds under contention, beside %d other "
+                "probe(s) (%.1fs elapsed); probed again alone, it answered %s "
+                "in %.1fs, and that run is the one counted."
+                % (name, args.probe_timeout, first["contended"], first["elapsed"],
+                   final["detail"], final["elapsed"]))
     else:
         out("  probe: not run (--no-probe). The answered column reads %s - never "
             "run - and is never read as a 0." % NEVER_RUN)

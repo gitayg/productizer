@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # check-selftest-coverage.sh [--version] [--help] [--root DIR] [--checks PATH]
 #                           [--workflow PATH] [--no-probe] [--probe-timeout N]
-#                           [--probe-jobs N] [--selftest]
+#                           [--probe-jobs N] [--records DIR] [--selftest]
+# check-selftest-coverage.sh --record DIR -- COMMAND...
 #
 # Asserts R39 and R40, which are two obligations over the same set and must not
 # be collapsed:
@@ -205,6 +206,27 @@
 #     and probes running side by side compete for the same cores. Self-tests
 #     that wrote to one shared path would collide; each here builds its own
 #     sandbox, which is read off their source, not enforced.
+#   - A probe that times out while another overlaps it in time is probed once
+#     more, alone, after the pool has drained (B187). Each retry can take the
+#     full --probe-timeout, one after another, so several of them can carry
+#     the whole check past the runner's own limit for it. "Alone" is alone
+#     among this check's probes; whatever else the machine runs is not seen.
+#     A timeout kills the self-test's whole process group, so a child it
+#     started in a session of its own would survive it.
+#   - --records (B186) trusts a record to be what it says: the commit, the
+#     tool blob and the flag are compared, and the output and exit code are
+#     taken as written. A record forged with the right commit and blob is
+#     read as a run. Records are written by the workflow into the runner's
+#     temp directory and handed between jobs as artifacts of the same run;
+#     whoever can edit the workflow can also delete this check. The wrapper
+#     a workflow line calls `--record` through is read as reaching the
+#     self-test, like any line naming the tool and the flag; that the wrapper
+#     returns the self-test's exit code is asserted by --record's own case,
+#     not read off the workflow.
+#   - A record is not used when any tracked file differs from HEAD, so a
+#     declared check that rewrites a tracked file before this one runs turns
+#     every record off and every self-test is probed again - slower, never
+#     weaker. The report counts what was read from records.
 #
 # EXIT CODES ARE THE CONTRACT.
 #
@@ -226,7 +248,7 @@
 # could not be driven at all (2).
 set -euo pipefail
 
-VERSION="check-selftest-coverage 1.1"
+VERSION="check-selftest-coverage 1.2"
 
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
@@ -236,6 +258,11 @@ WORKFLOW=".github/workflows/checks.yml"
 PROBE=1
 PROBE_TIMEOUT=30
 PROBE_JOBS=1
+# B186: the records of this CI run's own self-test step. The declared command
+# is the same locally and in CI, so CI names the directory through the
+# environment; a flag given on the command line wins.
+RECORDS="${PRODUCTIZER_SELFTEST_RECORDS:-}"
+RECORD_DIR=""
 MODE="measure"
 
 die_unmeasured() { printf 'check-selftest-coverage: %s\n' "$1" >&2; exit 2; }
@@ -244,7 +271,9 @@ usage() {
   printf 'usage: check-selftest-coverage.sh [--version] [--help] [--root DIR]\n'
   printf '                                  [--checks PATH] [--workflow PATH]\n'
   printf '                                  [--no-probe] [--probe-timeout N]\n'
-  printf '                                  [--probe-jobs N] [--selftest]\n'
+  printf '                                  [--probe-jobs N] [--records DIR]\n'
+  printf '                                  [--selftest]\n'
+  printf '       check-selftest-coverage.sh --record DIR -- COMMAND...\n'
   printf '  --root DIR         the work tree. Defaults to the git top level, never\n'
   printf '                     to the working directory.\n'
   printf '  --checks PATH      the declared checks, relative to --root.\n'
@@ -254,7 +283,15 @@ usage() {
   printf '  --probe-timeout N  seconds one self-test may take. A timeout is ?, not a\n'
   printf '                     failure and not a pass.\n'
   printf '  --probe-jobs N     self-tests probed at once (default 1), each under its\n'
-  printf '                     own --probe-timeout.\n'
+  printf '                     own --probe-timeout. One that times out while\n'
+  printf '                     others run beside it is probed again alone.\n'
+  printf '  --records DIR      read the self-tests --record wrote for this commit\n'
+  printf '                     instead of running them again; any without a\n'
+  printf '                     record about this tree is probed. Defaults to\n'
+  printf '                     the PRODUCTIZER_SELFTEST_RECORDS variable.\n'
+  printf '  --record DIR -- COMMAND...\n'
+  printf '                     run one self-test command, pass its output and its\n'
+  printf '                     exit code through, and keep a record of it in DIR.\n'
   printf '  --selftest         drive the built-in corpus instead of this repository.\n'
   printf 'exit: 0 every tool carries a self-test and every self-test is run\n'
   printf '      1 at least one does not - 2 could not measure\n'
@@ -275,13 +312,21 @@ while [ "$#" -gt 0 ]; do
     --probe-timeout=*) PROBE_TIMEOUT="${1#--probe-timeout=}"; shift ;;
     --probe-jobs)   [ "$#" -ge 2 ] || die_unmeasured "--probe-jobs needs a number"; PROBE_JOBS="$2"; shift 2 ;;
     --probe-jobs=*) PROBE_JOBS="${1#--probe-jobs=}"; shift ;;
+    --records)   [ "$#" -ge 2 ] || die_unmeasured "--records needs a directory"; RECORDS="$2"; shift 2 ;;
+    --records=*) RECORDS="${1#--records=}"; shift ;;
+    --record)
+      [ "$#" -ge 3 ] && [ "$2" != "" ] && [ "$3" = "--" ] \
+        || die_unmeasured "--record needs a directory, then --, then the self-test command"
+      RECORD_DIR="$2"; MODE="record"; shift 3; break ;;
     --selftest|--self-test) MODE="selftest"; shift ;;
     --) shift; break ;;
     -*) printf 'check-selftest-coverage: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *)  printf 'check-selftest-coverage: unexpected argument %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
-[ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1"
+if [ "$MODE" != "record" ]; then
+  [ "$#" -eq 0 ] || die_unmeasured "takes no positional arguments; got: $1"
+fi
 
 case "$PROBE_TIMEOUT" in
   ''|*[!0-9]*) die_unmeasured "--probe-timeout must be a whole number of seconds, got: $PROBE_TIMEOUT" ;;
@@ -320,8 +365,19 @@ run_measure() {
   if [ "$PROBE" -eq 0 ]; then
     args+=(--no-probe)
   fi
+  if [ -n "$RECORDS" ]; then
+    args+=(--records "$RECORDS")
+  fi
   python3 "$MEASURE" "${args[@]}"
 }
+
+if [ "$MODE" = "record" ]; then
+  # The self-test's own exit code is this one, unchanged: the workflow line
+  # that calls this is the line whose failure must fail the run.
+  RC=0
+  python3 "$MEASURE" --record "$RECORD_DIR" -- "$@" || RC=$?
+  exit "$RC"
+fi
 
 if [ "$MODE" = "measure" ]; then
   RC=0
@@ -791,6 +847,142 @@ checks:
     command: [./tools/meet-b.sh, --selftest]
 CFG
 
+# contended (B187): a self-test that finishes inside the limit only when it
+# runs alone. It answers at once if crowd.sh has finished, and stalls past the
+# limit if it finds crowd.sh running - which, side by side, it always does:
+# crowd.sh holds on until needs-alone.sh has seen it. Under --probe-jobs 2 it
+# times out beside crowd.sh, and probed again alone it answers - unless a child
+# of its first, killed attempt is still running, which a timeout that killed
+# only the shell would leave behind.
+mk_case contended
+cat > "$SB/contended/tools/crowd.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest)
+    : > crowd.running
+    for _ in $(seq 1 300); do [ -e needs.saw-crowd ] && break; sleep 0.1; done
+    rm -f crowd.running
+    : > crowd.done
+    exit 0 ;;
+esac
+exit 0
+TOOL
+cat > "$SB/contended/tools/needs-alone.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest)
+    for _ in $(seq 1 600); do
+      if [ -e crowd.done ]; then
+        # Alone means alone: a child the timed-out attempt left running would
+        # still be refreshing needs.child-alive, and then this stalls too.
+        rm -f needs.child-alive; sleep 0.5
+        if [ -e needs.child-alive ]; then sleep 60; fi
+        exit 0
+      fi
+      if [ -e crowd.running ]; then
+        : > needs.saw-crowd
+        ( for _ in $(seq 1 300); do : > needs.child-alive; sleep 0.1; done ) &
+        sleep 60; exit 0
+      fi
+      sleep 0.1
+    done
+    exit 1 ;;
+esac
+exit 0
+TOOL
+cat > "$SB/contended/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-crowd
+    command: [./tools/crowd.sh, --selftest]
+  - id: fixture-needs-alone
+    command: [./tools/needs-alone.sh, --selftest]
+CFG
+
+# stillslow (B187): too slow beside another probe AND too slow alone. Probed
+# again, it times out again, and the refusal says both.
+mk_case stillslow
+cat > "$SB/stillslow/tools/slow-crowded.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest) : > slow.started; sleep 30; exit 0 ;;
+esac
+exit 0
+TOOL
+cat > "$SB/stillslow/tools/waits-for-slow.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest)
+    for _ in $(seq 1 300); do [ -e slow.started ] && exit 0; sleep 0.1; done
+    exit 1 ;;
+esac
+exit 0
+TOOL
+cat > "$SB/stillslow/checks.yaml" <<'CFG'
+version: 1
+checks:
+  - id: fixture-slow-crowded
+    command: [./tools/slow-crowded.sh, --selftest]
+  - id: fixture-waits-for-slow
+    command: [./tools/waits-for-slow.sh, --selftest]
+CFG
+
+# records (B186): a self-test the workflow already ran is read from its record,
+# not run again. once.sh answers the FIRST time and stalls past the limit every
+# time after, so a case that exits 0 read the record and one that exits 2 ran
+# it a second time. Each case is a git work tree, because a record is bound to
+# a commit; the record is written by this script's own --record, the mode the
+# workflow uses.
+fixture_git() {
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c user.name=fixture \
+    -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+    -c core.hooksPath=/dev/null "$@"
+}
+mk_record_case() {
+  # $1 case, $2 the flag recorded (default --selftest). A committed tree, and
+  # a record of once.sh taken in it.
+  mk_case "$1"
+  cat > "$SB/$1/tools/once.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest)
+    if [ -e once.ran ]; then sleep 30; exit 0; fi
+    : > once.ran
+    printf '    exit codes reached: 0   documented: 0\n'
+    exit 0 ;;
+esac
+exit 0
+TOOL
+  printf 'version: 1\nchecks:\n  - id: fixture-once\n    command: [./tools/once.sh, --selftest]\n' \
+    > "$SB/$1/checks.yaml"
+  printf 'a tracked file\n' > "$SB/$1/notes.txt"
+  ( cd "$SB/$1" && fixture_git init -q && fixture_git add -A \
+      && fixture_git commit -q -m fixture \
+      && bash "$HERE/check-selftest-coverage.sh" --record "$SB/$1.rec" -- bash tools/once.sh "${2:---selftest}" ) \
+    > "$SB/$1.record.log" 2>&1 \
+    || die_unmeasured "could not build the $1 fixture; see its log above this line"
+}
+mk_record_case records
+# recdirty: a tracked file changed after the record was taken.
+mk_record_case recdirty
+printf 'changed\n' >> "$SB/recdirty/notes.txt"
+# rechead: a commit landed after the record was taken.
+mk_record_case rechead
+printf 'changed\n' >> "$SB/rechead/notes.txt"
+( cd "$SB/rechead" && fixture_git commit -q -am later ) > "$SB/rechead.commit.log" 2>&1 \
+  || die_unmeasured "could not commit in the rechead fixture"
+# recflag: the record ran a flag the source does not dispatch on, so it ran
+# nothing the probe would have; once.sh never saw --selftest and answers live.
+mk_record_case recflag --self-test
+# recforged: the record names a tool file other than the one in the tree.
+mk_record_case recforged
+python3 - "$SB/recforged.rec/tools__once.sh/meta.json" <<'PY' || die_unmeasured "could not edit the recforged record"
+import json, sys
+meta = json.load(open(sys.argv[1]))
+meta["blob"] = "0" * 64
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+
 mk_case listmention
 cat > "$SB/listmention/checks.yaml" <<'CFG'
 version: 1
@@ -905,6 +1097,66 @@ drive loopmention 1 "loop-mention.py carries no self-test"
 
 # B160: two probes at once. The case passes only if both run side by side.
 drive rendezvous  0 "R39 and R40 hold"                                   --probe-jobs 2 --probe-timeout 20
+
+# B187: a timeout beside other probes is probed again alone before it counts;
+# a timeout alone is not retried, and each refusal says which it was.
+drive timeout     2 "timed out after 1s, probed alone ("                 --probe-timeout 1
+drive contended   0 "timed out after 8s under contention, beside 1 other probe(s) .*probed again alone, it answered exit 0" \
+                                                                         --probe-jobs 2 --probe-timeout 8
+drive stillslow   2 "under contention, beside 1 other probe(s) .*probed again alone, it timed out again after 2s" \
+                                                                         --probe-jobs 2 --probe-timeout 2
+
+# B186: a record about this tree is read instead of a second run; a record
+# about any other tree is not, and the self-test is probed - here, a second run
+# of once.sh stalls past the limit, so exit 2 is the proof it was run again.
+drive records     0 "1 read from records of the workflow's own run of them, 0 executed here" \
+                                                       --probe-timeout 2 --records "$SB/records.rec"
+drive recdirty    2 "tools/once.sh: 1 tracked file(s) differ from HEAD"  --probe-timeout 2 --records "$SB/recdirty.rec"
+drive rechead     2 "tools/once.sh: recorded at commit "                 --probe-timeout 2 --records "$SB/rechead.rec"
+drive recflag     0 "tools/once.sh: recorded with --self-test, which its source does not dispatch on" \
+                                                       --probe-timeout 2 --records "$SB/recflag.rec"
+drive recforged   2 "tools/once.sh: the file is not the one the record ran" \
+                                                       --probe-timeout 2 --records "$SB/recforged.rec"
+
+# --record itself: the self-test's exit code and output pass through
+# unchanged, and the record says what happened. A failing self-test whose
+# wrapper exited 0 would be the swallowed failure R40 refuses.
+mk_case recordrc
+cat > "$SB/recordrc/tools/fails.sh" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --selftest) printf 'fails-marker-out\n'; printf 'fails-marker-err\n' >&2; exit 1 ;;
+esac
+exit 0
+TOOL
+( cd "$SB/recordrc" && fixture_git init -q && fixture_git add -A && fixture_git commit -q -m fixture ) \
+  > "$SB/recordrc.git.log" 2>&1 || die_unmeasured "could not build the recordrc fixture"
+REC_RC=0
+( cd "$SB/recordrc" && bash "$HERE/check-selftest-coverage.sh" --record "$SB/recordrc.rec" -- bash tools/fails.sh --selftest ) \
+  > "$SB/recordrc.out" 2> "$SB/recordrc.err" || REC_RC=$?
+CASES=$((CASES + 1))
+CODES_SEEN="${CODES_SEEN}${REC_RC}
+"
+if [ "$REC_RC" -eq 1 ] && grep -q fails-marker-out "$SB/recordrc.out" \
+   && grep -q fails-marker-err "$SB/recordrc.err" \
+   && grep -q '"exit": 1' "$SB/recordrc.rec/tools__fails.sh/meta.json"; then
+  printf '  held: case %-12s exit 1, the self-test'"'"'s own, its output passed through and recorded as exit 1\n' recordrc
+else
+  printf '  FINDING: case %-12s --record exited %d; expected the self-test'"'"'s exit 1, its output, and a record of exit 1\n' recordrc "$REC_RC"
+  FAILED=$((FAILED + 1))
+fi
+REC_RC=0
+( cd "$SB/recordrc" && bash "$HERE/check-selftest-coverage.sh" --record "$SB/recordrc.rec" -- bash tools/fails.sh ) \
+  > "$SB/recordusage.out" 2> "$SB/recordusage.err" || REC_RC=$?
+CASES=$((CASES + 1))
+CODES_SEEN="${CODES_SEEN}${REC_RC}
+"
+if [ "$REC_RC" -eq 2 ] && grep -q "must name a file in this work tree and a self-test flag" "$SB/recordusage.err"; then
+  printf '  held: case %-12s exit 2, a command with no self-test flag is not recorded\n' recordusage
+else
+  printf '  FINDING: case %-12s --record exited %d; expected 2 for a command with no self-test flag\n' recordusage "$REC_RC"
+  FAILED=$((FAILED + 1))
+fi
 
 printf '  cases driven: %d. Cases that did not hold: %d\n' "$CASES" "$FAILED"
 

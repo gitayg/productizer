@@ -987,3 +987,33 @@ set back into the plan (`references/plan-page.md`). What it does not do:
   left margin with options `  - A: ...` under it; anything else in the section
   stops the build, and a plan edited between building the page and answering
   it refuses the answers until the page is rebuilt.
+
+## Added in v4.79.0
+
+### 50 · The split CI has not run on GitHub, and a record is trusted for what it says ran
+
+Since v4.79.0 (B186, B187) `.github/workflows/checks.yml` runs every self-test
+once, in five `selftests` shards, and the `checks` job's `selftest-coverage`
+reads the shards' records instead of running each self-test a second time
+(`references/ci.md`). A probe that timed out beside other probes is probed
+again alone before it counts. What it does not do:
+
+- **It has not run on GitHub.** Both jobs were replayed on one machine with
+  `scripts/replay-ci.py`, one after another, and passed; that GitHub reads the
+  YAML anchors on step items as PyYAML does, and that `download-artifact`
+  merges the shards' records as the replay emulates, are read from their
+  documentation, not measured. The wall time of the new layout, about 10.5 to
+  12.7 minutes against 19m19s, is an estimate.
+- **A record's output and exit code are taken as written.** Only the commit,
+  an unchanged tracked tree, the sha256 of the tool file and the flag are
+  compared, so a record forged with the right four is read as a run. Locally
+  nothing names records, and every self-test is probed as before.
+- **18 self-tests still run twice in CI**: once in a shard and again as their
+  own declared check in Stage 5.
+- **That the release jobs wait for every shard is not checked.** Both release
+  jobs list `selftests` in `needs:`; no check asserts it, and
+  `governance-weakening` reports only a `needs:` that shrinks.
+- **"Alone" is alone among this check's probes**, not on the machine. Several
+  contended timeouts are retried one after another, each with the full limit,
+  and can carry the check past its own 600 seconds. A self-test that starts a
+  child in a session of its own escapes the timeout's process-group kill.
