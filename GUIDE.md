@@ -794,6 +794,20 @@ export SDLC_CHECK_RUNNER="/path/to/your/check-runner"
 Enforced beats advisory. The skill probes by *running* it, never by checking the
 file exists, and tells you which way it resolved.
 
+## Where CI time goes
+
+A run's one duration hides where the time went. `scripts/ci-timing.py
+--workflow checks.yml` reads the last 30 runs through `gh api`, read-only, and
+splits each job into waiting for a machine, setup and running, with the
+median, the p90 and the share of each. It flags a job that waits or sets up
+longer than it runs, and a step whose time falls into two modes - the shape of
+a cache that hits on some runs and misses on others. A run or job missing a
+timestamp is unmeasured, never zero. Setup is read from step names, so a step
+that installs something without saying so counts as running until you name
+it: this repository's own PyYAML, semgrep, gitleaks and puppeteer steps need
+`--setup-pattern '^(PyYAML|semgrep|gitleaks|puppeteer), '`. Run it after a
+change to the workflow, and when a run feels slower than it should.
+
 ## What it guarantees today
 
 Everything above argues for the shape. This is the agreed set — the requirements
@@ -808,7 +822,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**185 requirements are active**, and they are the whole of what has been
+**190 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -817,7 +831,7 @@ written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
 
-**Always, with no trigger.** Twenty-five requirements hold whatever else is
+**Always, with no trigger.** Twenty-six requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -874,8 +888,12 @@ happening:
   reference a browser would load from, or send to, the network.
 - **R210** — The lifecycle shall write what an answer set holds into the plan
   that answer set names and into no further file.
+- **R220** — The lifecycle shall count as CI setup time a step whose name
+  matches GitHub's own preparation, teardown or post steps, the actions that
+  fetch the repository, set up a runtime or cache, or a name that says it
+  installs or caches, together with the patterns the person adds.
 
-**When something arrives.** Forty-eight things happen on a discrete trigger:
+**When something arrives.** Fifty-one things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -1005,6 +1023,15 @@ happening:
 - **R218** — When the CI replay replays a job, the lifecycle shall also replay
   every job that job needs, each value of a job's matrix on a fresh clone of
   the commit, with artifacts handed between them as the workflow declares.
+- **R219** — When a person runs `ci-timing.py` on a workflow, the lifecycle
+  shall report, for each job over the runs read, the median, the 90th
+  percentile and the share of the job's waiting time, setup time and running
+  time.
+- **R221** — When a job's median waiting time or median setup time exceeds its
+  median running time, the lifecycle shall flag that job.
+- **R222** — When a step's durations over at least 5 timed runs split into two
+  modes, the higher mode's median at least 3 times the lower mode's and each
+  mode holding at least 20% of the runs, the lifecycle shall flag that step.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
@@ -1033,7 +1060,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** Ninety-one defences, written as `If … then`
+**When something goes wrong.** Ninety-two defences, written as `If … then`
 because a designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1307,6 +1334,10 @@ because a designed path and a defended one are not the same thing:
   the probe as timed out.
 - **R216** — If the self-test coverage check has no usable record of a
   self-test, then the lifecycle shall probe that self-test.
+- **R223** — If a run has not completed, a run's jobs cannot be read, or a job
+  or one of its non-skipped steps lacks a timestamp or has them out of order,
+  then the lifecycle shall count that run or job as unmeasured with its
+  reason, and never as zero.
 
 **Only where the feature is present.** Twelve requirements apply only to a
 build that includes the feature:

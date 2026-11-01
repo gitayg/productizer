@@ -363,6 +363,7 @@ jobs:
               record bash plugins/productizer/skills/spec/scripts/check-jira-unbound.sh --selftest
               record python3 plugins/productizer/skills/spec/scripts/check-plan-page.py --selftest
               record bash plugins/productizer/skills/spec/scripts/check-view-rendered.sh --selftest
+              record python3 plugins/productizer/skills/spec/scripts/ci-timing.py --selftest
               record bash plugins/productizer/skills/spec/scripts/classify-change-risk.sh --selftest
               record python3 plugins/productizer/skills/spec/scripts/score-reviewer-case.py --selftest
               record bash plugins/productizer/skills/spec/scripts/spec-diff.sh --selftest

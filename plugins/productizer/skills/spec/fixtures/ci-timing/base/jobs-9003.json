@@ -1,0 +1,155 @@
+{
+ "total_count": 3,
+ "jobs": [
+  {
+   "id": 90031,
+   "run_id": 9003,
+   "name": "test",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "created_at": "2026-10-26T00:33:20Z",
+   "started_at": "2026-10-26T00:33:22Z",
+   "completed_at": "2026-10-26T00:39:04Z",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1,
+     "started_at": "2026-10-26T00:33:22Z",
+     "completed_at": "2026-10-26T00:33:24Z"
+    },
+    {
+     "name": "Run actions/checkout@v4",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 2,
+     "started_at": "2026-10-26T00:33:24Z",
+     "completed_at": "2026-10-26T00:33:27Z"
+    },
+    {
+     "name": "Run actions/setup-python@v5",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 3,
+     "started_at": "2026-10-26T00:33:27Z",
+     "completed_at": "2026-10-26T00:33:32Z"
+    },
+    {
+     "name": "Run actions/cache@v4",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 4,
+     "started_at": "2026-10-26T00:33:32Z",
+     "completed_at": "2026-10-26T00:33:42Z"
+    },
+    {
+     "name": "Install dependencies",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 5,
+     "started_at": "2026-10-26T00:33:42Z",
+     "completed_at": "2026-10-26T00:34:02Z"
+    },
+    {
+     "name": "Run pytest",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 6,
+     "started_at": "2026-10-26T00:34:02Z",
+     "completed_at": "2026-10-26T00:39:02Z"
+    },
+    {
+     "name": "Post Run actions/cache@v4",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 7,
+     "started_at": "2026-10-26T00:39:02Z",
+     "completed_at": "2026-10-26T00:39:03Z"
+    },
+    {
+     "name": "Post Run actions/checkout@v4",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 8,
+     "started_at": "2026-10-26T00:39:03Z",
+     "completed_at": "2026-10-26T00:39:04Z"
+    },
+    {
+     "name": "Complete job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 9,
+     "started_at": "2026-10-26T00:39:04Z",
+     "completed_at": "2026-10-26T00:39:04Z"
+    }
+   ]
+  },
+  {
+   "id": 90032,
+   "run_id": 9003,
+   "name": "lint",
+   "status": "completed",
+   "conclusion": "success",
+   "run_attempt": 1,
+   "created_at": "2026-10-26T00:33:20Z",
+   "started_at": "2026-10-26T00:33:25Z",
+   "completed_at": "2026-10-26T00:34:37Z",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1,
+     "started_at": "2026-10-26T00:33:25Z",
+     "completed_at": "2026-10-26T00:33:26Z"
+    },
+    {
+     "name": "Run actions/checkout@v4",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 2,
+     "started_at": "2026-10-26T00:33:26Z",
+     "completed_at": "2026-10-26T00:33:27Z"
+    },
+    {
+     "name": "Install linters",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 3,
+     "started_at": "2026-10-26T00:33:27Z",
+     "completed_at": "2026-10-26T00:33:37Z"
+    },
+    {
+     "name": "Run ruff",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 4,
+     "started_at": "2026-10-26T00:33:37Z",
+     "completed_at": "2026-10-26T00:34:37Z"
+    },
+    {
+     "name": "Complete job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 5,
+     "started_at": "2026-10-26T00:34:37Z",
+     "completed_at": "2026-10-26T00:34:37Z"
+    }
+   ]
+  },
+  {
+   "id": 90033,
+   "run_id": 9003,
+   "name": "release",
+   "status": "completed",
+   "conclusion": "skipped",
+   "run_attempt": 1,
+   "created_at": "2026-10-26T00:39:04Z",
+   "started_at": "2026-10-26T00:39:04Z",
+   "completed_at": "2026-10-26T00:39:04Z",
+   "steps": []
+  }
+ ]
+}

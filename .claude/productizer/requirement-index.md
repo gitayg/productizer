@@ -244,4 +244,9 @@ marker, because a table left there would be one nothing writes or checks.
 | R216 | unwanted | active | `selftest-coverage` |
 | R217 | event | active | `selftest-coverage` |
 | R218 | event | active | `ci-replay` |
+| R219 | event | active | `ci-timing` |
+| R220 | ubiquitous | active | `ci-timing` |
+| R221 | event | active | `ci-timing` |
+| R222 | event | active | `ci-timing` |
+| R223 | unwanted | active | `ci-timing` |
 <!-- productizer:requirement-index:end -->

@@ -1017,3 +1017,30 @@ again alone before it counts. What it does not do:
   contended timeouts are retried one after another, each with the full limit,
   and can carry the check past its own 600 seconds. A self-test that starts a
   child in a session of its own escapes the timeout's process-group kill.
+
+## Added in v4.80.0
+
+### 51 · Where CI time goes is read from step names and whole-second timestamps
+
+Since v4.80.0 (B188) `scripts/ci-timing.py` splits each CI job's time over its
+last runs into waiting, setup and running, and flags a job that waits or sets
+up longer than it runs and a step whose time falls into two modes. What it
+does not do:
+
+- **Setup is read from step names.** A step that installs a tool without
+  saying so counts as running. This repository's own PyYAML, semgrep,
+  gitleaks and puppeteer steps are among them: the default rule reads the
+  `checks` job's median setup as 6s, and
+  `--setup-pattern '^(PyYAML|semgrep|gitleaks|puppeteer), '` as 30s. The
+  default rule was not widened to catch them, because nothing in their names
+  tells an install from a check without matching this repository's own words.
+- **A flagged bimodal step is not shown to be a cache**, and the thresholds -
+  3x, 20% of runs, modes 2x apart, a slow median of at least 5s - were not
+  tuned on a real cache miss: no run read here has a cache step, and the real
+  data raised no flag.
+- **Only the latest attempt of a run is read**, and a step is keyed by its
+  full name, so a pinned action moved inside the window splits its history.
+- **GitHub's timestamps are whole seconds.** A step under a few seconds is
+  noise. Pagination past 100 runs or 100 jobs per run was never exercised
+  against the real API.
+- **Nothing runs it on a schedule** and no band holds its figures.

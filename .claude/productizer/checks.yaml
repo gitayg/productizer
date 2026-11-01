@@ -4939,6 +4939,76 @@ checks:
       - Ignored paths are fnmatch globs, where `*` crosses `/`, not gitignore patterns. A cell holding a literal `|` splits its row.
       - The same bug at a moved line is not a re-report to it.
 
+  - id: ci-timing
+    why: CI time spent waiting for a machine or in setup, and a cache that misses on some runs, is invisible in a run's one duration
+    when:
+      always: true
+    severity: block
+    requires: [./plugins/productizer/skills/spec/scripts/ci-timing.py, python3]
+    version_command: [./plugins/productizer/skills/spec/scripts/ci-timing.py, --version]
+    mode: batch
+    command: [./plugins/productizer/skills/spec/scripts/ci-timing.py, --selftest]
+    timeout_seconds: 60
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a case did not produce the exit code or the text it declares
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: '([0-9]+) of 38 cases held'
+      min_covered: 38
+      spec_units:
+        - id: R219
+          verdict: Covered
+          evidence: >-
+            ci-timing.py 1.0 (B188), 38 cases, offline over fixtures/ci-timing/base (10 runs, a
+            `test`, a `lint` and a skipped `release` job). `base-steady` reads waiting 4s/5s,
+            setup 42s/42s, running 5m00s/5m00s and shares 1.2%, 12.1%, 86.7%, hand-computed from
+            the fixture; `p90-nearest-rank` 5m45s/6m20s; `live-via-gh` drives the gh path through a
+            stub on PATH and asserts the API paths it was asked for. Falsified 2026-11-01: p90 not
+            nearest rank, 36 of 38; --branch not passed to gh, 37 of 38.
+        - id: R220
+          verdict: Partial
+          reason: >-
+            The setup rule reads step names. A step that installs a tool without saying so counts
+            as running - in this repository's own workflow the PyYAML, semgrep, gitleaks and
+            puppeteer steps - until --setup-pattern names it; whether a step prepares or checks
+            is not measured.
+          evidence: >-
+            `default-setup-rule` classifies 9 setup and 6 running names;
+            `default-rule-misses-unnamed-install` holds the miss; `setup-pattern-adds` moves a
+            step with --setup-pattern. Falsified 2026-11-01: the install pattern dropped, 30 of 38
+            (re-measured at integration: 30 of 38); --setup-pattern ignored, 37 of 38.
+        - id: R221
+          verdict: Covered
+          evidence: >-
+            `waiting-exceeds-running` and `setup-exceeds-running` exit 1 with their FLAG line;
+            `waiting-equals-running-no-flag` exits 0. Falsified 2026-11-01: waiting flag off, 37 of
+            38; setup flag off, 36 of 38.
+        - id: R222
+          verdict: Partial
+          reason: >-
+            Two conditions beyond the requirement are applied - the modes 2x apart at the split and
+            a slow median of at least --min-seconds - and a flagged step is not shown to be a cache.
+          evidence: >-
+            `cache-bimodal-30pct`, `cache-bimodal-20pct-boundary`, `cache-3x-boundary` and
+            `modes-2x-apart-flags` exit 1; `cache-10pct-no-flag`, `cache-2.5x-no-flag`,
+            `steady-spread-no-flag`, `modes-1.9x-apart-no-flag` and `whole-second-noise-no-flag`
+            exit 0. Falsified 2026-11-01: ratio 2.5, 37 of 38; share 10%, 36 of 38; gap 1.0, 36 of
+            38; --min-seconds floor removed, 37 of 38.
+        - id: R223
+          verdict: Covered
+          evidence: >-
+            Eight cases: a job missing started_at or completed_at, a step missing completed_at,
+            timestamps out of order, a run in progress, a run whose jobs file is absent, and all
+            jobs missing (exit 3, NOT MEASURED). Falsified 2026-11-01: missing job timestamps read
+            as zero, 34 of 38; a step missing a timestamp skipped, 37 of 38; an incomplete run
+            measured, 37 of 38; nothing measured exits 0, 37 of 38; a cancelled job timed, 37 of 38.
+    limitations:
+      - The setup rule is a heuristic over step names. It misses an install step not named for installing; this repository's own four (PyYAML, semgrep, gitleaks, puppeteer) are counted as setup only with --setup-pattern '^(PyYAML|semgrep|gitleaks|puppeteer), '.
+      - GitHub's step timestamps are whole seconds; a step under a few seconds cannot be told apart from noise.
+      - The real API is never called by the self-test; the gh path is driven through a stub.
+
   - id: plan-record-checker
     why: a change whose plan cannot say how it was shown to work or how to undo it has its rollback invented during the incident
     when:
