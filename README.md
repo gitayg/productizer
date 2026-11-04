@@ -52,7 +52,7 @@ downloads that one file and the path will not resolve.
 
 ## Versioning: explicit `version`, bumped per release
 
-`plugin.json` sets `"version": "4.82.0"`.
+`plugin.json` sets `"version": "4.83.0"`.
 
 Claude Code resolves a plugin's version from the first source that is set:
 `plugin.json`, then the marketplace entry, then the resolved commit SHA of the
@@ -267,6 +267,18 @@ organisation without each person toggling it:
    NOT a declared check: it calls a `WARN` a finding where `validate-spec.py`
    exits 0, so gating on it would turn any pre-existing warning red and the
    first thing anyone did would be to delete the step.
+
+   Adding a requirement with a trigger (`When ...`, or `While/Where ...,
+   when ...`)? Since v4.83.0 it carries an unindented `Failure cases` line,
+   last in its item, naming the `If` requirement - or `n/a because <reason>` -
+   for invalid input, a wrong caller or tenant, a repeat or concurrent action
+   and a failing dependency (`references/ears.md` rule 6). Without `--base`,
+   `python3 plugins/productizer/skills/spec/scripts/validate-spec.py --repo .
+   --failure-cases` checks the uncommitted spec edit against HEAD, or, with
+   the spec committed, only the newest commit that changed it - not a branch
+   of several commits; pass `--base <the branch point>` for that. It exits
+   `4`, never `0`, when it cannot resolve a base. The `failure-cases` check
+   runs it in CI against the change's base.
 2. Bump `version` in `plugins/productizer/.claude-plugin/plugin.json`.
    Nothing ships without this.
 3. Run `claude plugin validate ./plugins/productizer --strict` and

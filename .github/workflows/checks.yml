@@ -559,7 +559,9 @@ jobs:
       # Adding `--version` to validate-spec.py is the change that would make the
       # declared check honest, and it is a change to the validator, not to this
       # config. Until then the backlog belongs beside the spec, on the same tool,
-      # in the same job.
+      # in the same job. validate-spec.py 1.0 (v4.83.0, B191) has `--version`, and
+      # the `failure-cases` and `spec-validator-selftest` checks record it; this
+      # step and `backlog-valid` were left as they were.
       #
       # `--kind backlog` is passed explicitly although the kind is auto-detected
       # from the heading. A backlog whose heading is rewritten into something the

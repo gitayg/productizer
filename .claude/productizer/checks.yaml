@@ -4313,6 +4313,177 @@ checks:
       pattern: '([0-9]+) file\(s\) checked'
       min_covered: 1
 
+# --- a new `When` requirement that never asked what goes wrong ---------------
+#
+# B191, the maintainer's intent of 2026-11-04. references/ears.md rule 6 said
+# unwanted-behaviour requirements are not optional, and nothing enforced it:
+# validate-spec.py read an `If` sentence's form and nothing else. Reproduced at
+# 487799d in a scratch clone - a spec change adding `When a person deletes a
+# backlog row, the lifecycle shall move that row to the archive file.` and no
+# `If` printed `2 file(s) checked: 0 error(s), 0 warning(s)` and exited 0 under
+# --strict, and so did --baseline against HEAD's spec.
+#
+# Two checks, for the reason `solver-corpus` and `spec-valid` are two: one runs
+# the validator's own fixtures, which is where the rule is seen failing, and
+# claims the requirements; the other runs the rule over THIS change, which is
+# the gate.
+#
+# ON THE CHANGE ITSELF. `{base}` is the merge base run-checks.sh computed from
+# --base, so in CI the rule examines every requirement the push or the pull
+# request adds and none that were already there. A run with no base -
+# `--changed` - records `no_base` for `failure-cases`, which blocks: the rule
+# cannot tell new from old without one, and guessing is the silent pass.
+#
+# min_covered: 2 is the spec at the base and the spec now. One `examined:`
+# line would be a run that read the work tree and no history - the run that
+# answers nothing while exiting 0 (superseded-text's reasoning, same number).
+# A spec ABSENT at the base still prints its `examined: <path>@<sha> (absent
+# at the base ...)` line and still counts: git was read at that commit and
+# found no spec there, which makes every requirement new - the strictest
+# reading the rule has, never a skipped one.
+  - id: spec-validator-selftest
+    why: the failure-case rule is only evidence once it has been seen failing, and validate-spec.py's fixtures are where it fails
+    when:
+      always: true
+    severity: block
+    requires: [python3, git, ./plugins/productizer/skills/spec/scripts/validate-spec.py]
+    version_command: [python3, plugins/productizer/skills/spec/scripts/validate-spec.py, --version]
+    mode: batch
+    command: [python3, plugins/productizer/skills/spec/scripts/validate-spec.py, --self-test]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [3]        # a fixture failed
+      refused: [2]
+    coverage:
+      from: stdout_count
+      pattern: 'self-test passed: ([0-9]+) fixtures'
+      min_covered: 95
+      spec_units:
+        - id: R254
+          verdict: Covered
+          evidence: >-
+            B191, validate-spec.py 1.0 --self-test, 95 fixtures, 33 of them B191's in
+            failure_cases.py. Driven through `main` against real git history: `fc-gap` - a new
+            `When` requirement with no line - exits 1 with FAILURE_CASES_MISSING naming it, beside
+            `fc-gap-plain`, the same tree without --failure-cases, exiting 0 (the gap as it stood);
+            `fc-uncovered` names only the case the line leaves out; `fc-section` reports a
+            requirement filed under Event-driven whose sentence opens with `While`; `fc-covered`
+            exits 0; `fc-trigger-sentence` checks a `When` holding `purge <ticket>` under
+            Ubiquitous, `While ..., when ...` and `Where ..., when ...`, and not a `when` after the
+            response. Falsified 2026-11-04: coverage never demanded, 12 of 95 cases red; the
+            uncovered cases unreported, 3 of 95; the heading not read as a trigger, 2 of 95; the
+            trigger read from the cached pattern, 1 of 95; a `, when` clause not a trigger, 1 of 95.
+        - id: R255
+          verdict: Partial
+          reason: >-
+            A merge commit as the newest spec change is not driven; the walk takes its first parent
+            by construction, and no fixture builds a merge.
+          evidence: >-
+            `fc-gap` reads `HEAD, because the spec in the work tree differs`; `fc-walk` commits the
+            change and reads the first parent of that commit as the base; `fc-walk-later` commits
+            an unrelated file on top and still reads it; `fc-founding-with-parent` resolves the
+            parent of the only commit that changed the spec; `fc-base-named` and `fc-base-head`
+            take --base. Falsified 2026-11-04: the base always HEAD, 5 of 95 cases red; one spec
+            commit refused, 2 of 95.
+        - id: R256
+          verdict: Covered
+          evidence: >-
+            `fc-refine` rewrites an active ubiquitous requirement in place into a `When` one and
+            exits 1 naming it; `fc-checked-ids` asserts the checked set and its reasons. Falsified
+            2026-11-04: only new ids checked, 2 of 95 cases red.
+        - id: R257
+          verdict: Covered
+          evidence: >-
+            `fc-old-exempt` keeps the base's `When` requirement with no line and adds three with no
+            trigger: exit 0, `0 requirement(s) checked`; `fc-gap` asserts the old one is not named.
+            Falsified 2026-11-04: an old event-driven requirement checked, 7 of 95 cases red.
+        - id: R258
+          verdict: Covered
+          evidence: >-
+            `fc-ids` names a superseded, a withdrawn and a ubiquitous id - two
+            FAILURE_CASE_ID_INACTIVE and one FAILURE_CASE_ID_NOT_UNWANTED, each naming the id;
+            `fc-ids-no-then` an `If` with no `then`; `fc-ids-unknown` an id the spec does not
+            define. Falsified 2026-11-04: ids never resolved, 3 of 95 cases red; an `If` with no
+            `then` accepted, 1 of 95.
+        - id: R259
+          verdict: Covered
+          evidence: >-
+            `fc-malformed`: a case named twice, an unknown case, an `n/a` with no reason, a body
+            that is neither ids nor `n/a because`, a bare `n/a` and an empty line - six
+            FAILURE_CASES_MALFORMED. Falsified 2026-11-04: malformed never reported, 1 of 95.
+        - id: R260
+          verdict: Covered
+          evidence: >-
+            `fc-misplaced`: an indented line, a line after a blank, a status marker after the line
+            and a second line - four FAILURE_CASES_MISPLACED - and the indented one is not read
+            into the sentence. Falsified 2026-11-04: the indented line read as text, 1 of 95 (two
+            assertions); a line after it unreported, 1 of 95.
+        - id: R261
+          verdict: Covered
+          evidence: >-
+            Exit 4 with FAILURE_CASES_NO_BASE and NOT MEASURED, no counts: `fc-no-base-single` (one
+            spec commit, a clean tree), `fc-no-base-shallow`, `fc-no-base-ref` (a --base naming no
+            commit), `fc-no-base-not-git` (git's own `fatal:` passed on to stderr).
+            `fc-shallow-dirty` shows a shallow clone is refused only where history is walked.
+            Falsified 2026-11-04: the refusal passed on, 4 of 95 cases red; a shallow clone
+            walked, 1 of 95.
+        - id: R262
+          verdict: Covered
+          evidence: >-
+            `fc-whole-na` exits clean on one `n/a because` line; `fc-coverage` reports nothing for a
+            requirement carrying one. Falsified 2026-11-04: the whole-line n/a not read as
+            covering, 2 of 95 cases red.
+        - id: R264
+          verdict: Covered
+          evidence: >-
+            A base commit holding R5 with a full line: `fc-line-kept` exits 0, `fc-line-deleted`
+            exits 1 with FAILURE_CASES_MISSING saying R5 carried a line at the base,
+            `fc-line-weakened` drops `caller` and exits 1 with FAILURE_CASE_UNCOVERED naming it;
+            `fc-checked-ids` puts in the checked set a requirement that carried a line and has no trigger now.
+            Falsified 2026-11-04: a base line not re-checked, 4 of 95 cases red.
+
+  - id: failure-cases
+    why: a requirement a change adds with a trigger and no failure case beside it ships behaviour nobody asked what goes wrong with, and its tests inherit the gap
+    when:
+      always: true
+    severity: block
+    requires: [python3, git, ./plugins/productizer/skills/spec/scripts/validate-spec.py]
+    version_command: [python3, plugins/productizer/skills/spec/scripts/validate-spec.py, --version]
+    mode: batch
+    command: [python3, plugins/productizer/skills/spec/scripts/validate-spec.py, --repo, ., --failure-cases, --base, "{base}"]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a new When requirement whose failure cases are not covered, or a Failure cases line that does not read
+      refused: [2, 4]  # usage; NOT MEASURED - no base commit resolved, or failure_cases.py not importable
+    coverage:
+      from: stdout_paths
+      pattern: '^examined: (\S+)'
+      must_cover: none
+      min_covered: 2
+      spec_units:
+        - id: R263
+          verdict: Partial
+          reason: >-
+            Only a run with a base applies the rule. Under --changed the row is `no_base`, which
+            blocks rather than passing, and nothing here asserts that CI passes --base; the
+            workflow's checks step does, on its own line.
+          evidence: >-
+            Declared `always`, taking `{base}`, the merge base run-checks.sh computes and records as
+            change.base. Measured 2026-11-04 in a scratch clone holding the B191 change as one
+            commit on 487799d, through run-checks.sh --base HEAD~1 over a config holding this check
+            alone: it was handed 487799d3c7726b4c2fa5ae66051425892478ac39, printed `named by --base`,
+            covered 2 (the spec at the base and now) and passed with R254, R255, R256, R263 and
+            R264 checked; one more commit adding a `When` requirement with no line made the run exit 3,
+            `REFUSED: failure-cases (fail)`, FAILURE_CASES_MISSING naming it. With `--base, "{base}"`
+            taken out of the command the passing run resolved the base itself (`the first parent
+            of ...`) - so the substitution, not the fallback, is what the evidence shows.
+    limitations:
+      - It reads the spec through `--repo`, so a requirement in a part `spec.path` does not declare is not examined; validate-spec.py's own SPEC_FILE_UNDECLARED reports that part.
+      - Whether an `n/a because` reason is TRUE is not judged. That is Stage 2's review, the same way a reason line on a superseded requirement is.
+      - It cannot tell that an `If` requirement named for a case is ABOUT that case; it checks that the id is an active unwanted-behaviour requirement.
+
 # --- unquoted expansions, which shell-lint's severity never raised ----------
 #
 # B85. shell-lint runs `shellcheck --severity=warning`, and SC2086 - an unquoted

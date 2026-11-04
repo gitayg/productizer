@@ -72,11 +72,13 @@ allocator, written in EARS (`references/ears.md`).
 **R41** — When a payment provider posts a settlement callback the billing
 service cannot yet verify, the billing service shall queue it for retry.
 Pattern: event-driven. Replaces R7 — see *Superseded*.
+Failure cases: input n/a because a callback that fails verification is what R41 queues · caller n/a because the consumer resolves a principal before it works (P2 above) · repeat R43 · dependency <the If requirement for a queue that refuses the write>
 Verified by: `test_unverified_callback_is_queued`.
 
 **R42** — When an operator requests a settlement export, the billing service
 shall write a CSV containing one row per settlement in the requested period.
 Pattern: event-driven.
+Failure cases: n/a because an export reads settlements and changes none
 Verified by: `test_settlement_export_row_per_settlement`.
 
 **R43** — If a settlement callback arrives with a provider reference already
@@ -87,6 +89,14 @@ Verified by: `test_duplicate_settlement_callback_records_once`.
 A change that adds no unwanted-behaviour requirement has not considered
 failure, and the tests will inherit that gap. Say so explicitly if the change
 genuinely has no failure path, rather than leaving the reviewer to notice.
+
+**Every added `When` requirement answers four questions** — invalid input, a
+wrong caller or tenant, a repeat or concurrent action, a failing dependency —
+each with an `If` requirement id or `n/a because <reason>`, or once with
+`n/a because <reason>` when it changes no state. Quote the `Failure cases`
+line here as it stands in the spec, where it is one unindented line, last in
+the requirement's item (`references/ears.md` rule 6).
+`validate-spec.py --repo . --failure-cases` refuses the change without it.
 
 ## Refined requirements
 

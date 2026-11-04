@@ -1154,3 +1154,55 @@ not do:
   system config or a linked worktree's `config.worktree`, a bare repository or
   a shared absolute `core.hooksPath` for the installer, git older than 2.40,
   and `GIT_ATTR_SOURCE` reaching a check's own git call.
+
+## Added in v4.83.0
+
+### 54 · Failure cases are checked for being written down, not for being right
+
+Since v4.83.0 (B191) a requirement a change adds under the event-driven heading,
+or whose sentence holds a `when` trigger clause ahead of its response (`When`,
+`While …, when …`, `Where …, when …`), carries a `Failure cases` line covering
+invalid input, a wrong caller or tenant, a repeat or concurrent action and a
+failing dependency (`references/ears.md` rule 6), and `validate-spec.py
+--failure-cases` refuses a change without it. What it does not do:
+
+- **An `n/a because` reason is not judged.** `n/a because it is fine` passes.
+  Whether a requirement changes state is the author's written declaration;
+  Stage 2's review reads it, nothing else does.
+- **A named `If` is not checked to be about its case.** The id must be an
+  active unwanted-behaviour requirement; any one will do.
+- **Only requirements a change adds are checked.** Every requirement active at
+  the base with a trigger and no line is left alone on purpose, so the 57
+  requirements with a trigger this spec held before v4.83.0 carry no line and
+  are never asked. A requirement refined in place from another pattern into a
+  `When` one is checked, and so is one that carried a line at the base, so a
+  line can be deleted or weakened only as a finding.
+- **An old `When` requirement rewritten in place stays exempt** (R257, by
+  design). Its sentence can change what it does - `the widget shall purge every
+  ticket of every tenant` - and the rule does not ask again; `--baseline` and
+  `check-suspect-links.sh` see the rewrite, this does not. Measured with the
+  review's probe: exit 0, `0 requirement(s) checked`.
+- **A spec that moves reads as new.** The base is read at the spec's CURRENT
+  declared paths, so a spec moved to another path (or a part renamed in a
+  split spec) is absent at the base and every requirement with a trigger in it
+  is demanded a line - measured with the review's probe: a spec moved to
+  `docs/spec.md` with nothing else changed exits 1 with FAILURE_CASES_MISSING
+  for its old `When` requirement. Name a base after the move, or add the lines.
+- **Without `--base` one change is one edit or one commit.** The uncommitted
+  edit against HEAD, or the newest commit that changed the spec; a branch of
+  several spec commits is checked whole only with `--base`, as CI passes it.
+- **The line is unindented**, a Markdown lazy continuation, because every
+  parser here reads an indented line as more of the sentence. A renderer that
+  does not take lazy continuations shows it as a paragraph after the list item.
+- **No base, no verdict.** A run with `--changed` records `failure-cases` as
+  `no_base`, which blocks; a shallow clone with a clean tree, a clean tree whose
+  only spec commit is the repository's first, and a `--base` that names no
+  commit each exit 4. A spec whose only commit has a parent is measured against
+  that parent, where it is absent, so every requirement in it is new.
+- **Not driven by a case:** a merge commit as the newest spec change (the walk
+  takes its first parent), a split spec across several files, and
+  `failure_cases.py` missing beside `validate-spec.py` (it reports
+  `FAILURE_CASES_UNREADABLE` and NOT MEASURED; no fixture removes it).
+- **The fire rate is not calibrated.** `failure-cases` passes `--base`, which
+  the overfire replay cannot give it; `spec-validator-selftest` replayed 29
+  merged commits that each ran an older self-test without these fixtures.

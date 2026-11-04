@@ -35,7 +35,7 @@ Prose loses to a hurried agent at 2 a.m. A grammar does not.
 | 1 | At least one ERROR (with `--strict`, at least one WARN) |
 | 2 | Usage error |
 | 3 | `--self-test` failed |
-| 4 | **NOT MEASURED** — a file could not be read, its kind could not be determined, or it holds no requirements/principles/items to check |
+| 4 | **NOT MEASURED** — a file could not be read, its kind could not be determined, or it holds no requirements/principles/items to check; under `--failure-cases`, no base commit could be resolved (`FAILURE_CASES_NO_BASE`) |
 
 Exit 4 exists because of P1. A spec that was not read has not passed, and the
 run prints `NOT MEASURED: <path>` with **no counts at all** rather than
@@ -50,7 +50,8 @@ month later.
 
 Greppable, anchored to a line, sorted by `(line, code, message)`. No wall clock,
 environment or network is read, so two runs over the same input are
-byte-identical.
+byte-identical. The one exception is `--failure-cases`, which reads git history
+to find the base; its result is fixed by the commits it reads and the work tree.
 
 ## Document kinds
 
@@ -193,6 +194,35 @@ superseded or withdrawn requirement's text (`SUPERSEDED_TEXT_CHANGED`).
 
 Nothing is ever deleted. A requirement missing from the file but present in the
 baseline is an ERROR, not a tidy-up.
+
+### The `Failure cases` line (since v4.83.0, B191)
+
+The one line in an item that is **not** indented. It sits directly under the
+bullet, or under its status marker, and is the item's last line:
+
+<!-- EXAMPLE:BEGIN -->
+```
+- **R12** — When a person files a ticket, the lifecycle shall store it.
+Failure cases: input R13 · caller R14 · repeat n/a because a ticket is keyed by its source id · dependency R15
+```
+<!-- EXAMPLE:END -->
+
+```
+line    := "Failure cases:" ( na | case ( sep case )* )
+case    := ( "input" | "caller" | "repeat" | "dependency" ) ( ids | na )
+ids     := R<n> ( ("," | "and" | " ") R<n> )*
+na      := "n/a because" <non-empty reason>
+sep     := "·" | ";"
+```
+
+A bare `na` covers all four cases. Each id must be an active requirement whose
+sentence is `If …, then …`. Indented, it would be read as more of the sentence
+by every parser that reads requirement text (`validate-spec.py`,
+`spec-requirements.sh`, `build-guide.sh`); unindented, each of them closes the
+item on it and reads nothing — so a status marker written BELOW it is read by
+no parser at all, and that is `FAILURE_CASES_MISPLACED`. Which requirements
+must carry one is `--failure-cases`'s question, asked against a base commit;
+the codes are in `references/ears.md`.
 
 ---
 
@@ -382,8 +412,13 @@ python3 scripts/validate-spec.py --strict .claude/productizer/spec.md
 git show HEAD~1:.claude/productizer/spec.md > /tmp/spec-before.md
 python3 scripts/validate-spec.py --baseline /tmp/spec-before.md .claude/productizer/spec.md
 
-# the validator checking itself
+# rule 6 on this change: every requirement new against the base that has a
+# trigger covers its four failure cases (git history; see `--help` for the base)
+python3 scripts/validate-spec.py --repo . --failure-cases [--base REF]
+
+# the validator checking itself, and its version
 python3 scripts/validate-spec.py --self-test
+python3 scripts/validate-spec.py --version
 ```
 
 Passing the spec and the constitution on one command line lets the

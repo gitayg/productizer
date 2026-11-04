@@ -89,3 +89,30 @@ arguments deferred to review, and a spec with no `If <trigger>, then …`
 requirements has not considered failure — a gap the tests inherit. Apply policy
 skills **while writing**, not afterwards; name conflicts and both owners. Only
 the **delta** goes to build.
+
+**Every requirement the delta adds with a trigger asks four questions** —
+`When …`, or `While …, when …` / `Where …, when …` — (B191, since
+v4.83.0). What happens on **invalid input**? On a **wrong caller or tenant**? On
+a **repeat or concurrent action**? When a **dependency fails**? Each answer is
+an unwanted-behaviour requirement (`If …, then …`) the delta also adds or
+already holds, or `n/a because <reason>`, written on an unindented
+`Failure cases` line as the last line of the requirement's item:
+
+<!-- EXAMPLE:BEGIN -->
+```
+- **R12** — When a person files a ticket, the lifecycle shall store it.
+Failure cases: input R13 · caller R14 · repeat n/a because a ticket is keyed by its source id · dependency R15
+```
+<!-- EXAMPLE:END -->
+
+A requirement that changes no state says so once — `Failure cases: n/a because
+<reason>` — and that line covers all four. Whether it changes state is that
+written declaration, reviewed like the sentence, never a guess by a script.
+`validate-spec.py --repo . --failure-cases` demands the line of the requirements
+the change adds against a base commit, and of any that carried one there, and
+leaves the rest of the spec as it stood alone;
+the `failure-cases` check runs it in CI against the change's base. Each `If`
+named there then gets its acceptance row and a test seen failing, like every
+other requirement — `check-acceptance-rows.sh` already refuses an active one
+with no row. The line's grammar and why it is not indented are in
+`references/ears.md` rule 6.

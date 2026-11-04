@@ -61,6 +61,42 @@ distinction is what separates a designed path from a defended one.
    list.
 6. **Unwanted-behaviour requirements are not optional.** A spec with no `If`
    requirements has not considered failure, and the tests will inherit that gap.
+   **Enforced since v4.83.0 (B191)** on every change: a requirement the change
+   adds under the event-driven heading, or whose sentence holds a `when`
+   trigger clause ahead of its response (`When …`, `While …, when …`,
+   `Where …, when …`, read from the sentence whatever its heading), carries a
+   `Failure cases` line covering four cases — `input` (invalid
+   input), `caller` (a wrong caller or tenant), `repeat` (a repeat or
+   concurrent action) and `dependency` (a failing dependency). Each names one
+   or more active `If …, then …` requirement ids, or says `n/a because
+   <reason>`; cases are separated by `·` (or `;`):
+
+   <!-- EXAMPLE:BEGIN -->
+   ```
+   - **R12** — When a person files a ticket, the lifecycle shall store it.
+   Failure cases: input R13 · caller R14 · repeat n/a because a ticket is keyed by its source id · dependency R15
+   - **R16** — When a person opens the board, the lifecycle shall list the tickets.
+   Failure cases: n/a because listing changes no state
+   ```
+   <!-- EXAMPLE:END -->
+
+   One `n/a because <reason>` with no case named covers all four: it declares,
+   where a reviewer reads it, that the requirement changes no state. The line
+   is **unindented and last in the item**, after any status marker. Every spec
+   parser here — `validate-spec.py`, `spec-requirements.sh` (and so every check
+   reading the spec through it) and `build-guide.sh` — reads an indented line
+   under a bullet as more of the requirement's sentence; measured, an indented
+   line failed `--strict` with `EARS_NO_FULL_STOP`, joined the text
+   `contradiction-check.py` compares and was rendered into GUIDE.md. An
+   unindented line is a Markdown lazy continuation: it renders inside the item,
+   and every one of those parsers closes the item on it without reading it.
+   `validate-spec.py --repo ROOT --failure-cases [--base REF]` demands the line
+   of the requirements new against a base, of any requirement active there
+   with no trigger that has one now, and of any requirement that carried a
+   line there, so a line deleted or weakened is judged again; a requirement
+   active at the base with a trigger and no line is left alone, so the spec as
+   it stood is not affected. See *Failure cases* under *Checking it instead of trusting
+   it* for the codes.
 
 ## Requirement identity and lifecycle
 
@@ -287,6 +323,25 @@ consistent. Against an earlier copy it is arithmetic:
 | `PATTERN_CHANGED` | ERROR | the trigger changed pattern, which makes it a different requirement |
 | `COUNTER_REWOUND` | ERROR | the counter went backwards |
 | `STATUS_REVERTED` | WARN | superseded or withdrawn, now active again |
+
+### Failure cases (rule 6, since v4.83.0)
+
+A `Failure cases` line that is present is always read, whatever the base. One
+that must be present is demanded only under `--failure-cases`, against a base:
+`--base REF`, else HEAD when the spec in the work tree differs from HEAD's
+(the uncommitted edit is the change), else the first parent of the newest
+commit on HEAD's first-parent line that changed the spec (that one commit is
+the change, never a branch of several) — the walk `check-changelog-row.sh`
+takes, and like it a shallow clone is refused there.
+
+| Code | Sev | Fires on |
+|---|---|---|
+| `FAILURE_CASES_MISSING` | ERROR | `--failure-cases`: a requirement new against the base with a trigger, one that gained a trigger, or one that carried a line at the base, with no line; says which and names the four cases |
+| `FAILURE_CASE_UNCOVERED` | ERROR | `--failure-cases`: a case its line neither covers with an id nor marks `n/a because` |
+| `FAILURE_CASE_ID_UNKNOWN` / `_INACTIVE` / `_NOT_UNWANTED` | ERROR | an id on a line that the spec does not define, that is superseded or withdrawn, or whose sentence is not `If …, then …` |
+| `FAILURE_CASES_MALFORMED` | ERROR | a case outside the four, a case named twice, an `n/a` with no reason, a body that is neither ids nor `n/a because`, an empty line |
+| `FAILURE_CASES_MISPLACED` | ERROR | an indented line, a line under no requirement, a second line, or a line of the item after it |
+| `FAILURE_CASES_NO_BASE` | exit 4 | `--failure-cases` and no base commit resolved: not a git work tree, `--base` naming no commit, a shallow clone where history is walked, or a clean tree whose only spec commit is the repository's first. NOT MEASURED, never a pass |
 
 ### Constitution and backlog
 

@@ -28,15 +28,35 @@ Exit codes
     4  NOT MEASURED — a file could not be read, its kind could not be
        determined, or it holds no requirements/principles to check. This is
        never reported as "0 errors": a spec that was not read has not passed.
+       Under --failure-cases, also: no base commit could be resolved
+       (FAILURE_CASES_NO_BASE).
 
 Usage
     validate-spec.py [--strict] [--quiet] [--kind spec|constitution|backlog] FILE...
     validate-spec.py --repo ROOT [--strict] [--quiet]
+    validate-spec.py --repo ROOT --failure-cases [--base REF] [--strict]
     validate-spec.py --repo ROOT --list-files
     validate-spec.py --baseline OLD_SPEC.md NEW_SPEC.md
     validate-spec.py --counts SPEC.md
     validate-spec.py --format speckit SPEC.md
     validate-spec.py --self-test
+    validate-spec.py --version
+
+Failure cases (B191, 1.0)
+    A requirement this change ADDS under the event-driven heading, or whose
+    sentence holds a `when` trigger clause ahead of its response (`When ...`,
+    `While ..., when ...`, `Where ..., when ...`), carries an unindented
+    `Failure cases` line as the last line of its item. Each of four cases - input (invalid input),
+    caller (a wrong caller or tenant), repeat (a repeat or concurrent action),
+    dependency (a failing dependency) - names unwanted-behaviour requirement
+    ids or says `n/a because <reason>`; one `n/a because <reason>` alone
+    covers all four for a requirement that changes no state. A line that is
+    present is always parsed and its ids resolved; --failure-cases demands the
+    line of the requirements that are new against a base, of those that gain
+    a trigger, and of those that carried a line at the base, and leaves alone
+    every requirement active at the base with a trigger and no line. The
+    rule and the base resolution are in `failure_cases.py`; `--help` states
+    the resolution.
 
 Input formats
     --format productizer  (default) the grammar above, read as written.
@@ -106,7 +126,9 @@ Scope
 
 Deterministic: no wall clock, no environment, no network is read, and problems
 are emitted sorted by (line, code, message). Two runs of the same input are
-byte-identical. Python 3.8+, standard library only.
+byte-identical. --failure-cases alone reads git (the base commit and the spec
+at it), so its input is the work tree AND those commits. Python 3.8+, standard
+library only.
 """
 
 from __future__ import annotations
@@ -129,6 +151,11 @@ EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_SELFTEST = 3
 EXIT_UNMEASURED = 4
+
+# 1.0 (v4.83.0, B191): the first versioned release. `--version`, so a declared
+# check can record this tool's version rather than python3's, and the
+# failure-case rule.
+VERSION = "1.0"
 
 # --------------------------------------------------------------------------
 # Grammar
@@ -154,6 +181,12 @@ SUPERSEDED_RE = re.compile(
     r"^Superseded by\s+(?P<target>R[0-9]+)\s*\.?\s*(?P<reason>.*)$")
 WITHDRAWN_RE = re.compile(r"^Withdrawn\s*\.?\s*(?P<reason>.*)$")
 STATUS_START_RE = re.compile(r"^(superseded|withdrawn)\b", re.I)
+
+# B191. The opener of a requirement's `Failure cases` line. The grammar of the
+# rest of the line is `failure_cases.py`'s, imported only when a line exists
+# or --failure-cases asks, so a spec carrying none runs exactly the code it
+# ran before 1.0.
+FAILURE_LINE_RE = re.compile(r"^failure cases\s*:\s*(?P<body>.*)$", re.I)
 
 P_SUPERSEDED_RE = re.compile(
     r"^Superseded by\s+(?P<target>P[0-9]+)\s*(?P<date>\d{4}-\d{2}-\d{2})?\s*\.?\s*"
@@ -284,6 +317,8 @@ class Requirement:
     status_line: int = 0
     supersedes_target: str = ""
     reason: str = ""
+    failure_cases: str = ""
+    failure_cases_line: int = 0
 
 
 @dataclass
@@ -427,6 +462,7 @@ def parse_spec(doc, text):
     pattern_section = ""
     in_requirements = False
     current = None
+    closed_by = None
     blank_since_bullet = False
 
     for lineno, raw in iter_lines(text):
@@ -443,6 +479,7 @@ def parse_spec(doc, text):
             elif level == 3 and in_requirements:
                 pattern_section = SECTION_PATTERNS.get(title, "")
                 current = None
+            closed_by = None
             continue
 
         if not raw.strip():
@@ -454,17 +491,54 @@ def parse_spec(doc, text):
             if bullet:
                 current = read_requirement(doc, lineno, bullet, pattern_section)
                 blank_since_bullet = False
+                closed_by = None
                 continue
             if raw.startswith("- "):
                 doc.add(lineno, ERROR, "ID_MALFORMED",
                         "bullet in the Requirements section carries no "
                         "`**R<n>**` id: %s" % raw.strip()[:70])
                 current = None
+                closed_by = None
+                continue
+            # B191. The `Failure cases` line is UNINDENTED and LAST in its
+            # item: every spec parser here reads an indented line as more of
+            # the sentence, and closes the item on an unindented one without
+            # reading it. See failure_cases.py for what was measured.
+            if FAILURE_LINE_RE.match(raw):
+                if current is not None and not blank_since_bullet:
+                    current.failure_cases = FAILURE_LINE_RE.match(raw).group(
+                        "body")
+                    current.failure_cases_line = lineno
+                    closed_by = current
+                elif closed_by is not None and not blank_since_bullet:
+                    doc.add(lineno, ERROR, "FAILURE_CASES_MISPLACED",
+                            "a second `Failure cases` line under %s; an item "
+                            "carries one" % closed_by.ident)
+                else:
+                    doc.add(lineno, ERROR, "FAILURE_CASES_MISPLACED",
+                            "a `Failure cases` line that does not follow a "
+                            "requirement's bullet or status marker directly "
+                            "belongs to no requirement")
+                current = None
                 continue
             if current is not None and not blank_since_bullet and raw[:1] in " \t":
+                if FAILURE_LINE_RE.match(raw.strip()):
+                    doc.add(lineno, ERROR, "FAILURE_CASES_MISPLACED",
+                            "%s's `Failure cases` line is indented; every "
+                            "spec parser reads an indented line as more of "
+                            "the requirement's sentence. Write it unindented, "
+                            "as the item's last line" % current.ident)
+                    continue
                 read_continuation(doc, lineno, raw.strip(), current)
                 continue
+            if (closed_by is not None and not blank_since_bullet
+                    and raw[:1] in " \t"):
+                doc.add(lineno, ERROR, "FAILURE_CASES_MISPLACED",
+                        "an indented line after %s's `Failure cases` line is "
+                        "read by no parser; the line goes last in the item, "
+                        "after any status marker" % closed_by.ident)
             current = None
+            closed_by = None
             continue
 
         if section in CITED_SECTIONS:
@@ -634,6 +708,43 @@ def check_spec(doc, siblings=None, others=None):
     check_spec_citations(doc, siblings)
     check_spec_allocator(doc, counter, others)
     check_spec_text_siblings(doc, others)
+    check_failure_lines(doc, others)
+
+
+def ears_pattern(text):
+    """The EARS pattern a sentence opens with, or "" -- no diagnostics."""
+    for name, regex in EARS_PATTERNS:
+        if regex.match(text.strip()):
+            return name
+    return ""
+
+
+def check_failure_lines(doc, others=None):
+    """Read every `Failure cases` line present (B191).
+
+    Only when one exists: a spec that carries none never imports the rule, so
+    every spec written before 1.0 is checked by exactly the code that checked
+    it before. Coverage -- whether a line has to be there at all -- is
+    --failure-cases's question, asked in `main` against a base.
+    """
+    if not any(r.failure_cases_line for r in doc.requirements):
+        return
+    try:
+        rule = import_failure_cases()
+    except ImportError as exc:
+        doc.add(1, ERROR, "FAILURE_CASES_UNREADABLE",
+                "this spec carries `Failure cases` lines and failure_cases.py "
+                "beside this script could not be imported (%s), so none of "
+                "them was read" % exc)
+        doc.unmeasured = True
+        return
+    lookup = {}
+    for part in [doc] + list(others or []):
+        for requirement in part.requirements:
+            if requirement.status == "active" and not requirement.pattern:
+                requirement.pattern = ears_pattern(requirement.text)
+            lookup.setdefault(requirement.ident, requirement)
+    rule.check_declared(doc, lookup, ERROR)
 
 
 def check_spec_ids(doc, counter):
@@ -1870,6 +1981,21 @@ def import_adapter():
     finally:
         sys.dont_write_bytecode = previous
     return speckit_adapt
+
+
+def import_failure_cases():
+    """Import the failure-case rule the way `import_adapter` imports the
+    adapter: from beside this file, leaving no `__pycache__` behind."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        import failure_cases
+    finally:
+        sys.dont_write_bytecode = previous
+    return failure_cases
 
 
 def load_speckit(path, text, adapter):
@@ -3349,6 +3475,20 @@ def self_test():
     # deliberate failure injected. The copy runs with the guard variable set,
     # which is what stops it copying itself forever.
     # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
+    # B191, the failure-case rule. Its cases live beside the rule in
+    # failure_cases.py and register here, so the count below includes them.
+    # ----------------------------------------------------------------------
+    try:
+        rule = import_failure_cases()
+    except ImportError as exc:
+        failures.append("failure-cases: failure_cases.py could not be "
+                        "imported, so the rule was not measured at all: %s"
+                        % exc)
+        rule = None
+    if rule is not None:
+        rule.self_test(case, failures, validate_text, main, VERSION)
+
     reached = set()
     if not os.environ.get("VALIDATE_SPEC_CHILD"):
         import subprocess
@@ -3426,6 +3566,53 @@ def self_test():
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
+
+def run_failure_cases(root, spec_paths, specs, base_ref, out, unmeasured):
+    """--failure-cases: resolve the base, then demand coverage of the
+    requirements new against it. Returns the report lines, or None when the
+    run was refused -- `unmeasured` then names why, and nothing passes."""
+    anchor = specs[0]
+    try:
+        rule = import_failure_cases()
+    except ImportError as exc:
+        out.write("%s:1: %s FAILURE_CASES_UNREADABLE: failure_cases.py beside "
+                  "this script could not be imported (%s); no requirement was "
+                  "checked for its failure cases\n" % (anchor.path, ERROR, exc))
+        unmeasured.append(anchor.path)
+        return None
+    base = rule.resolve_base(root, spec_paths, base_ref, sys.stderr)
+    if base.refusal:
+        out.write("%s:1: %s FAILURE_CASES_NO_BASE: %s. Which requirements are "
+                  "new is a comparison with a base commit, and with none "
+                  "nothing was compared\n" % (anchor.path, ERROR, base.refusal))
+        unmeasured.append(anchor.path)
+        return None
+    base_docs = []
+    lines = ["failure cases: base %s (%s)" % (base.sha, base.how)]
+    for rel, text in base.texts.items():
+        if text is None:
+            lines.append("examined: %s@%s (absent at the base, so every "
+                          "requirement in it is new)" % (rel, base.sha[:12]))
+            continue
+        lines.append("examined: %s@%s" % (rel, base.sha[:12]))
+        doc = build_document("%s@%s" % (rel, base.sha[:12]), text, "spec")
+        check_spec(doc)
+        base_docs.append(doc)
+    for doc in specs:
+        lines.append("examined: %s" % doc.path)
+    checked, new = rule.checked_ids(specs, base_docs)
+    for doc in specs:
+        rule.check_coverage(doc, checked, ERROR)
+    findings = sum(1 for doc in specs for p in doc.problems
+                   if p.code.startswith("FAILURE_CASE"))
+    ordered = sorted(checked, key=lambda i: int(i[1:]))
+    lines.append("failure cases: %d requirement(s) new against the base, %d "
+                 "requirement(s) checked for failure cases%s, %d finding(s)"
+                 % (new, len(ordered),
+                    (" (%s)" % ", ".join(ordered)) if ordered else "",
+                    findings))
+    return lines
+
 
 def report_counts(paths, kind, out):
     """Print the header's declared totals beside the totals counted from the file.
@@ -3519,14 +3706,50 @@ def main(argv):
                         help="with --repo, print the discovered spec files one "
                              "per line and check nothing, so another tool can "
                              "read the same list this does")
+    parser.add_argument("--failure-cases", dest="failure_cases",
+                        action="store_true",
+                        help="with --repo: demand a `Failure cases` line of "
+                             "every requirement new against a base commit "
+                             "that is filed under the event-driven heading or "
+                             "holds a `when` trigger clause ahead of its "
+                             "response, of one that gained such a trigger, and "
+                             "of one that carried a line at the base. The base "
+                             "is --base REF; without it, HEAD when the spec "
+                             "in the work tree differs from HEAD's (so only "
+                             "the uncommitted edit is checked), otherwise the "
+                             "first parent of the newest commit on HEAD's "
+                             "first-parent line that changed the spec (so only "
+                             "that one commit is checked; a shallow clone is "
+                             "refused there). A branch of several commits is "
+                             "checked whole only with --base. No resolvable "
+                             "base exits 4, NOT MEASURED, never a pass")
+    parser.add_argument("--base", metavar="REF",
+                        help="with --failure-cases: the commit the change is "
+                             "measured against")
+    parser.add_argument("--version", action="store_true",
+                        help="print this validator's version and exit")
     parser.add_argument("--self-test", "--selftest", dest="self_test",
                         action="store_true",
                         help="run the built-in fixtures and exit")
     args = parser.parse_args(argv)
 
     out = sys.stdout
+    if args.version:
+        out.write("%s\n" % VERSION)
+        return EXIT_CLEAN
     if args.self_test:
         return self_test()
+    if args.base is not None and not args.failure_cases:
+        sys.stderr.write("validate-spec.py: --base names the commit "
+                         "--failure-cases measures against; without "
+                         "--failure-cases nothing reads it\n")
+        return EXIT_USAGE
+    if args.failure_cases and (args.repo is None or args.list_files):
+        sys.stderr.write("validate-spec.py: --failure-cases reads the spec a "
+                         "repo declares and that repo's history, so it takes "
+                         "--repo ROOT and checks; it does not take files or "
+                         "--list-files\n")
+        return EXIT_USAGE
     discovery = None
     if args.repo is not None:
         for flag, given in (("files", bool(args.files)),
@@ -3702,6 +3925,11 @@ def main(argv):
                 baseline.problems = []
                 check_baseline(spec, baseline)
 
+    failure_report = None
+    if args.failure_cases and spec is not None:
+        failure_report = run_failure_cases(args.repo, discovery.spec_paths,
+                                           specs, args.base, out, unmeasured)
+
     # Source-line remapping and the n/a drop happen once every check that can
     # add a problem has run, `--baseline` included.
     for doc in documents:
@@ -3739,6 +3967,9 @@ def main(argv):
                          "it" if len(set(unmeasured)) == 1 else "them"))
         return EXIT_UNMEASURED
 
+    if failure_report and not args.quiet:
+        for line in failure_report:
+            out.write(line + "\n")
     if not args.quiet:
         # Under --format speckit the n/a families ride on the summary line, so
         # a zero-error run cannot be quoted as a clean bill of health for

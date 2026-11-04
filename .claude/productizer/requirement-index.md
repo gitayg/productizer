@@ -279,4 +279,15 @@ marker, because a table left there would be one nothing writes or checks.
 | R251 | optional | active | `pre-push-hook` |
 | R252 | unwanted | active | `pre-push-hook` |
 | R253 | unwanted | active | `pre-push-hook` |
+| R254 | event | active | `spec-validator-selftest` |
+| R255 | event | active | `spec-validator-selftest` |
+| R256 | event | active | `spec-validator-selftest` |
+| R257 | ubiquitous | active | `spec-validator-selftest` |
+| R258 | unwanted | active | `spec-validator-selftest` |
+| R259 | unwanted | active | `spec-validator-selftest` |
+| R260 | unwanted | active | `spec-validator-selftest` |
+| R261 | unwanted | active | `spec-validator-selftest` |
+| R262 | optional | active | `spec-validator-selftest` |
+| R263 | event | active | `failure-cases` |
+| R264 | event | active | `spec-validator-selftest` |
 <!-- productizer:requirement-index:end -->

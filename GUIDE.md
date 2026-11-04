@@ -240,6 +240,25 @@ not a requirement. This is what turns "do the tests actually assert the
 criteria?" from an argument into a check. A spec with no `If` requirements has
 not considered failure, and the tests will inherit that gap.
 
+Since v4.83.0 that is checked, not hoped for. Every `When` requirement a change
+adds answers four questions — invalid input, a wrong caller or tenant, a repeat
+or concurrent action, a failing dependency — on one unindented line, last in
+its item:
+
+<!-- EXAMPLE:BEGIN -->
+```
+- **R12** — When a person files a ticket, the lifecycle shall store it.
+Failure cases: input R13 · caller R14 · repeat n/a because a ticket is keyed by its source id · dependency R15
+```
+<!-- EXAMPLE:END -->
+
+Each case names an `If` requirement or says `n/a because <reason>`; a
+requirement that changes no state says `Failure cases: n/a because <reason>`
+once. A `While …, when …` or `Where …, when …` sentence has a trigger too.
+`validate-spec.py --repo . --failure-cases` asks it of the requirements the
+change adds, and again of any that already carried a line, and refuses — exit
+4, never a pass — when it cannot find the commit to compare with.
+
 ## Products can span repos
 
 A product is one or more repos. Exactly one of them is the **spec home** and
@@ -822,7 +841,7 @@ Edit the spec; this section follows.
      plugins/productizer/skills/spec/scripts/build-guide.sh. Everything between
      these two markers is rewritten on every release - edit the spec, not this. -->
 
-**220 requirements are active**, and they are the whole of what has been
+**231 requirements are active**, and they are the whole of what has been
 agreed.
 
 Thirty-three more are superseded and none withdrawn, and neither kind is
@@ -831,7 +850,7 @@ written two years ago still leads somewhere — but a guide is read by someone
 deciding what to do next, and a superseded sentence gives them no sign it
 stopped being true.
 
-**Always, with no trigger.** Twenty-six requirements hold whatever else is
+**Always, with no trigger.** Twenty-seven requirements hold whatever else is
 happening:
 
 - **R1** — The lifecycle shall hold exactly one living spec per product.
@@ -892,8 +911,11 @@ happening:
   matches GitHub's own preparation, teardown or post steps, the actions that
   fetch the repository, set up a runtime or cache, or a name that says it
   installs or caches, together with the patterns the person adds.
+- **R257** — The lifecycle shall leave out of the failure-case rule every
+  requirement that was active at the base with a trigger and no `Failure
+  cases` line.
 
-**When something arrives.** Fifty-seven things happen on a discrete trigger:
+**When something arrives.** Sixty-two things happen on a discrete trigger:
 
 - **R6** — When an intent arrives, the lifecycle shall classify it against the
   whole living spec as exactly one of extend, refine, duplicate or contradict.
@@ -1048,6 +1070,25 @@ happening:
 - **R237** — When the hook installer is run again, run with `--dry-run`, or
   run with `--uninstall`, the lifecycle shall leave an up-to-date own hook
   unchanged, write no file, or remove only its own hook, respectively.
+- **R254** — When a change adds a requirement filed under the event-driven
+  heading or whose sentence holds a `when` trigger clause ahead of its
+  response, the lifecycle shall report each failure case of invalid input, a
+  wrong caller or tenant, a repeat or concurrent action and a failing
+  dependency that the requirement's `Failure cases` line neither covers with
+  an unwanted-behaviour requirement id nor marks `n/a because` with a reason.
+- **R255** — When the lifecycle applies the failure-case rule with no base
+  named, the lifecycle shall take HEAD as the base if the spec in the work
+  tree differs from HEAD's, and otherwise the first parent of the newest
+  commit on HEAD's first-parent line that changed the spec.
+- **R256** — When a requirement that was active at the base with no trigger
+  gains one in the change, by moving under the event-driven heading or by a
+  `when` trigger clause ahead of its response, the lifecycle shall apply the
+  failure-case rule to it as to a new requirement.
+- **R263** — When a change is gated against a base, the lifecycle shall apply
+  the failure-case rule against that base.
+- **R264** — When a requirement that carried a `Failure cases` line at the
+  base is active in the change, the lifecycle shall apply the failure-case
+  rule to it as to a new requirement.
 
 **For as long as a state lasts.** Nine requirements are true for the duration
 of a state, not at a moment inside it:
@@ -1076,7 +1117,7 @@ of a state, not at a moment inside it:
 - **R138** — While the release-draft job holds a token that can write to the
   repository, the lifecycle shall run no code from the repository in it.
 
-**When something goes wrong.** 107 defences, written as `If … then` because a
+**When something goes wrong.** 111 defences, written as `If … then` because a
 designed path and a defended one are not the same thing:
 
 - **R18** — If a configured command names a shell or an interpreter with an
@@ -1403,8 +1444,22 @@ designed path and a defended one are not the same thing:
   whose name is on the pre-push hook's list of tool configuration names, and
   the clone has not opted in to trusting pushed configuration, then the
   lifecycle shall stop the push and name each such file.
+- **R258** — If a `Failure cases` line names a requirement id that the spec
+  does not define, that is not active or whose sentence is not an `If …, then
+  …` sentence, then the lifecycle shall report that id with the requirement
+  whose line names it.
+- **R259** — If a `Failure cases` line names a case other than input, caller,
+  repeat or dependency, names a case twice, or gives a case neither
+  requirement ids nor `n/a because` with a reason, then the lifecycle shall
+  report that line as malformed.
+- **R260** — If a `Failure cases` line is indented, does not directly follow a
+  requirement's bullet or status marker, or has a line of its requirement's
+  item after it, then the lifecycle shall report that line as misplaced.
+- **R261** — If the lifecycle is asked to apply the failure-case rule and no
+  base commit can be resolved, then the lifecycle shall refuse the run as not
+  measured.
 
-**Only where the feature is present.** Twenty-one requirements apply only to a
+**Only where the feature is present.** Twenty-two requirements apply only to a
 build that includes the feature:
 
 - **R22** — Where a repository declares its own check tools, the lifecycle
@@ -1471,6 +1526,9 @@ build that includes the feature:
 - **R251** — Where a repository's pre-push hook is installed, the lifecycle
   shall read git attributes from the trusted commit and run no git hook when
   it checks out or compares the pushed commit.
+- **R262** — Where a requirement's `Failure cases` line is one `n/a because`
+  with a reason and names no case, the lifecycle shall read it as covering the
+  four failure cases.
 
 Every id above is permanent. A plan, a test or a PR title naming `R1` will
 still mean this sentence in two years, which is why ids are never reused and

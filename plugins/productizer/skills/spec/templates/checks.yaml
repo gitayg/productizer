@@ -112,12 +112,13 @@ policy:
   # (shellcheck, semgrep, grep). The list ships with the plugin and is never
   # read from this file.
   #
-  # 20 of the 23 checks below need it on: the 17 whose program is a script in
-  # this repository (pii-log-scan, stderr-suppression, spec-home,
-  # ruling-requested, template-frontmatter, guide-current, view-read-only,
-  # missing-tool-reported, acceptance-rows, import-marking,
-  # classification-provenance, superseded-text, pending-ruling-scope,
-  # review-record, plan-record, approval-rules, revert-cases), and
+  # 21 of the 24 checks below need it on: the 18 whose program is a script in
+  # this repository, or is python3 handed one (pii-log-scan,
+  # stderr-suppression, spec-home, ruling-requested, template-frontmatter,
+  # guide-current, view-read-only, missing-tool-reported, acceptance-rows,
+  # import-marking, classification-provenance, superseded-text,
+  # failure-cases, pending-ruling-scope, review-record, plan-record,
+  # approval-rules, revert-cases), and
   # sast, sast-auth and secure-coding-controls, whose `coverage.rules_command`
   # names a committed file. secret-scan, shell-lint and dependency-audit run
   # with it off.
@@ -1044,6 +1045,49 @@ checks:
     limitations:
       - A requirement that ENTERS the repo already superseded and already rewritten cannot be caught: its first commit is the only baseline there is.
       - A shallow clone is refused rather than passed, which means CI must fetch full history for this to measure anything.
+
+  # --- a new `When` requirement that never asked what goes wrong ---------------
+  #
+  # `references/ears.md` rule 6. A requirement a change ADDS under the
+  # event-driven heading, or whose sentence holds a `when` trigger clause ahead
+  # of its response (`When ...`, `While ..., when ...`, `Where ..., when ...`),
+  # or that carried a `Failure cases` line at the base, carries an
+  # unindented `Failure cases` line, last in its item, covering invalid input,
+  # a wrong caller or tenant, a repeat or concurrent action and a failing
+  # dependency - each with an `If` requirement id or `n/a because <reason>`.
+  #
+  # `{base}` is the merge base run-checks.sh computes from --base, so the rule
+  # examines what the change adds and none of the spec as it stood. A run with
+  # --changed has no base and records `no_base`, which blocks: new and old
+  # cannot be told apart without one. A shallow clone is refused where the
+  # history must be walked, so CI fetches full history.
+  #
+  # min_covered: 2 is the spec at the base and the spec now. One `examined:`
+  # line is a run that read no history. A spec absent at the base still prints
+  # its `examined:` line and counts: git was read there, and every requirement
+  # is then new - the strictest reading, not a skipped one.
+  - id: failure-cases
+    why: a requirement a change adds with a trigger and no failure case beside it ships behaviour nobody asked what goes wrong with, and its tests inherit the gap
+    when:
+      always: true
+    severity: block
+    requires: [python3, git, ./plugins/productizer/skills/spec/scripts/validate-spec.py]
+    version_command: [python3, plugins/productizer/skills/spec/scripts/validate-spec.py, --version]
+    mode: batch
+    command: [python3, plugins/productizer/skills/spec/scripts/validate-spec.py, --repo, ., --failure-cases, --base, "{base}"]
+    timeout_seconds: 120
+    exit_codes:
+      pass: [0]
+      fail: [1]        # a new When requirement whose failure cases are not covered, or a Failure cases line that does not read
+      refused: [2, 4]  # usage; NOT MEASURED - no base commit resolved
+    coverage:
+      from: stdout_paths
+      pattern: '^examined: (\S+)'
+      must_cover: none
+      min_covered: 2
+    limitations:
+      - Whether an `n/a because` reason is true is not judged; that is Stage 2's review.
+      - It checks that a named id is an active `If` requirement, not that it is about that case.
 
   # --- a spec change merged under a live contradiction ------------------------
   #

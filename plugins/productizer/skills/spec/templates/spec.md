@@ -88,6 +88,7 @@ area regardless of how the file is subdivided.
 
 - **R2** — When `<trigger>`, the `<system>` shall `<response>`.
   Superseded by R41. <Why, in one line, naming the decision.>
+Failure cases: input R4 · caller n/a because <reason> · repeat R4 · dependency R4
 
 ### State-driven
 
@@ -97,7 +98,10 @@ area regardless of how the file is subdivided.
 ### Unwanted behaviour
 
 A spec with nothing here has not considered failure, and the tests will inherit
-that gap.
+that gap. Every requirement a change adds with a trigger (`When`, or `While`/`Where` with a `when` clause) names the ones here that
+cover its invalid input, wrong caller or tenant, repeat or concurrent action and
+failing dependency, on an unindented `Failure cases` line, last in its item, as
+under R2 above - or says `n/a because <reason>` (`references/ears.md` rule 6).
 
 - **R4** — If `<unwanted trigger>`, then the `<system>` shall `<response>`.
 
